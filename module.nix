@@ -4,8 +4,6 @@ let
 
   format = pkgs.formats.toml { };
   configFile = format.generate "harmonia.toml" cfg.settings;
-
-  harmonia = import ./. { inherit pkgs; };
 in
 {
   options = {
@@ -30,7 +28,7 @@ in
       priority = 50;
     };
 
-    environment.systemPackages = [ harmonia ];
+    environment.systemPackages = [ pkgs.harmonia ];
 
     systemd.services.harmonia = {
       description = "harmonia binary cache service";
@@ -53,7 +51,7 @@ in
       environment.HOME = "/run/harmonia";
 
       serviceConfig = {
-        ExecStart = "${harmonia}/bin/harmonia";
+        ExecStart = "${pkgs.harmonia}/bin/harmonia";
 
         User = "harmonia";
         Group = "harmonia";
