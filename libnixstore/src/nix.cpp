@@ -29,7 +29,6 @@ static nix::ref<nix::Store> get_store() {
     nix::initLibStore();
 
     nix::loadConfFile();
-    nix::settings.lockCPU = false;
     _store = nix::openStore();
   }
   return nix::ref<nix::Store>(_store);
@@ -254,13 +253,16 @@ rust::String add_to_store(rust::Str src_path, int32_t recursive,
 rust::String make_fixed_output_path(bool recursive, rust::Str algo,
                                     rust::Str hash, rust::Str name) {
   auto store = get_store();
-  nix::Hash h = nix::Hash::parseAny(STRING_VIEW(hash),
-                                    nix::parseHashType(STRING_VIEW(algo)));
-  nix::FileIngestionMethod method = recursive
-                                        ? nix::FileIngestionMethod::Recursive
-                                        : nix::FileIngestionMethod::Flat;
-  nix::StorePath path =
-      store->makeFixedOutputPath(method, h, STRING_VIEW(name));
+
+  nix::FixedOutputInfo info{
+      .method = recursive ? nix::FileIngestionMethod::Recursive
+                          : nix::FileIngestionMethod::Flat,
+      .hash = nix::Hash::parseAny(STRING_VIEW(hash),
+                                  nix::parseHashType(STRING_VIEW(algo))),
+      .references = {},
+  };
+
+  nix::StorePath path = store->makeFixedOutputPath(STRING_VIEW(name), info);
   return store->printStorePath(path);
 }
 
