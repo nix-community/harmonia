@@ -314,10 +314,32 @@ pub(crate) async fn get(
     req: HttpRequest,
     info: web::Query<NarRequest>,
 ) -> Result<HttpResponse, Box<dyn Error>> {
-    let store_path = some_or_404!(libnixstore::query_path_from_hash_part(&info.hash));
+    let (store_path, nar_hash) = some_or_404!((if info.hash.len() == 32 {
+        Some((info.hash.as_str(), None))
+    } else if info.hash.len() == 85 {
+        // narinfos served by nix-serve have the nar file hash embedded in the nar URL.
+        // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
+        // will stay in the cache for a while - so support them anyway.
+        info.hash
+            .split_once('-')
+            .and_then(|(first, rest)| (first.len() == 32).then_some((first, Some(rest))))
+    } else {
+        None
+    })
+    .and_then(
+        |(hash, nar_hash)| libnixstore::query_path_from_hash_part(hash)
+            .map(|hash| (hash, nar_hash))
+    ));
 
-    let size = libnixstore::query_path_info(&store_path, Radix::default())?.size;
-    let mut rlength = size;
+    let info = libnixstore::query_path_info(&store_path, Radix::default())?;
+    if let Some(nar_hash) = nar_hash {
+        if Some(nar_hash) != info.narhash.strip_prefix("sha256:") {
+            return Ok(HttpResponse::NotFound()
+                .insert_header(crate::cache_control_no_store())
+                .body("hash mismatch detected"));
+        }
+    }
+    let mut rlength = info.size;
     let offset;
     let mut res = HttpResponse::Ok();
 
@@ -339,7 +361,7 @@ pub(crate) async fn get(
 
                 res.insert_header((
                     http::header::CONTENT_RANGE,
-                    format!("bytes {}-{}/{}", offset, offset + rlength - 1, size,),
+                    format!("bytes {}-{}/{}", offset, offset + rlength - 1, info.size),
                 ));
             } else {
                 res.insert_header((http::header::CONTENT_RANGE, format!("bytes */{}", rlength)));
