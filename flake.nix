@@ -45,6 +45,7 @@
           projectRootFile = "flake.lock";
 
           programs.rustfmt.enable = true;
+          programs.clang-format.enable = true;
 
           settings.formatter = {
             nix = {

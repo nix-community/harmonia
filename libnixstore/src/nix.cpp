@@ -353,7 +353,8 @@ rust::String get_build_log(rust::Str derivation_path) {
 rust::String get_nar_list(rust::Str store_path) {
   nlohmann::json j = {
       {"version", 1},
-      {"root", listNar(get_store()->getFSAccessor(), STRING_VIEW(store_path), true)},
+      {"root",
+       listNar(get_store()->getFSAccessor(), STRING_VIEW(store_path), true)},
   };
 
   return j.dump();
