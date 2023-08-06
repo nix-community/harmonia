@@ -1,10 +1,22 @@
-{ pkgs ? import <nixpkgs> { } }:
+{ pkgs ? import <nixpkgs> { }
+, nixVersions ? pkgs.nixVersions
+, nlohmann_json ? pkgs.nlohmann_json
+, libsodium ? pkgs.libsodium
+, boost ? pkgs.boost
+, rustfmt ? pkgs.rustfmt
+, clippy ? pkgs.clippy
+, cargo-watch ? pkgs.cargo-watch
+, cargo-edit ? pkgs.cargo-edit
+, cargo-outdated ? pkgs.cargo-outdated
+, cargo-audit ? pkgs.cargo-audit
+, openssl ? pkgs.openssl
+}:
 
 pkgs.mkShell {
   name = "harmonia";
   nativeBuildInputs = with pkgs; [ rustc cargo pkg-config ];
-  buildInputs = with pkgs; [
-    (if lib.versionAtLeast nix.version nixVersions.nix_2_12.version then nix else nixVersions.nix_2_12)
+  buildInputs = [
+    nixVersions.unstable
     nlohmann_json
     libsodium
     boost
