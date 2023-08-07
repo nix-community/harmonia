@@ -29,7 +29,11 @@ static nix::ref<nix::Store> get_store() {
     nix::initLibStore();
 
     nix::loadConfFile();
-    _store = nix::openStore();
+    nix::Store::Params params;
+    // Disable caching since we run as a deamon and non-reproduceable builds
+    // might have a different result for hashes
+    params["path-info-cache-size"] = "0";
+    _store = openStore(nix::settings.storeUri, params);
   }
   return nix::ref<nix::Store>(_store);
 }
