@@ -5,7 +5,7 @@ fn main() {
 
     cxx_build::bridge("src/lib.rs")
         .file("src/nix.cpp")
-        .flag_if_supported("-std=c++17")
+        .flag_if_supported("-std=c++2a")
         .flag_if_supported("-O2")
         .compile("libnixstore");
     println!("cargo:rerun-if-changed=include/nix.h");
