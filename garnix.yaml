@@ -1,0 +1,11 @@
+builds:
+  exclude:
+  - checks.aarch64-darwin.clippy
+  - checks.aarch64-linux.clippy
+  - checks.aarch64-darwin.treefmt
+  - checks.aarch64-linux.treefm
+  include:
+  - '*.x86_64-linux.*'
+  - '*.aarch64-linux.*'
+  - '*.aarch64-darwin.*'
+  - nixosConfigurations.*

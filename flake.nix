@@ -23,6 +23,8 @@
         "x86_64-linux"
         "i686-linux"
         "aarch64-linux"
+        "aarch64-darwin"
+        "x86_64-darwin"
       ];
       imports = [
         inputs.treefmt-nix.flakeModule
@@ -30,14 +32,23 @@
       perSystem = { lib, config, pkgs, ... }: {
         packages.harmonia = pkgs.callPackage ./. { };
         packages.default = config.packages.harmonia;
-        checks = (import ./tests/default.nix {
-          inherit pkgs;
-          inherit (inputs) self;
-        }) // {
-          clippy = config.packages.harmonia.override ({
-            enableClippy = true;
-          });
-        };
+        checks =
+          let
+            testArgs = {
+              inherit pkgs;
+              inherit (inputs) self;
+            };
+          in
+          lib.optionalAttrs pkgs.stdenv.isLinux
+            {
+              t00-simple = import ./tests/t00-simple.nix testArgs;
+              t01-signing = import ./tests/t01-signing.nix testArgs;
+              t02-varnish = import ./tests/t02-varnish.nix testArgs;
+            } // {
+            clippy = config.packages.harmonia.override ({
+              enableClippy = true;
+            });
+          };
         devShells.default = pkgs.callPackage ./shell.nix { };
 
         treefmt = {
