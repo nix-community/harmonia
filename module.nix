@@ -23,6 +23,12 @@ in
 
         description = lib.mdDoc "Settings to merge with the default configuration";
       };
+
+      package = lib.mkOption {
+        type = lib.types.path;
+        default = pkgs.callPackage ./. { };
+        description = "The harmonia package";
+      };
     };
   };
 
@@ -54,8 +60,9 @@ in
       # otherwise
       environment.HOME = "/run/harmonia";
 
+
       serviceConfig = {
-        ExecStart = "${pkgs.callPackage ./. { }}/bin/harmonia";
+        ExecStart = "${cfg.package}/bin/harmonia";
 
         User = "harmonia";
         Group = "harmonia";

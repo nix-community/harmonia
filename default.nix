@@ -1,6 +1,7 @@
 { pkgs ? (import <nixpkgs> { })
 , rustPlatform ? pkgs.rustPlatform
 , nixVersions ? pkgs.nixVersions
+, nixForHarmonia ? nixVersions.unstable
 , nix-gitignore ? pkgs.nix-gitignore
 , lib ? pkgs.lib
 , clippy ? pkgs.clippy
@@ -19,7 +20,7 @@ rustPlatform.buildRustPackage ({
 
   nativeBuildInputs = [ pkg-config ] ++ lib.optionals enableClippy [ clippy ];
   buildInputs = [
-    nixVersions.unstable
+    nixForHarmonia
     nlohmann_json
     libsodium
     boost
