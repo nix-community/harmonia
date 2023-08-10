@@ -3,13 +3,9 @@ queue_rules:
     merge_conditions:
       - check-success=Evaluate flake.nix
       - check-success=check clippy [x86_64-linux]
-      - check-success=check t00-simple [aarch64-linux]
       - check-success=check t00-simple [x86_64-linux]
-      - check-success=check t01-signing [aarch64-linux]
       - check-success=check t01-signing [x86_64-linux]
-      - check-success=check t02-varnish [aarch64-linux]
       - check-success=check t02-varnish [x86_64-linux]
-      - check-success=check treefmt [aarch64-linux]
       - check-success=check treefmt [x86_64-linux]
       - check-success=devShell default [aarch64-darwin]
       - check-success=devShell default [aarch64-linux]
