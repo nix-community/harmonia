@@ -10,6 +10,7 @@
 , cargo-outdated ? pkgs.cargo-outdated
 , cargo-audit ? pkgs.cargo-audit
 , openssl ? pkgs.openssl
+, sqlite ? pkgs.sqlite
 }:
 
 pkgs.mkShell {
@@ -27,6 +28,7 @@ pkgs.mkShell {
     cargo-outdated
     cargo-audit
     openssl
+    sqlite
   ];
 
   # provide a dummy configuration for testing

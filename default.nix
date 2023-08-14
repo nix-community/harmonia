@@ -10,6 +10,7 @@
 , libsodium ? pkgs.libsodium
 , boost ? pkgs.boost
 , openssl ? pkgs.openssl
+, sqlite ? pkgs.sqlite
 , enableClippy ? false
 }:
 
@@ -25,6 +26,7 @@ rustPlatform.buildRustPackage ({
     libsodium
     boost
     openssl
+    sqlite
   ];
   doCheck = false;
 

@@ -5,6 +5,7 @@ use actix_web::{http, web, App, HttpResponse, HttpServer};
 mod buildlog;
 mod cacheinfo;
 mod config;
+mod db;
 mod health;
 mod nar;
 mod narinfo;
