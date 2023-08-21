@@ -24,7 +24,7 @@ tokio-stream = { version = "0.1" }
 http-range = "0.1"
 askama_escape = "0.10.3"
 percent-encoding = "2.3.0"
-anyhow = "1.0.72"
+anyhow = "1.0.75"
 tempfile = "3.7.1"
 
 
