@@ -1,4 +1,5 @@
-use std::{fmt::Display, time::Duration};
+use std::{fmt::Display, path::Path, time::Duration};
+use url::Url;
 
 use actix_web::{http, web, App, HttpResponse, HttpServer};
 
@@ -107,7 +108,7 @@ async fn main() -> std::io::Result<()> {
     let config_data = c.clone();
 
     log::info!("listening on {}", c.bind);
-    HttpServer::new(move || {
+    let mut server = HttpServer::new(move || {
         App::new()
             .app_data(config_data.clone())
             .route("/", web::get().to(root::get))
@@ -125,8 +126,35 @@ async fn main() -> std::io::Result<()> {
     // default is 5 seconds, which is too small when doing mass requests on slow machines
     .client_request_timeout(Duration::from_secs(30))
     .workers(c.workers)
-    .max_connection_rate(c.max_connection_rate)
-    .bind(c.bind.clone())?
-    .run()
-    .await
+    .max_connection_rate(c.max_connection_rate);
+
+    let try_url = Url::parse(&c.bind);
+    let (bind, uds) = {
+        if try_url.is_ok() {
+            let url = try_url.as_ref().unwrap();
+            if url.scheme() != "file" {
+                (c.bind.as_str(), false)
+            } else if url.host().is_none() {
+                (url.path(), true)
+            } else {
+                log::error!("Can only bind to file URLs without host portion.");
+                std::process::exit(1)
+            }
+        } else {
+            (c.bind.as_str(), false)
+        }
+    };
+
+    server = if uds {
+        if !cfg!(unix) {
+            log::error!("Binding to Unix domain sockets is only supported on Unix.");
+            std::process::exit(1);
+        } else {
+            server.bind_uds(Path::new(bind))?
+        }
+    } else {
+        server.bind(bind)?
+    };
+
+    server.run().await
 }

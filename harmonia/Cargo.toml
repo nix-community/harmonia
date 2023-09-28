@@ -26,6 +26,7 @@ askama_escape = "0.10.3"
 percent-encoding = "2.3.0"
 anyhow = "1.0.75"
 tempfile = "3.8.0"
+url = "2.4.1"
 
 
 libnixstore = { path = "../libnixstore" }
