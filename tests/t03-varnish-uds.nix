@@ -28,7 +28,7 @@
 
           systemd.sockets.harmonia-dev = {
             listenStreams = [ sock ];
-            requiredBy = "harmonia-dev.service";
+            requiredBy = ["harmonia-dev.service"];
             socketConfig = {
               SocketGroup = "varnish";
             };
