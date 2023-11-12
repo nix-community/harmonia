@@ -42,7 +42,7 @@ static nix::DerivedPath to_derived_path(const nix::StorePath &store_path) {
   if (store_path.isDerivation()) {
     auto drv = get_store()->readDerivation(store_path);
     return nix::DerivedPath::Built{
-        .drvPath = store_path,
+        .drvPath = nix::makeConstantStorePathRef(store_path),
         .outputs = drv.outputNames(),
     };
   } else {
@@ -285,9 +285,9 @@ InternalDrv derivation_from_path(rust::Str drv_path) {
   }
 
   rust::Vec<rust::String> input_drvs;
-  input_drvs.reserve(drv.inputDrvs.size());
-  for (auto &i : drv.inputDrvs) {
-    input_drvs.push_back(store->printStorePath(i.first));
+  input_drvs.reserve(drv.inputDrvs.map.size());
+  for (const auto &[inputDrv, inputNode] : drv.inputDrvs.map) {
+    input_drvs.push_back(store->printStorePath(inputDrv));
   }
 
   rust::Vec<rust::String> input_srcs = extract_path_set(drv.inputSrcs);
@@ -335,16 +335,16 @@ rust::String get_build_log(rust::Str derivation_path) {
     if (!log_store) {
       continue;
     }
-    std::optional<std::string> log =
-        std::visit(overloaded{
-                       [&](const nix::DerivedPath::Opaque &bo) {
-                         return log_store->getBuildLog(bo.path);
-                       },
-                       [&](const nix::DerivedPath::Built &bfd) {
-                         return log_store->getBuildLog(bfd.drvPath);
-                       },
-                   },
-                   b.raw());
+    std::optional<std::string> log = std::visit(
+        overloaded{
+            [&](const nix::DerivedPath::Opaque &bo) {
+              return log_store->getBuildLog(bo.path);
+            },
+            [&](const nix::DerivedPath::Built &bfd) {
+              return log_store->getBuildLog(bfd.drvPath->getBaseStorePath());
+            },
+        },
+        b.raw());
     if (!log) {
       continue;
     }
