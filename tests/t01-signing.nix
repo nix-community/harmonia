@@ -20,7 +20,7 @@
       harmonia = { ... }: {
         imports = [ ../module.nix ];
 
-        services.harmonia = {
+        services.harmonia-dev = {
           enable = true;
           signKeyPath = "${./cache.sk}";
         };
