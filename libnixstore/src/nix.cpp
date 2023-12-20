@@ -1,5 +1,6 @@
 #include "libnixstore/include/nix.h"
 
+#include <nix/canon-path.hh>
 #include <nix/config.h>
 #include <nix/derivations.hh>
 #include <nix/globals.hh>
@@ -20,7 +21,9 @@
 #include <string.h>
 
 // C++17 std::visit boilerplate
-template <class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template <class... Ts> struct overloaded : Ts... {
+  using Ts::operator()...;
+};
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 static nix::ref<nix::Store> get_store() {
@@ -98,7 +101,7 @@ rust::Vec<rust::String> nix_query_references(rust::Str path) {
 rust::String query_path_hash(rust::Str path) {
   auto store = get_store();
   return store->queryPathInfo(store->parseStorePath(STRING_VIEW(path)))
-      ->narHash.to_string(nix::Base32, true);
+      ->narHash.to_string(nix::HashFormat::Base32, true);
 }
 
 rust::String query_deriver(rust::Str path) {
@@ -113,8 +116,8 @@ InternalPathInfo query_path_info(rust::Str path, bool base32) {
   nix::ref<const nix::ValidPathInfo> info =
       store->queryPathInfo(store->parseStorePath(STRING_VIEW(path)));
 
-  std::string narhash =
-      info->narHash.to_string(base32 ? nix::Base32 : nix::Base16, true);
+  std::string narhash = info->narHash.to_string(
+      base32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16, true);
 
   rust::Vec<rust::String> refs = extract_path_set(info->references);
 
@@ -205,25 +208,29 @@ rust::String hash_path(rust::Str algo, bool base32, rust::Str path) {
   nix::Hash h =
       nix::hashPath(nix::parseHashType(STRING_VIEW(algo)), STRING_VIEW(path))
           .first;
-  return h.to_string(base32 ? nix::Base32 : nix::Base16, false);
+  return h.to_string(base32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16,
+                     false);
 }
 
 rust::String hash_file(rust::Str algo, bool base32, rust::Str path) {
   nix::Hash h =
       nix::hashFile(nix::parseHashType(STRING_VIEW(algo)), STRING_VIEW(path));
-  return h.to_string(base32 ? nix::Base32 : nix::Base16, false);
+  return h.to_string(base32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16,
+                     false);
 }
 
 rust::String hash_string(rust::Str algo, bool base32, rust::Str s) {
   nix::Hash h =
       nix::hashString(nix::parseHashType(STRING_VIEW(algo)), STRING_VIEW(s));
-  return h.to_string(base32 ? nix::Base32 : nix::Base16, false);
+  return h.to_string(base32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16,
+                     false);
 }
 
 rust::String convert_hash(rust::Str algo, rust::Str s, bool to_base_32) {
   nix::Hash h = nix::Hash::parseAny(STRING_VIEW(s),
                                     nix::parseHashType(STRING_VIEW(algo)));
-  return h.to_string(to_base_32 ? nix::Base32 : nix::Base16, false);
+  return h.to_string(
+      to_base_32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16, false);
 }
 
 rust::String sign_string(rust::Str secret_key, rust::Str msg) {
@@ -355,10 +362,10 @@ rust::String get_build_log(rust::Str derivation_path) {
 }
 
 rust::String get_nar_list(rust::Str store_path) {
+  auto path = nix::CanonPath(STRING_VIEW(store_path));
   nlohmann::json j = {
       {"version", 1},
-      {"root",
-       listNar(get_store()->getFSAccessor(), STRING_VIEW(store_path), true)},
+      {"root", listNar(get_store()->getFSAccessor(), path, true)},
   };
 
   return j.dump();
