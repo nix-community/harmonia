@@ -25,7 +25,7 @@ http-range = "0.1"
 askama_escape = "0.10.3"
 percent-encoding = "2.3.1"
 anyhow = "1.0.79"
-tempfile = "3.9.0"
+tempfile = "3.10.0"
 
 
 libnixstore = { path = "../libnixstore" }
