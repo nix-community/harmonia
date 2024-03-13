@@ -78,24 +78,11 @@ You can use the binary cache on a different machine using the following NixOS co
 }
 ```
 
-## Build
-
-### Whole application
-
-```bash
-nix build -L
-```
-
-### Get a development environment:
-
-``` bash
-nix develop
-```
-
 ## Configuration format
 
-Configuration is done via a `toml` file. The location of the configuration file
-should be passed as env var `CONFIG_FILE`. If no config file is passed the
+Configuration is done via a `toml` file.
+**Hint:** You don't need to interface with the configuration directly in case you are using the NixOS module.
+The location of the configuration file should be passed as env var `CONFIG_FILE`. If no config file is passed the
 following default values will be used:
 
 ```toml
@@ -125,6 +112,20 @@ Logging can be configured with
 is `info,actix_web=debug`. To only log errors use the following
 `RUST_LOG=error` and to only disable access logging, use
 `RUST_LOG=info,actix_web::middleware=error`
+
+## Build
+
+### Whole application
+
+```bash
+nix build -L
+```
+
+### Get a development environment:
+
+``` bash
+nix develop
+```
 
 ## Run tests
 
