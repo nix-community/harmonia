@@ -1,7 +1,10 @@
 [package]
 name = "harmonia"
 version = "0.7.4"
-authors = ["Simon Hauser <simon.hauser@helsinki-systems.de>"]
+authors = [
+  "Jörg Thalheim <joerg@thalheim.io>",
+  "Simon Hauser <simon.hauser@helsinki-systems.de>"
+]
 edition = "2021"
 license = "MIT"
 homepage = "https://github.com/nix-community/harmonia"
