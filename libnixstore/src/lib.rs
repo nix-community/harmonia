@@ -57,7 +57,6 @@ mod ffi {
         fn follow_links_to_store_path(path: &str) -> Result<String>;
         fn export_paths(fd: i32, paths: Vec<&str>) -> Result<()>;
         fn import_paths(fd: i32, dont_check_signs: bool) -> Result<()>;
-        fn hash_path(algo: &str, base32: bool, path: &str) -> Result<String>;
         fn hash_file(algo: &str, base32: bool, path: &str) -> Result<String>;
         fn hash_string(algo: &str, base32: bool, s: &str) -> Result<String>;
         fn convert_hash(algo: &str, s: &str, to_base_32: bool) -> Result<String>;
@@ -261,13 +260,6 @@ pub fn export_paths(fd: i32, paths: Vec<&str>) -> Result<(), cxx::Exception> {
 /// access.
 pub fn import_paths(fd: i32, dont_check_signs: bool) -> Result<(), cxx::Exception> {
     ffi::import_paths(fd, dont_check_signs)
-}
-
-#[inline]
-/// Compute the hash of the given path. The hash is defined as (essentially)
-/// `hashString(ht, dumpPath(path))`.
-pub fn hash_path(algo: &str, radix: Radix, path: &str) -> Result<String, cxx::Exception> {
-    ffi::hash_path(algo, matches!(radix, Radix::Base32), path)
 }
 
 #[inline]

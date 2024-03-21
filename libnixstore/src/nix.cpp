@@ -9,6 +9,7 @@
 #include <nix/log-store.hh>
 #include <nix/content-address.hh>
 #include <nix/util.hh>
+#include <nix/build/drv-output-substitution-goal.hh>
 
 #include <nix/nar-accessor.hh>
 
@@ -201,14 +202,6 @@ void import_paths(int32_t fd, bool dont_check_signs) {
   nix::FdSource source(fd);
   get_store()->importPaths(source, dont_check_signs ? nix::NoCheckSigs
                                                     : nix::CheckSigs);
-}
-
-rust::String hash_path(rust::Str algo, bool base32, rust::Str path) {
-  nix::Hash h =
-      nix::hashPath(nix::parseHashAlgo(STRING_VIEW(algo)), STRING_VIEW(path))
-          .first;
-  return h.to_string(base32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16,
-                     false);
 }
 
 rust::String hash_file(rust::Str algo, bool base32, rust::Str path) {

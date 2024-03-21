@@ -20,7 +20,6 @@ rust::Vec<rust::String> topo_sort_paths(rust::Vec<rust::Str> paths);
 rust::String follow_links_to_store_path(rust::Str path);
 void export_paths(int32_t fd, rust::Vec<rust::Str> paths);
 void import_paths(int32_t fd, bool dont_check_signs);
-rust::String hash_path(rust::Str algo, bool base32, rust::Str path);
 rust::String hash_file(rust::Str algo, bool base32, rust::Str path);
 rust::String hash_string(rust::Str algo, bool base32, rust::Str s);
 rust::String convert_hash(rust::Str algo, rust::Str s, bool to_base_32);
