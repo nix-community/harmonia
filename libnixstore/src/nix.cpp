@@ -100,7 +100,7 @@ rust::Vec<rust::String> query_references(rust::Str path) {
 rust::String query_path_hash(rust::Str path) {
   auto store = get_store();
   return store->queryPathInfo(store->parseStorePath(STRING_VIEW(path)))
-      ->narHash.to_string(nix::HashFormat::Base32, true);
+      ->narHash.to_string(nix::HashFormat::Nix32, true);
 }
 
 rust::String query_deriver(rust::Str path) {
@@ -116,7 +116,7 @@ InternalPathInfo query_path_info(rust::Str path, bool base32) {
       store->queryPathInfo(store->parseStorePath(STRING_VIEW(path)));
 
   std::string narhash = info->narHash.to_string(
-      base32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16, true);
+      base32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16, true);
 
   rust::Vec<rust::String> refs = extract_path_set(info->references);
 
@@ -205,31 +205,31 @@ void import_paths(int32_t fd, bool dont_check_signs) {
 
 rust::String hash_path(rust::Str algo, bool base32, rust::Str path) {
   nix::Hash h =
-      nix::hashPath(nix::parseHashType(STRING_VIEW(algo)), STRING_VIEW(path))
+      nix::hashPath(nix::parseHashAlgo(STRING_VIEW(algo)), STRING_VIEW(path))
           .first;
-  return h.to_string(base32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16,
+  return h.to_string(base32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16,
                      false);
 }
 
 rust::String hash_file(rust::Str algo, bool base32, rust::Str path) {
   nix::Hash h =
-      nix::hashFile(nix::parseHashType(STRING_VIEW(algo)), STRING_VIEW(path));
-  return h.to_string(base32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16,
+      nix::hashFile(nix::parseHashAlgo(STRING_VIEW(algo)), STRING_VIEW(path));
+  return h.to_string(base32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16,
                      false);
 }
 
 rust::String hash_string(rust::Str algo, bool base32, rust::Str s) {
   nix::Hash h =
-      nix::hashString(nix::parseHashType(STRING_VIEW(algo)), STRING_VIEW(s));
-  return h.to_string(base32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16,
+      nix::hashString(nix::parseHashAlgo(STRING_VIEW(algo)), STRING_VIEW(s));
+  return h.to_string(base32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16,
                      false);
 }
 
 rust::String convert_hash(rust::Str algo, rust::Str s, bool to_base_32) {
   nix::Hash h = nix::Hash::parseAny(STRING_VIEW(s),
-                                    nix::parseHashType(STRING_VIEW(algo)));
+                                    nix::parseHashAlgo(STRING_VIEW(algo)));
   return h.to_string(
-      to_base_32 ? nix::HashFormat::Base32 : nix::HashFormat::Base16, false);
+      to_base_32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16, false);
 }
 
 rust::String sign_string(rust::Str secret_key, rust::Str msg) {
@@ -256,7 +256,7 @@ rust::String add_to_store(rust::Str src_path, int32_t recursive,
                                         : nix::FileIngestionMethod::Flat;
   nix::StorePath path = store->addToStore(
       std::string(nix::baseNameOf(STRING_VIEW(src_path))),
-      STRING_VIEW(src_path), method, nix::parseHashType(STRING_VIEW(algo)));
+      STRING_VIEW(src_path), method, nix::parseHashAlgo(STRING_VIEW(algo)));
   return store->printStorePath(path);
 }
 
