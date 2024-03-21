@@ -337,10 +337,10 @@ pub(crate) async fn get(
         if let Some(outhash) = &q.hash {
             Some(outhash.as_str())
         } else {
-            path.outhash.as_ref().map(|e| e.as_str())
+            path.outhash.as_deref()
         }
     }
-    .and_then(|outhash| libnixstore::query_path_from_hash_part(&outhash)));
+    .and_then(libnixstore::query_path_from_hash_part));
 
     // lookup the path info.
     let info = libnixstore::query_path_info(&store_path, Radix::default())?;
