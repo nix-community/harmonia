@@ -1,4 +1,4 @@
-{ pkgs ? (import <nixpkgs> { })
+{ pkgs ? (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem}
 , rustPlatform ? pkgs.rustPlatform
 , nixVersions ? pkgs.nixVersions
 , nixForHarmonia ? nixVersions.unstable

@@ -1,4 +1,4 @@
-{ pkgs ? import <nixpkgs> { }
+{ pkgs ? (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem}
 , nixVersions ? pkgs.nixVersions
 , nlohmann_json ? pkgs.nlohmann_json
 , libsodium ? pkgs.libsodium
