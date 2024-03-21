@@ -241,18 +241,6 @@ bool check_signature(rust::Str public_key, rust::Str sig, rust::Str msg) {
                                      (unsigned char *)public_key.data()) == 0;
 }
 
-rust::String add_to_store(rust::Str src_path, int32_t recursive,
-                          rust::Str algo) {
-  auto store = get_store();
-  nix::FileIngestionMethod method = recursive
-                                        ? nix::FileIngestionMethod::Recursive
-                                        : nix::FileIngestionMethod::Flat;
-  nix::StorePath path = store->addToStore(
-      std::string(nix::baseNameOf(STRING_VIEW(src_path))),
-      STRING_VIEW(src_path), method, nix::parseHashAlgo(STRING_VIEW(algo)));
-  return store->printStorePath(path);
-}
-
 InternalDrv derivation_from_path(rust::Str drv_path) {
   auto store = get_store();
   nix::Derivation drv =

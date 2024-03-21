@@ -62,7 +62,6 @@ mod ffi {
         fn convert_hash(algo: &str, s: &str, to_base_32: bool) -> Result<String>;
         fn sign_string(secret_key: &str, msg: &str) -> Result<String>;
         fn check_signature(public_key: &str, sig: &str, msg: &str) -> Result<bool>;
-        fn add_to_store(src_path: &str, recursive: i32, algo: &str) -> Result<String>;
         fn derivation_from_path(drv_path: &str) -> Result<InternalDrv>;
         fn add_temp_root(store_path: &str) -> Result<()>;
         fn get_bin_dir() -> String;
@@ -292,14 +291,6 @@ pub fn sign_string(secret_key: &str, msg: &str) -> Result<String, cxx::Exception
 /// Verify that `sig` is a valid signature for `msg`, using the signer's `public_key`.
 pub fn check_signature(public_key: &str, sig: &str, msg: &str) -> Result<bool, cxx::Exception> {
     ffi::check_signature(public_key, sig, msg)
-}
-
-#[inline]
-/// This is the preparatory part of `addToStore()`;
-///
-/// It computes the store path to which `src_path` is to be copied. Returns the store path.
-pub fn add_to_store(src_path: &str, recursive: i32, algo: &str) -> Result<String, cxx::Exception> {
-    ffi::add_to_store(src_path, recursive, algo)
 }
 
 #[inline]

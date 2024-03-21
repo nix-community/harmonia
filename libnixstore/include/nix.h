@@ -25,8 +25,6 @@ rust::String hash_string(rust::Str algo, bool base32, rust::Str s);
 rust::String convert_hash(rust::Str algo, rust::Str s, bool to_base_32);
 rust::String sign_string(rust::Str secret_key, rust::Str msg);
 bool check_signature(rust::Str public_key, rust::Str sig, rust::Str msg);
-rust::String add_to_store(rust::Str src_path, int32_t recursive,
-                          rust::Str algo);
 InternalDrv derivation_from_path(rust::Str drv_path);
 void add_temp_root(rust::Str store_path);
 rust::String get_bin_dir();
