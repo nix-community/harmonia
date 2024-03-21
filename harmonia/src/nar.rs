@@ -19,9 +19,17 @@ use crate::{cache_control_max_age_1y, some_or_404};
 use std::ffi::{OsStr, OsString};
 use tokio::{sync, task};
 
+/// Represents the query string of a NAR URL.
 #[derive(Debug, Deserialize)]
 pub struct NarRequest {
-    hash: String,
+    hash: Option<String>,
+}
+
+/// Represents the parsed parts in a NAR URL.
+#[derive(Debug, Deserialize)]
+pub struct PathParams {
+    narhash: String,
+    outhash: Option<String>,
 }
 
 // TODO(conni2461): still missing
@@ -314,35 +322,35 @@ async fn dump_path(path: &Path, tx: &Sender<Result<Bytes, ThreadSafeError>>) -> 
 }
 
 pub(crate) async fn get(
-    _nar_hash: web::Path<String>,
+    path: web::Path<PathParams>,
     req: HttpRequest,
-    info: web::Query<NarRequest>,
+    q: web::Query<NarRequest>,
 ) -> Result<HttpResponse, Box<dyn Error>> {
-    let (store_path, nar_hash) = some_or_404!((if info.hash.len() == 32 {
-        Some((info.hash.as_str(), None))
-    } else if info.hash.len() == 85 {
-        // narinfos served by nix-serve have the nar file hash embedded in the nar URL.
-        // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
-        // will stay in the cache for a while - so support them anyway.
-        info.hash
-            .split_once('-')
-            .and_then(|(first, rest)| (first.len() == 32).then_some((first, Some(rest))))
-    } else {
-        None
-    })
-    .and_then(
-        |(hash, nar_hash)| libnixstore::query_path_from_hash_part(hash)
-            .map(|hash| (hash, nar_hash))
-    ));
+    // Extract the narhash from the query parameter, and bail out if it's missing or invalid.
+    let narhash = some_or_404!(Some(path.narhash.as_str()));
 
-    let info = libnixstore::query_path_info(&store_path, Radix::default())?;
-    if let Some(nar_hash) = nar_hash {
-        if Some(nar_hash) != info.narhash.strip_prefix("sha256:") {
-            return Ok(HttpResponse::NotFound()
-                .insert_header(crate::cache_control_no_store())
-                .body("hash mismatch detected"));
+    // lookup the store path.
+    let store_path = some_or_404!({
+        // We usually extract the outhash from the query parameter.
+        // However, when processing nix-serve URLs, it's present in the path
+        // directly.
+        if let Some(outhash) = &q.hash {
+            Some(outhash.as_str())
+        } else {
+            path.outhash.as_deref()
         }
     }
+    .and_then(libnixstore::query_path_from_hash_part));
+
+    // lookup the path info.
+    let info = libnixstore::query_path_info(&store_path, Radix::default())?;
+    // ensure the narhash specified in the request matches.
+    if format!("sha256:{}", narhash) != info.narhash {
+        return Ok(HttpResponse::NotFound()
+            .insert_header(crate::cache_control_no_store())
+            .body("hash mismatch detected"));
+    }
+
     let mut rlength = info.size;
     let offset;
     let mut res = HttpResponse::Ok();

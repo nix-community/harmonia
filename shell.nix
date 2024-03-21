@@ -1,4 +1,4 @@
-{ pkgs ? import <nixpkgs> { }
+{ pkgs ? (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem}
 , nixVersions ? pkgs.nixVersions
 , nlohmann_json ? pkgs.nlohmann_json
 , libsodium ? pkgs.libsodium
@@ -10,6 +10,7 @@
 , cargo-outdated ? pkgs.cargo-outdated
 , cargo-audit ? pkgs.cargo-audit
 , openssl ? pkgs.openssl
+, rust-analzyer ? pkgs.rust-analyzer
 }:
 
 pkgs.mkShell {
@@ -27,6 +28,7 @@ pkgs.mkShell {
     cargo-outdated
     cargo-audit
     openssl
+    rust-analzyer
   ];
 
   # provide a dummy configuration for testing
