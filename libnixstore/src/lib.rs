@@ -41,7 +41,6 @@ mod ffi {
         // bindings that are also available in the perl bindings
         fn init();
         fn is_valid_path(path: &str) -> Result<bool>;
-        fn query_references(path: &str) -> Result<Vec<String>>;
         fn query_path_hash(path: &str) -> Result<String>;
         fn query_deriver(path: &str) -> Result<String>;
         fn query_path_info(path: &str, base32: bool) -> Result<InternalPathInfo>;
@@ -150,12 +149,6 @@ pub fn init() {
 /// Check whether a path is valid.
 pub fn is_valid_path(path: &str) -> bool {
     ffi::is_valid_path(path).unwrap_or(false)
-}
-
-#[inline]
-/// Return references of a valid path. It is permitted to omit the name part of the store path.
-pub fn query_references(path: &str) -> Result<Vec<String>, cxx::Exception> {
-    ffi::query_references(path)
 }
 
 #[inline]

@@ -87,13 +87,6 @@ bool is_valid_path(rust::Str path) {
   return store->isValidPath(store->parseStorePath(STRING_VIEW(path)));
 }
 
-rust::Vec<rust::String> query_references(rust::Str path) {
-  auto store = get_store();
-  return extract_path_set(
-      store->queryPathInfo(store->parseStorePath(STRING_VIEW(path)))
-          ->references);
-}
-
 rust::String query_path_hash(rust::Str path) {
   auto store = get_store();
   return store->queryPathInfo(store->parseStorePath(STRING_VIEW(path)))
