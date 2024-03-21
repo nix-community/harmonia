@@ -7,15 +7,8 @@ namespace libnixstore {
 void init();
 bool is_valid_path(rust::Str path);
 rust::String query_path_hash(rust::Str path);
-rust::String query_deriver(rust::Str path);
 InternalPathInfo query_path_info(rust::Str path, bool base32);
-rust::String query_raw_realisation(rust::Str output_id);
 rust::String query_path_from_hash_part(rust::Str hash_part);
-rust::Vec<rust::String> compute_fs_closure(bool flip_direction,
-                                           bool include_outputs,
-                                           rust::Vec<rust::Str> paths);
-rust::Vec<rust::String> topo_sort_paths(rust::Vec<rust::Str> paths);
-rust::String follow_links_to_store_path(rust::Str path);
 void export_paths(int32_t fd, rust::Vec<rust::Str> paths);
 void import_paths(int32_t fd, bool dont_check_signs);
 rust::String hash_file(rust::Str algo, bool base32, rust::Str path);

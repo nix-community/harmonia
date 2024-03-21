@@ -38,34 +38,16 @@ mod ffi {
     unsafe extern "C++" {
         include!("libnixstore/include/nix.h");
 
-        // bindings that are also available in the perl bindings
         fn init();
         fn is_valid_path(path: &str) -> Result<bool>;
         fn query_path_hash(path: &str) -> Result<String>;
-        fn query_deriver(path: &str) -> Result<String>;
         fn query_path_info(path: &str, base32: bool) -> Result<InternalPathInfo>;
-        fn query_raw_realisation(output_id: &str) -> Result<String>;
         fn query_path_from_hash_part(hash_part: &str) -> Result<String>;
-        fn compute_fs_closure(
-            flip_direction: bool,
-            include_outputs: bool,
-            paths: Vec<&str>,
-        ) -> Result<Vec<String>>;
-        fn topo_sort_paths(paths: Vec<&str>) -> Result<Vec<String>>;
-        fn follow_links_to_store_path(path: &str) -> Result<String>;
-        fn export_paths(fd: i32, paths: Vec<&str>) -> Result<()>;
-        fn import_paths(fd: i32, dont_check_signs: bool) -> Result<()>;
-        fn hash_file(algo: &str, base32: bool, path: &str) -> Result<String>;
-        fn hash_string(algo: &str, base32: bool, s: &str) -> Result<String>;
         fn convert_hash(algo: &str, s: &str, to_base_32: bool) -> Result<String>;
         fn sign_string(secret_key: &str, msg: &str) -> Result<String>;
         fn check_signature(public_key: &str, sig: &str, msg: &str) -> Result<bool>;
         fn derivation_from_path(drv_path: &str) -> Result<InternalDrv>;
-        fn add_temp_root(store_path: &str) -> Result<()>;
-        fn get_bin_dir() -> String;
         fn get_store_dir() -> String;
-
-        // additional but useful for harmonia
         fn get_build_log(derivation_path: &str) -> Result<String>;
         fn get_nar_list(store_path: &str) -> Result<String>;
     }
@@ -158,16 +140,6 @@ pub fn query_path_hash(path: &str) -> Result<String, cxx::Exception> {
 }
 
 #[inline]
-#[must_use]
-/// Return deriver of a valid path. It is permitted to omit the name part of the store path.
-pub fn query_deriver(path: &str) -> Option<String> {
-    match ffi::query_deriver(path) {
-        Ok(v) => string_to_opt(v),
-        Err(_) => None,
-    }
-}
-
-#[inline]
 /// Query information about a valid path. It is permitted to omit the name part of the store path.
 /// The `radix` field affects only the `narHash` field of the result.
 pub fn query_path_info(path: &str, radix: Radix) -> Result<PathInfo, cxx::Exception> {
@@ -185,16 +157,6 @@ pub fn query_path_info(path: &str, radix: Radix) -> Result<PathInfo, cxx::Except
 
 #[inline]
 #[must_use]
-/// Query the information about a realisation
-pub fn query_raw_realisation(output_id: &str) -> Option<String> {
-    match ffi::query_raw_realisation(output_id) {
-        Ok(v) => string_to_opt(v),
-        Err(_) => None,
-    }
-}
-
-#[inline]
-#[must_use]
 /// Query the full store path given the hash part of a valid store path, or empty if the path
 /// doesn't exist.
 pub fn query_path_from_hash_part(hash_part: &str) -> Option<String> {
@@ -202,61 +164,6 @@ pub fn query_path_from_hash_part(hash_part: &str) -> Option<String> {
         Ok(v) => string_to_opt(v),
         Err(_) => None,
     }
-}
-
-#[inline]
-/// Returns all store paths in the file system closure of `storePath`
-///
-/// That is, all paths than can be directly or indirectly reached from it. If `flip_direction` is
-/// true, the set of paths that can reach `storePath` is returned; that is, the closures under the
-/// `referrers` relation instead of the `references` relation is returned.  If `include_outputs` is
-/// `true` then closure will additionally include all outputs of every derivation in the closure.
-pub fn compute_fs_closure(
-    flip_direction: bool,
-    include_outputs: bool,
-    paths: Vec<&str>,
-) -> Result<Vec<String>, cxx::Exception> {
-    ffi::compute_fs_closure(flip_direction, include_outputs, paths)
-}
-
-#[inline]
-/// Sort a set of paths topologically under the references relation. If `p` refers to `q`, then `p`
-/// precedes `q` in this list.
-pub fn topo_sort_paths(paths: Vec<&str>) -> Result<Vec<String>, cxx::Exception> {
-    ffi::topo_sort_paths(paths)
-}
-
-#[inline]
-/// Follow symlinks until we end up with a path in the Nix store. Will transform the results to
-/// store paths.
-pub fn follow_links_to_store_path(path: &str) -> Result<String, cxx::Exception> {
-    ffi::follow_links_to_store_path(path)
-}
-
-#[inline]
-/// Export multiple paths in the format expected by `nix-store --import`.
-pub fn export_paths(fd: i32, paths: Vec<&str>) -> Result<(), cxx::Exception> {
-    ffi::export_paths(fd, paths)
-}
-
-#[inline]
-/// Import a sequence of NAR dumps created by `export_paths()` into the Nix store. Optionally, the
-/// contents of the NARs are preloaded into the specified FS accessor to speed up subsequent
-/// access.
-pub fn import_paths(fd: i32, dont_check_signs: bool) -> Result<(), cxx::Exception> {
-    ffi::import_paths(fd, dont_check_signs)
-}
-
-#[inline]
-/// Compute the hash of the given file.
-pub fn hash_file(algo: &str, radix: Radix, path: &str) -> Result<String, cxx::Exception> {
-    ffi::hash_file(algo, matches!(radix, Radix::Base32), path)
-}
-
-#[inline]
-/// Compute the hash of the given string.
-pub fn hash_string(algo: &str, radix: Radix, s: &str) -> Result<String, cxx::Exception> {
-    ffi::hash_string(algo, matches!(radix, Radix::Base32), s)
 }
 
 #[inline]
@@ -302,20 +209,6 @@ pub fn derivation_from_path(drv_path: &str) -> Result<Drv, cxx::Exception> {
         args: res.args,
         env,
     })
-}
-
-#[inline]
-/// Add a store path as a temporary root of the garbage collector. The root disappears as soon as
-/// we exit.
-pub fn add_temp_root(store_path: &str) -> Result<(), cxx::Exception> {
-    ffi::add_temp_root(store_path)
-}
-
-#[inline]
-#[must_use]
-/// Return the path to the directory where the main programs are stored.
-pub fn get_bin_dir() -> String {
-    ffi::get_bin_dir()
 }
 
 #[inline]

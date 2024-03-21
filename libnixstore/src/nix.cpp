@@ -93,13 +93,6 @@ rust::String query_path_hash(rust::Str path) {
       ->narHash.to_string(nix::HashFormat::Nix32, true);
 }
 
-rust::String query_deriver(rust::Str path) {
-  auto store = get_store();
-  nix::ref<const nix::ValidPathInfo> info =
-      store->queryPathInfo(store->parseStorePath(STRING_VIEW(path)));
-  return extract_opt_path(info->deriver);
-}
-
 InternalPathInfo query_path_info(rust::Str path, bool base32) {
   auto store = get_store();
   nix::ref<const nix::ValidPathInfo> info =
@@ -128,83 +121,9 @@ InternalPathInfo query_path_info(rust::Str path, bool base32) {
   };
 }
 
-rust::String query_raw_realisation(rust::Str output_id) {
-  std::shared_ptr<const nix::Realisation> realisation =
-      get_store()->queryRealisation(
-          nix::DrvOutput::parse(STRING_VIEW(output_id)));
-  if (!realisation) {
-    // TODO(conni2461): Replace with option
-    return "";
-  }
-  return realisation->toJSON().dump();
-}
-
 rust::String query_path_from_hash_part(rust::Str hash_part) {
   return extract_opt_path(
       get_store()->queryPathFromHashPart(STRING_VIEW(hash_part)));
-}
-
-rust::Vec<rust::String> compute_fs_closure(bool flip_direction,
-                                           bool include_outputs,
-                                           rust::Vec<rust::Str> paths) {
-  auto store = get_store();
-  nix::StorePathSet path_set;
-  for (auto &path : paths) {
-    store->computeFSClosure(store->parseStorePath(STRING_VIEW(path)), path_set,
-                            flip_direction, include_outputs);
-  }
-  return extract_path_set(path_set);
-}
-
-rust::Vec<rust::String> topo_sort_paths(rust::Vec<rust::Str> paths) {
-  auto store = get_store();
-  nix::StorePathSet path_set;
-  for (auto &path : paths) {
-    path_set.insert(store->parseStorePath(STRING_VIEW(path)));
-  }
-  nix::StorePaths sorted = store->topoSortPaths(path_set);
-  rust::Vec<rust::String> res;
-  res.reserve(sorted.size());
-  for (auto &path : sorted) {
-    res.push_back(store->printStorePath(path));
-  }
-  return res;
-}
-
-rust::String follow_links_to_store_path(rust::Str path) {
-  auto store = get_store();
-  return store->printStorePath(
-      store->followLinksToStorePath(STRING_VIEW(path)));
-}
-
-void export_paths(int32_t fd, rust::Vec<rust::Str> paths) {
-  auto store = get_store();
-  nix::StorePathSet path_set;
-  for (auto &path : paths) {
-    path_set.insert(store->parseStorePath(STRING_VIEW(path)));
-  }
-  nix::FdSink sink(fd);
-  store->exportPaths(path_set, sink);
-}
-
-void import_paths(int32_t fd, bool dont_check_signs) {
-  nix::FdSource source(fd);
-  get_store()->importPaths(source, dont_check_signs ? nix::NoCheckSigs
-                                                    : nix::CheckSigs);
-}
-
-rust::String hash_file(rust::Str algo, bool base32, rust::Str path) {
-  nix::Hash h =
-      nix::hashFile(nix::parseHashAlgo(STRING_VIEW(algo)), STRING_VIEW(path));
-  return h.to_string(base32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16,
-                     false);
-}
-
-rust::String hash_string(rust::Str algo, bool base32, rust::Str s) {
-  nix::Hash h =
-      nix::hashString(nix::parseHashAlgo(STRING_VIEW(algo)), STRING_VIEW(s));
-  return h.to_string(base32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16,
-                     false);
 }
 
 rust::String convert_hash(rust::Str algo, rust::Str s, bool to_base_32) {
@@ -267,15 +186,6 @@ InternalDrv derivation_from_path(rust::Str drv_path) {
   return InternalDrv{
       outputs, input_drvs, input_srcs, drv.platform, drv.builder, args, env,
   };
-}
-
-void add_temp_root(rust::Str store_path) {
-  auto store = get_store();
-  store->addTempRoot(store->parseStorePath(STRING_VIEW(store_path)));
-}
-
-rust::String get_bin_dir() {
-  return nix::settings.nixBinDir;
 }
 
 rust::String get_store_dir() {
