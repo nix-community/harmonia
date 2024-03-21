@@ -64,12 +64,6 @@ mod ffi {
         fn sign_string(secret_key: &str, msg: &str) -> Result<String>;
         fn check_signature(public_key: &str, sig: &str, msg: &str) -> Result<bool>;
         fn add_to_store(src_path: &str, recursive: i32, algo: &str) -> Result<String>;
-        fn make_fixed_output_path(
-            recursive: bool,
-            algo: &str,
-            hash: &str,
-            name: &str,
-        ) -> Result<String>;
         fn derivation_from_path(drv_path: &str) -> Result<InternalDrv>;
         fn add_temp_root(store_path: &str) -> Result<()>;
         fn get_bin_dir() -> String;
@@ -314,16 +308,6 @@ pub fn check_signature(public_key: &str, sig: &str, msg: &str) -> Result<bool, c
 /// It computes the store path to which `src_path` is to be copied. Returns the store path.
 pub fn add_to_store(src_path: &str, recursive: i32, algo: &str) -> Result<String, cxx::Exception> {
     ffi::add_to_store(src_path, recursive, algo)
-}
-
-#[inline]
-pub fn make_fixed_output_path(
-    recursive: bool,
-    algo: &str,
-    hash: &str,
-    name: &str,
-) -> Result<String, cxx::Exception> {
-    ffi::make_fixed_output_path(recursive, algo, hash, name)
 }
 
 #[inline]

@@ -9,7 +9,6 @@
 #include <nix/log-store.hh>
 #include <nix/content-address.hh>
 #include <nix/util.hh>
-#include <nix/crypto.hh>
 
 #include <nix/nar-accessor.hh>
 
@@ -258,22 +257,6 @@ rust::String add_to_store(rust::Str src_path, int32_t recursive,
   nix::StorePath path = store->addToStore(
       std::string(nix::baseNameOf(STRING_VIEW(src_path))),
       STRING_VIEW(src_path), method, nix::parseHashType(STRING_VIEW(algo)));
-  return store->printStorePath(path);
-}
-
-rust::String make_fixed_output_path(bool recursive, rust::Str algo,
-                                    rust::Str hash, rust::Str name) {
-  auto store = get_store();
-
-  nix::FixedOutputInfo info{
-      .method = recursive ? nix::FileIngestionMethod::Recursive
-                          : nix::FileIngestionMethod::Flat,
-      .hash = nix::Hash::parseAny(STRING_VIEW(hash),
-                                  nix::parseHashType(STRING_VIEW(algo))),
-      .references = {},
-  };
-
-  nix::StorePath path = store->makeFixedOutputPath(STRING_VIEW(name), info);
   return store->printStorePath(path);
 }
 

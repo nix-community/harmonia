@@ -28,8 +28,6 @@ rust::String sign_string(rust::Str secret_key, rust::Str msg);
 bool check_signature(rust::Str public_key, rust::Str sig, rust::Str msg);
 rust::String add_to_store(rust::Str src_path, int32_t recursive,
                           rust::Str algo);
-rust::String make_fixed_output_path(bool recursive, rust::Str algo,
-                                    rust::Str hash, rust::Str name);
 InternalDrv derivation_from_path(rust::Str drv_path);
 void add_temp_root(rust::Str store_path);
 rust::String get_bin_dir();
