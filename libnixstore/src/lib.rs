@@ -40,7 +40,6 @@ mod ffi {
 
         // bindings that are also available in the perl bindings
         fn init();
-        fn set_verbosity(level: i32);
         fn is_valid_path(path: &str) -> Result<bool>;
         fn query_references(path: &str) -> Result<Vec<String>>;
         fn query_path_hash(path: &str) -> Result<String>;
@@ -144,12 +143,6 @@ impl Default for Radix {
 /// Perform any necessary effectful operation to make the store up and running.
 pub fn init() {
     ffi::init();
-}
-
-#[inline]
-/// Set the loglevel.
-pub fn set_verbosity(level: i32) {
-    ffi::set_verbosity(level);
 }
 
 #[inline]

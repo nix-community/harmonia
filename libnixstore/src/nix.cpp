@@ -82,10 +82,6 @@ void init() {
   get_store();
 }
 
-void set_verbosity(int32_t level) {
-  nix::verbosity = (nix::Verbosity)level;
-}
-
 bool is_valid_path(rust::Str path) {
   auto store = get_store();
   return store->isValidPath(store->parseStorePath(STRING_VIEW(path)));
