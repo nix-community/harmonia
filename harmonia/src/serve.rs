@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use actix_files::NamedFile;
+use actix_web::http::header;
 use actix_web::Responder;
 use actix_web::{web, HttpRequest, HttpResponse};
 use anyhow::Context;
@@ -152,7 +153,11 @@ pub(crate) async fn get(path: web::Path<(String, PathBuf)>, req: HttpRequest) ->
             }
         }
 
-        let url_prefix = PathBuf::from("/serve").join(&hash);
+        let url_prefix = match req.headers().get(header::X_FORWARDED_HOST) {
+            Some(h) => PathBuf::from(h.to_str().unwrap()).join("/serve"),
+            None    => PathBuf::from("/serve")
+        };
+        let url_prefix = url_prefix.join(&hash);
         let url_prefix = if dir == Path::new("") {
             url_prefix
         } else {
