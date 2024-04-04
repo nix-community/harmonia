@@ -154,8 +154,8 @@ pub(crate) async fn get(path: web::Path<(String, PathBuf)>, req: HttpRequest) ->
         }
 
         let url_prefix = match req.headers().get(header::X_FORWARDED_HOST) {
-            Some(h) => PathBuf::from(h.to_str().unwrap()).join("/serve"),
-            None    => PathBuf::from("/serve")
+            Some(h) => PathBuf::from(h.to_str().unwrap()).join("serve"),
+            None => PathBuf::from("/serve"),
         };
         let url_prefix = url_prefix.join(&hash);
         let url_prefix = if dir == Path::new("") {
