@@ -43,6 +43,7 @@
               t00-simple = import ./tests/t00-simple.nix testArgs;
               t01-signing = import ./tests/t01-signing.nix testArgs;
               t02-varnish = import ./tests/t02-varnish.nix testArgs;
+              t03-chroot = import ./tests/t03-chroot.nix testArgs;
             } // {
             clippy = config.packages.harmonia.override ({
               enableClippy = true;

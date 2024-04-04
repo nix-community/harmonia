@@ -1,5 +1,6 @@
 use std::fs::read_to_string;
 
+use crate::store::Store;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine};
 use serde::Deserialize;
@@ -33,8 +34,11 @@ pub(crate) struct Config {
     pub(crate) priority: usize,
     #[serde(default)]
     pub(crate) sign_key_path: Option<String>,
-    #[serde(default)]
+
+    #[serde(skip)]
     pub(crate) secret_key: Option<String>,
+    #[serde(skip)]
+    pub(crate) store: Store,
 }
 
 fn get_secret_key(sign_key_path: Option<&str>) -> Result<Option<String>> {
@@ -65,5 +69,6 @@ pub(crate) fn load() -> Result<Config> {
     )
     .with_context(|| format!("Couldn't parse config file '{settings_file}'"))?;
     settings.secret_key = get_secret_key(settings.sign_key_path.as_deref())?;
+    settings.store = Store::new();
     Ok(settings)
 }
