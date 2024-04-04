@@ -8,7 +8,9 @@ use askama_escape::{escape as escape_html_entity, Html};
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use std::fmt::Write;
 
-use crate::{nixhash, some_or_404, ServerResult, BOOTSTRAP_SOURCE, CARGO_NAME, CARGO_VERSION};
+use crate::{
+    config::Config, nixhash, some_or_404, ServerResult, BOOTSTRAP_SOURCE, CARGO_NAME, CARGO_VERSION,
+};
 
 /// Returns percent encoded file URL path.
 macro_rules! encode_file_url {
@@ -46,10 +48,12 @@ fn file_size(bytes: u64) -> String {
     }
 }
 
-pub(crate) fn directory_listing(url_prefix: &Path, fs_path: &Path) -> ServerResult {
-    let path_without_store = fs_path
-        .strip_prefix(libnixstore::get_store_dir())
-        .unwrap_or(fs_path);
+pub(crate) fn directory_listing(
+    url_prefix: &Path,
+    fs_path: &Path,
+    real_store: &str,
+) -> ServerResult {
+    let path_without_store = fs_path.strip_prefix(real_store).unwrap_or(fs_path);
     let index_of = format!(
         "Index of {}",
         escape_html_entity(&path_without_store.to_string_lossy(), Html)
@@ -123,11 +127,15 @@ pub(crate) fn directory_listing(url_prefix: &Path, fs_path: &Path) -> ServerResu
         .body(html))
 }
 
-pub(crate) async fn get(path: web::Path<(String, PathBuf)>, req: HttpRequest) -> ServerResult {
+pub(crate) async fn get(
+    path: web::Path<(String, PathBuf)>,
+    req: HttpRequest,
+    settings: web::Data<Config>,
+) -> ServerResult {
     let (hash, dir) = path.into_inner();
     let dir = dir.strip_prefix("/").unwrap_or(&dir);
 
-    let store_path = PathBuf::from(some_or_404!(nixhash(&hash)));
+    let store_path = settings.store.get_real_path(&some_or_404!(nixhash(&hash)));
     let full_path = if dir == Path::new("") {
         store_path.clone()
     } else {
@@ -137,7 +145,7 @@ pub(crate) async fn get(path: web::Path<(String, PathBuf)>, req: HttpRequest) ->
         .canonicalize()
         .with_context(|| format!("cannot resolve nix store path: {}", full_path.display()))?;
 
-    if !full_path.starts_with(libnixstore::get_store_dir()) {
+    if !full_path.starts_with(settings.store.real_store()) {
         return Ok(HttpResponse::NotFound().finish());
     }
 
@@ -158,7 +166,7 @@ pub(crate) async fn get(path: web::Path<(String, PathBuf)>, req: HttpRequest) ->
         } else {
             url_prefix.join(dir)
         };
-        directory_listing(&url_prefix, &full_path)
+        directory_listing(&url_prefix, &full_path, settings.store.real_store())
     } else {
         Ok(NamedFile::open_async(&full_path)
             .await

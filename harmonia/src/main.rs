@@ -11,6 +11,7 @@ mod narinfo;
 mod narlist;
 mod root;
 mod serve;
+mod store;
 mod version;
 
 fn nixhash(hash: &str) -> Option<String> {

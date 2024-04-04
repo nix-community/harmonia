@@ -14,6 +14,7 @@ rust::String sign_string(rust::Str secret_key, rust::Str msg);
 bool check_signature(rust::Str public_key, rust::Str sig, rust::Str msg);
 InternalDrv derivation_from_path(rust::Str drv_path);
 rust::String get_store_dir();
+rust::String get_real_store_dir();
 rust::String get_build_log(rust::Str derivation_path);
 rust::String get_nar_list(rust::Str store_path);
 

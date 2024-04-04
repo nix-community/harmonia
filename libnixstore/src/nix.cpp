@@ -6,6 +6,7 @@
 #include <nix/globals.hh>
 #include <nix/shared.hh>
 #include <nix/store-api.hh>
+#include <nix/local-fs-store.hh>
 #include <nix/log-store.hh>
 #include <nix/content-address.hh>
 #include <nix/util.hh>
@@ -190,6 +191,16 @@ InternalDrv derivation_from_path(rust::Str drv_path) {
 
 rust::String get_store_dir() {
   return nix::settings.nixStore;
+}
+
+rust::String get_real_store_dir() {
+  auto store = get_store();
+  auto *fsstore = dynamic_cast<nix::LocalFSStore *>(&(*store));
+
+  if (fsstore != nullptr)
+    return fsstore->getRealStoreDir();
+  else
+    return get_store_dir();
 }
 
 rust::String get_build_log(rust::Str derivation_path) {

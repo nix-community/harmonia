@@ -15,6 +15,7 @@ use sync::mpsc::Sender;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
+use crate::config::Config;
 use crate::{cache_control_max_age_1y, some_or_404};
 use std::ffi::{OsStr, OsString};
 use tokio::{sync, task};
@@ -269,9 +270,9 @@ async fn dump_symlink(frame: &Frame, tx: &Sender<Result<Bytes, ThreadSafeError>>
     Ok(())
 }
 
-async fn dump_path(path: &Path, tx: &Sender<Result<Bytes, ThreadSafeError>>) -> Result<()> {
+async fn dump_path(path: PathBuf, tx: &Sender<Result<Bytes, ThreadSafeError>>) -> Result<()> {
     write_byte_slices(tx, &[b"nix-archive-1"]).await?;
-    let mut stack = vec![Frame::new(path.to_owned()).await?];
+    let mut stack = vec![Frame::new(path).await?];
 
     while let Some(frame) = stack.last_mut() {
         let file_type = frame.metadata.file_type();
@@ -325,6 +326,7 @@ pub(crate) async fn get(
     path: web::Path<PathParams>,
     req: HttpRequest,
     q: web::Query<NarRequest>,
+    settings: web::Data<Config>,
 ) -> Result<HttpResponse, Box<dyn Error>> {
     // Extract the narhash from the query parameter, and bail out if it's missing or invalid.
     let narhash = some_or_404!(Some(path.narhash.as_str()));
@@ -386,7 +388,11 @@ pub(crate) async fn get(
 
         let (tx2, mut rx2) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
-            let err = dump_path(Path::new(&store_path), &tx2).await;
+            // If Nix is set to a non-root store, physical store paths will differ from
+            // logical paths. Below we check if that is the case, and rewrite to physical
+            // before dumping.
+
+            let err = dump_path(settings.store.get_real_path(&store_path), &tx2).await;
             if let Err(err) = err {
                 log::error!("Error dumping path {}: {:?}", store_path, err);
             }
@@ -426,7 +432,7 @@ pub(crate) async fn get(
         });
     } else {
         task::spawn(async move {
-            let err = dump_path(Path::new(&store_path), &tx).await;
+            let err = dump_path(settings.store.get_real_path(&store_path), &tx).await;
             if let Err(err) = err {
                 log::error!("Error dumping path {}: {:?}", store_path, err);
             }
@@ -443,12 +449,14 @@ pub(crate) async fn get(
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::{path::PathBuf, process::Command};
+    use crate::store::Store;
+    use std::process::Command;
 
-    async fn dump_to_vec(path: PathBuf) -> Result<Vec<u8>> {
+    async fn dump_to_vec(path: String) -> Result<Vec<u8>> {
+        let store = Store::new();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
-            let e = dump_path(&path, &tx).await;
+            let e = dump_path(store.get_real_path(&path), &tx).await;
             if let Err(e) = e {
                 eprintln!("Error dumping path: {:?}", e);
             }
@@ -521,7 +529,7 @@ mod test {
 
         std::os::unix::fs::symlink("sometarget", dir.join("symlink"))?;
 
-        let nar_dump = dump_to_vec(dir.to_path_buf()).await?;
+        let nar_dump = dump_to_vec(dir.to_str().unwrap().to_owned()).await?;
         let res = Command::new("nix-store")
             .arg("--dump")
             .arg(dir)

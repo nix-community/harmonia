@@ -48,6 +48,7 @@ mod ffi {
         fn check_signature(public_key: &str, sig: &str, msg: &str) -> Result<bool>;
         fn derivation_from_path(drv_path: &str) -> Result<InternalDrv>;
         fn get_store_dir() -> String;
+        fn get_real_store_dir() -> String;
         fn get_build_log(derivation_path: &str) -> Result<String>;
         fn get_nar_list(store_path: &str) -> Result<String>;
     }
@@ -216,6 +217,13 @@ pub fn derivation_from_path(drv_path: &str) -> Result<Drv, cxx::Exception> {
 /// Returns the path to the directory where nix store sources and derived files.
 pub fn get_store_dir() -> String {
     ffi::get_store_dir()
+}
+
+#[inline]
+#[must_use]
+/// Returns the physical path to the nix store.
+pub fn get_real_store_dir() -> String {
+    ffi::get_real_store_dir()
 }
 
 #[inline]
