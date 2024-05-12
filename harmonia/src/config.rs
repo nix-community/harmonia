@@ -34,6 +34,8 @@ pub(crate) struct Config {
     pub(crate) priority: usize,
     #[serde(default)]
     pub(crate) sign_key_path: Option<String>,
+    #[serde(default)]
+    pub(crate) sign_key_paths: Vec<String>,
 
     #[serde(skip, default)]
     pub(crate) secret_keys: Vec<String>,
@@ -68,8 +70,13 @@ pub(crate) fn load() -> Result<Config> {
             .with_context(|| format!("Couldn't read config file '{settings_file}'"))?,
     )
     .with_context(|| format!("Couldn't parse config file '{settings_file}'"))?;
-    if let Some(sk) = get_secret_key(settings.sign_key_path.as_deref())? {
-        settings.secret_keys.push(sk);
+    if let Some(sign_key_path) = &settings.sign_key_path {
+        settings.sign_key_paths.push(sign_key_path.to_string());
+    }
+    for sign_key_path in &settings.sign_key_paths {
+        if let Some(sk) = get_secret_key(Some(sign_key_path))? {
+            settings.secret_keys.push(sk);
+        }
     }
     settings.store = Store::new();
     Ok(settings)
