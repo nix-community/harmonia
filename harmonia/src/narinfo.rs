@@ -73,7 +73,7 @@ fn extract_filename(path: &str) -> Option<String> {
 fn query_narinfo(
     store_path: &str,
     hash: &str,
-    sign_key: Option<&str>,
+    sign_keys: &Vec<String>,
 ) -> Result<NarInfo, Box<dyn Error>> {
     let path_info = libnixstore::query_path_info(store_path, Radix::default())?;
     let mut res = NarInfo {
@@ -110,7 +110,7 @@ fn query_narinfo(
         }
     }
 
-    if let Some(sk) = sign_key {
+    for sk in sign_keys {
         let fingerprint = fingerprint_path(store_path, &res.nar_hash, res.nar_size, &refs)?;
         if let Some(fp) = fingerprint {
             res.sig = Some(libnixstore::sign_string(sk, &fp)?);
@@ -162,7 +162,7 @@ pub(crate) async fn get(
 ) -> Result<HttpResponse, Box<dyn Error>> {
     let hash = hash.into_inner();
     let store_path = some_or_404!(nixhash(&hash));
-    let narinfo = query_narinfo(&store_path, &hash, settings.secret_key.as_deref())?;
+    let narinfo = query_narinfo(&store_path, &hash, &settings.secret_keys)?;
 
     if param.json.is_some() {
         Ok(HttpResponse::Ok()
