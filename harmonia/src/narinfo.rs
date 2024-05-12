@@ -22,7 +22,7 @@ struct NarInfo {
     references: Vec<String>,
     deriver: Option<String>,
     system: Option<String>,
-    sig: Option<String>,
+    sig: Vec<String>,
     ca: Option<String>,
 }
 
@@ -89,7 +89,7 @@ fn query_narinfo(
         references: vec![],
         deriver: None,
         system: None,
-        sig: None,
+        sig: vec![],
         ca: path_info.ca,
     };
 
@@ -113,7 +113,7 @@ fn query_narinfo(
     for sk in sign_keys {
         let fingerprint = fingerprint_path(store_path, &res.nar_hash, res.nar_size, &refs)?;
         if let Some(fp) = fingerprint {
-            res.sig = Some(libnixstore::sign_string(sk, &fp)?);
+            res.sig.push(libnixstore::sign_string(sk, &fp)?);
         }
     }
 
@@ -143,7 +143,7 @@ fn format_narinfo_txt(narinfo: &NarInfo) -> String {
         res.push(format!("System: {}", sys));
     }
 
-    if let Some(sig) = &narinfo.sig {
+    for sig in &narinfo.sig {
         res.push(format!("Sig: {}", sig));
     }
 
