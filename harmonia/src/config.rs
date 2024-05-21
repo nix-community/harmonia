@@ -71,10 +71,10 @@ pub(crate) fn load() -> Result<Config> {
     if let Some(sign_key_path) = &settings.sign_key_path {
         settings.sign_key_paths.push(sign_key_path.to_string());
     }
-    if let Some(sign_key_path) = std::env::var("SIGN_KEY_PATH").ok() {
+    if let Ok(sign_key_path) = std::env::var("SIGN_KEY_PATH") {
         settings.sign_key_paths.push(sign_key_path.to_string());
     }
-    if let Some(sign_key_paths) = std::env::var("SIGN_KEY_PATHS").ok() {
+    if let Ok(sign_key_paths) = std::env::var("SIGN_KEY_PATHS") {
         for sign_key_path in sign_key_paths.split_whitespace() {
             settings.sign_key_paths.push(sign_key_path.to_string());
         }
