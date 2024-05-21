@@ -44,9 +44,7 @@ pub(crate) struct Config {
 }
 
 fn get_secret_key(sign_key_path: Option<&str>) -> Result<Option<String>> {
-    let env_key = std::env::var("SIGN_KEY_PATH").ok();
-    let k = sign_key_path.or(env_key.as_deref());
-    if let Some(path) = k {
+    if let Some(path) = sign_key_path {
         let sign_key = read_to_string(path)
             .with_context(|| format!("Couldn't read sign_key file '{path}'"))?;
         let (_sign_host, sign_key64) = sign_key
@@ -71,6 +69,9 @@ pub(crate) fn load() -> Result<Config> {
     )
     .with_context(|| format!("Couldn't parse config file '{settings_file}'"))?;
     if let Some(sign_key_path) = &settings.sign_key_path {
+        settings.sign_key_paths.push(sign_key_path.to_string());
+    }
+    if let Some(sign_key_path) = std::env::var("SIGN_KEY_PATH").ok() {
         settings.sign_key_paths.push(sign_key_path.to_string());
     }
     for sign_key_path in &settings.sign_key_paths {
