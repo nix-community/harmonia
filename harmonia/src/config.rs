@@ -74,6 +74,11 @@ pub(crate) fn load() -> Result<Config> {
     if let Some(sign_key_path) = std::env::var("SIGN_KEY_PATH").ok() {
         settings.sign_key_paths.push(sign_key_path.to_string());
     }
+    if let Some(sign_key_paths) = std::env::var("SIGN_KEY_PATHS").ok() {
+        for sign_key_path in sign_key_paths.split_whitespace() {
+            settings.sign_key_paths.push(sign_key_path.to_string());
+        }
+    }
     for sign_key_path in &settings.sign_key_paths {
         if let Some(sk) = get_secret_key(Some(sign_key_path))? {
             settings.secret_keys.push(sk);
