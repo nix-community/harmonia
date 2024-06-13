@@ -17,7 +17,7 @@ pkgs.mkShell {
   name = "harmonia";
   nativeBuildInputs = with pkgs; [ rustc cargo pkg-config ];
   buildInputs = [
-    nixVersions.unstable
+    nixVersions.latest
     nlohmann_json
     libsodium
     boost

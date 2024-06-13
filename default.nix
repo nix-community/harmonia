@@ -1,7 +1,7 @@
 { pkgs ? (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem}
 , rustPlatform ? pkgs.rustPlatform
 , nixVersions ? pkgs.nixVersions
-, nixForHarmonia ? nixVersions.unstable
+, nixForHarmonia ? nixVersions.latest
 , nix-gitignore ? pkgs.nix-gitignore
 , lib ? pkgs.lib
 , clippy ? pkgs.clippy
