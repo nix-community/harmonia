@@ -69,9 +69,15 @@ pub(crate) fn load() -> Result<Config> {
     )
     .with_context(|| format!("Couldn't parse config file '{settings_file}'"))?;
     if let Some(sign_key_path) = &settings.sign_key_path {
+        log::warn!(
+            "The sign_key_path configuration option is deprecated. Use sign_key_paths instead."
+        );
         settings.sign_key_paths.push(sign_key_path.to_string());
     }
     if let Ok(sign_key_path) = std::env::var("SIGN_KEY_PATH") {
+        log::warn!(
+            "The SIGN_KEY_PATH environment variable is deprecated. Use SIGN_KEY_PATHS instead."
+        );
         settings.sign_key_paths.push(sign_key_path.to_string());
     }
     if let Ok(sign_key_paths) = std::env::var("SIGN_KEY_PATHS") {
