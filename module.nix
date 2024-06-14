@@ -42,6 +42,11 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    warnings =
+      if cfg.signKeyPath != null
+      then [ ''`services.harmonia-dev.signKeyPath` is deprecated, use `services.harmonia-dev.signKeyPaths` instead'' ]
+      else [ ];
+
     services.harmonia-dev.settings = builtins.mapAttrs (_: v: lib.mkDefault v) {
       bind = "[::]:5000";
       workers = 4;
