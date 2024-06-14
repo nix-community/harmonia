@@ -4,6 +4,9 @@ let
 
   format = pkgs.formats.toml { };
   configFile = format.generate "harmonia.toml" cfg.settings;
+
+  signKeyPaths = cfg.signKeyPaths ++ (if cfg.signKeyPath != null then [ cfg.signKeyPath ] else [ ]);
+  credentials = lib.imap0 (i: signKeyPath: { id = "sign-key-${builtins.toString i}"; path = signKeyPath; }) signKeyPaths;
 in
 {
   options = {
@@ -14,6 +17,12 @@ in
         type = lib.types.nullOr lib.types.path;
         default = null;
         description = lib.mdDoc "Path to the signing key to use for signing the cache";
+      };
+
+      signKeyPaths = lib.mkOption {
+        type = lib.types.listOf lib.types.path;
+        default = [ ];
+        description = lib.mdDoc "Paths to the signing keys to use for signing the cache";
       };
 
       settings = lib.mkOption {
@@ -51,7 +60,7 @@ in
         NIX_REMOTE = "daemon";
         LIBEV_FLAGS = "4"; # go ahead and mandate epoll(2)
         CONFIG_FILE = lib.mkIf (configFile != null) configFile;
-        SIGN_KEY_PATH = lib.mkIf (cfg.signKeyPath != null) "%d/sign-key";
+        SIGN_KEY_PATHS = lib.strings.concatMapStringsSep " " (credential: "%d/${credential.id}") credentials;
         RUST_LOG = "info";
       };
 
@@ -72,7 +81,7 @@ in
         UMask = "0066";
 
         RuntimeDirectory = "harmonia";
-        LoadCredential = lib.optional (cfg.signKeyPath != null) "sign-key:${cfg.signKeyPath}";
+        LoadCredential = builtins.map (credential: "${credential.id}:${credential.path}") credentials;
 
         SystemCallFilter = [
           "@system-service"
