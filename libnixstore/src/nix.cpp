@@ -10,7 +10,6 @@
 #include <nix/log-store.hh>
 #include <nix/content-address.hh>
 #include <nix/util.hh>
-#include <nix/build/drv-output-substitution-goal.hh>
 
 #include <nix/nar-accessor.hh>
 
