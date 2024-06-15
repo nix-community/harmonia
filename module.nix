@@ -16,7 +16,7 @@ in
       signKeyPath = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         default = null;
-        description = lib.mdDoc "Path to the signing key to use for signing the cache";
+        description = lib.mdDoc "DEPRECATED: Use `services.harmonia-dev.signKeyPaths` instead. Path to the signing key to use for signing the cache";
       };
 
       signKeyPaths = lib.mkOption {
