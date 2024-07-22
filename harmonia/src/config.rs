@@ -36,6 +36,10 @@ pub(crate) struct Config {
     pub(crate) sign_key_path: Option<String>,
     #[serde(default)]
     pub(crate) sign_key_paths: Vec<String>,
+    #[serde(default)]
+    pub(crate) tls_cert_path: Option<String>,
+    #[serde(default)]
+    pub(crate) tls_key_path: Option<String>,
 
     #[serde(skip, default)]
     pub(crate) secret_keys: Vec<String>,

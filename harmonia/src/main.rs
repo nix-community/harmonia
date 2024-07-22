@@ -1,6 +1,7 @@
 use std::{fmt::Display, time::Duration};
 
 use actix_web::{http, web, App, HttpResponse, HttpServer};
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 mod buildlog;
 mod cacheinfo;
@@ -109,7 +110,7 @@ async fn main() -> std::io::Result<()> {
     let config_data = c.clone();
 
     log::info!("listening on {}", c.bind);
-    HttpServer::new(move || {
+    let mut server = HttpServer::new(move || {
         App::new()
             .app_data(config_data.clone())
             .route("/", web::get().to(root::get))
@@ -140,8 +141,14 @@ async fn main() -> std::io::Result<()> {
     // default is 5 seconds, which is too small when doing mass requests on slow machines
     .client_request_timeout(Duration::from_secs(30))
     .workers(c.workers)
-    .max_connection_rate(c.max_connection_rate)
-    .bind(c.bind.clone())?
-    .run()
-    .await
+    .max_connection_rate(c.max_connection_rate);
+    if c.tls_cert_path.is_some() || c.tls_key_path.is_some() {
+        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())?;
+        builder.set_private_key_file(c.tls_key_path.clone().unwrap(), SslFiletype::PEM)?;
+        builder.set_certificate_chain_file(c.tls_cert_path.clone().unwrap())?;
+        server = server.bind_openssl(c.bind.clone(), builder)?;
+    } else {
+        server = server.bind(c.bind.clone())?;
+    }
+    server.run().await
 }

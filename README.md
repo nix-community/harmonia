@@ -114,6 +114,8 @@ is `info,actix_web=debug`. To only log errors use the following
 `RUST_LOG=error` and to only disable access logging, use
 `RUST_LOG=info,actix_web::middleware=error`
 
+To enable TLS on the HTTP server, specify `tls_cert_path` and `tls_key_path`.
+
 ## Build
 
 ### Whole application
