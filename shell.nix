@@ -1,21 +1,29 @@
 { pkgs ? (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem}
-, nixVersions ? pkgs.nixVersions
-, nlohmann_json ? pkgs.nlohmann_json
-, libsodium ? pkgs.libsodium
 , boost ? pkgs.boost
-, rustfmt ? pkgs.rustfmt
-, clippy ? pkgs.clippy
-, cargo-watch ? pkgs.cargo-watch
+, cargo-audit ? pkgs.cargo-audit
 , cargo-edit ? pkgs.cargo-edit
 , cargo-outdated ? pkgs.cargo-outdated
-, cargo-audit ? pkgs.cargo-audit
+, cargo-watch ? pkgs.cargo-watch
+, clippy ? pkgs.clippy
+, lib ? pkgs.lib
+, libiconv ? pkgs.libiconv
+, libsodium ? pkgs.libsodium
+, nixVersions ? pkgs.nixVersions
+, nlohmann_json ? pkgs.nlohmann_json
 , openssl ? pkgs.openssl
 , rust-analzyer ? pkgs.rust-analyzer
+, rustfmt ? pkgs.rustfmt
+, stdenv ? pkgs.stdenv
+,
 }:
 
 pkgs.mkShell {
   name = "harmonia";
-  nativeBuildInputs = with pkgs; [ rustc cargo pkg-config ];
+  nativeBuildInputs = with pkgs; [
+    rustc
+    cargo
+    pkg-config
+  ];
   buildInputs = [
     nixVersions.latest
     nlohmann_json
@@ -29,7 +37,7 @@ pkgs.mkShell {
     cargo-audit
     openssl
     rust-analzyer
-  ];
+  ] ++ lib.optional (stdenv.isDarwin) [ libiconv ];
 
   # provide a dummy configuration for testing
   CONFIG_FILE = pkgs.writeText "config.toml" "";
