@@ -49,23 +49,10 @@
           projectRootFile = "flake.lock";
 
           programs.rustfmt.enable = true;
+          programs.nixfmt.enable = true;
+          programs.nixfmt.package = pkgs.nixfmt-rfc-style;
+          programs.deadnix.enable = true;
           programs.clang-format.enable = true;
-
-          settings.formatter = {
-            nix = {
-              command = "sh";
-              options = [
-                "-eucx"
-                ''
-                  export PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.findutils pkgs.deadnix pkgs.nixpkgs-fmt ]}
-                  deadnix --edit "$@"
-                  nixpkgs-fmt "$@"
-                ''
-                "--"
-              ];
-              includes = [ "*.nix" ];
-            };
-          };
         };
       };
       flake.nixosModules.harmonia = ./module.nix;
