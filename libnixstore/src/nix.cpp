@@ -245,7 +245,7 @@ rust::String get_nar_list(rust::Str store_path) {
 
 class StopDump : public std::exception {
 public:
-  const char *what() {
+  const char *what() const noexcept override {
     return "Stop dumping nar";
   }
 };
