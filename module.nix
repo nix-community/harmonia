@@ -1,4 +1,9 @@
-{ config, pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 let
   cfg = config.services.harmonia-dev;
 
@@ -6,7 +11,10 @@ let
   configFile = format.generate "harmonia.toml" cfg.settings;
 
   signKeyPaths = cfg.signKeyPaths ++ (if cfg.signKeyPath != null then [ cfg.signKeyPath ] else [ ]);
-  credentials = lib.imap0 (i: signKeyPath: { id = "sign-key-${builtins.toString i}"; path = signKeyPath; }) signKeyPaths;
+  credentials = lib.imap0 (i: signKeyPath: {
+    id = "sign-key-${builtins.toString i}";
+    path = signKeyPath;
+  }) signKeyPaths;
 in
 {
   options = {
@@ -26,9 +34,7 @@ in
       };
 
       settings = lib.mkOption {
-        type = lib.types.submodule {
-          freeformType = format.type;
-        };
+        type = lib.types.submodule { freeformType = format.type; };
 
         description = lib.mdDoc "Settings to merge with the default configuration";
       };
@@ -43,9 +49,12 @@ in
 
   config = lib.mkIf cfg.enable {
     warnings =
-      if cfg.signKeyPath != null
-      then [ ''`services.harmonia-dev.signKeyPath` is deprecated, use `services.harmonia-dev.signKeyPaths` instead'' ]
-      else [ ];
+      if cfg.signKeyPath != null then
+        [
+          ''`services.harmonia-dev.signKeyPath` is deprecated, use `services.harmonia-dev.signKeyPaths` instead''
+        ]
+      else
+        [ ];
 
     services.harmonia-dev.settings = builtins.mapAttrs (_: v: lib.mkDefault v) {
       bind = "[::]:5000";
@@ -65,7 +74,9 @@ in
         NIX_REMOTE = "daemon";
         LIBEV_FLAGS = "4"; # go ahead and mandate epoll(2)
         CONFIG_FILE = lib.mkIf (configFile != null) configFile;
-        SIGN_KEY_PATHS = lib.strings.concatMapStringsSep " " (credential: "%d/${credential.id}") credentials;
+        SIGN_KEY_PATHS = lib.strings.concatMapStringsSep " " (
+          credential: "%d/${credential.id}"
+        ) credentials;
         RUST_LOG = "info";
       };
 
@@ -73,7 +84,6 @@ in
       # $HOME in order to use a temporary cache dir. bizarre failures will occur
       # otherwise
       environment.HOME = "/run/harmonia";
-
 
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/harmonia";

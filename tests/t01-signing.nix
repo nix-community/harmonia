@@ -1,5 +1,5 @@
-(import ./lib.nix)
-  ({ pkgs, ... }:
+(import ./lib.nix) (
+  { pkgs, ... }:
   let
     inherit (pkgs) hello;
     copyScript = pkgs.writeShellScript "copy-test" ''
@@ -17,21 +17,28 @@
     name = "t01-signing";
 
     nodes = {
-      harmonia = { ... }: {
-        imports = [ ../module.nix ];
+      harmonia =
+        { ... }:
+        {
+          imports = [ ../module.nix ];
 
-        services.harmonia-dev = {
-          enable = true;
-          signKeyPaths = [ "${./cache.sk}" "${./cache2.sk}" ];
+          services.harmonia-dev = {
+            enable = true;
+            signKeyPaths = [
+              "${./cache.sk}"
+              "${./cache2.sk}"
+            ];
+          };
+
+          networking.firewall.allowedTCPPorts = [ 5000 ];
+          system.extraDependencies = [ hello ];
         };
 
-        networking.firewall.allowedTCPPorts = [ 5000 ];
-        system.extraDependencies = [ hello ];
-      };
-
-      client01 = { lib, ... }: {
-        nix.settings.substituters = lib.mkForce [ "http://harmonia:5000" ];
-      };
+      client01 =
+        { lib, ... }:
+        {
+          nix.settings.substituters = lib.mkForce [ "http://harmonia:5000" ];
+        };
     };
 
     testScript = ''
@@ -44,4 +51,5 @@
       client01.wait_until_succeeds("${copyScript} ${./cache2.pk} /root/test-store2 ${hello}")
       client01.succeed("${hello}/bin/hello --version")
     '';
-  })
+  }
+)

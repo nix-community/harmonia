@@ -1,20 +1,21 @@
-{ pkgs ? (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem}
-, boost ? pkgs.boost
-, cargo-audit ? pkgs.cargo-audit
-, cargo-edit ? pkgs.cargo-edit
-, cargo-outdated ? pkgs.cargo-outdated
-, cargo-watch ? pkgs.cargo-watch
-, clippy ? pkgs.clippy
-, lib ? pkgs.lib
-, libiconv ? pkgs.libiconv
-, libsodium ? pkgs.libsodium
-, nixVersions ? pkgs.nixVersions
-, nlohmann_json ? pkgs.nlohmann_json
-, openssl ? pkgs.openssl
-, rust-analzyer ? pkgs.rust-analyzer
-, rustfmt ? pkgs.rustfmt
-, stdenv ? pkgs.stdenv
-,
+{
+  pkgs ?
+    (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem},
+  boost ? pkgs.boost,
+  cargo-audit ? pkgs.cargo-audit,
+  cargo-edit ? pkgs.cargo-edit,
+  cargo-outdated ? pkgs.cargo-outdated,
+  cargo-watch ? pkgs.cargo-watch,
+  clippy ? pkgs.clippy,
+  lib ? pkgs.lib,
+  libiconv ? pkgs.libiconv,
+  libsodium ? pkgs.libsodium,
+  nixVersions ? pkgs.nixVersions,
+  nlohmann_json ? pkgs.nlohmann_json,
+  openssl ? pkgs.openssl,
+  rust-analzyer ? pkgs.rust-analyzer,
+  rustfmt ? pkgs.rustfmt,
+  stdenv ? pkgs.stdenv,
 }:
 
 pkgs.mkShell {

@@ -1,5 +1,5 @@
-(import ./lib.nix)
-  ({ pkgs, ... }:
+(import ./lib.nix) (
+  { pkgs, ... }:
   let
     testServe = pkgs.runCommand "test" { } ''
       mkdir -p $out/dir
@@ -12,7 +12,8 @@
     name = "t00-simple";
 
     nodes = {
-      harmonia = { pkgs, ... }:
+      harmonia =
+        { pkgs, ... }:
         {
           imports = [ ../module.nix ];
 
@@ -25,7 +26,8 @@
           ];
         };
 
-      client01 = { lib, ... }:
+      client01 =
+        { lib, ... }:
         {
           nix.settings.require-sigs = false;
           nix.settings.substituters = lib.mkForce [ "http://harmonia:5000" ];
@@ -67,4 +69,5 @@
         print(out)
         assert "file" == out, f"expected 'file', got '{out}'"
       '';
-  })
+  }
+)

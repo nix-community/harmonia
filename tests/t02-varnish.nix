@@ -1,9 +1,11 @@
-(import ./lib.nix)
-  ({ pkgs, ... }: {
+(import ./lib.nix) (
+  { pkgs, ... }:
+  {
     name = "t02-varnish";
 
     nodes = {
-      harmonia = { config, pkgs, ... }:
+      harmonia =
+        { config, pkgs, ... }:
         {
           imports = [ ../module.nix ];
 
@@ -25,7 +27,8 @@
           environment.systemPackages = [ pkgs.hello ];
         };
 
-      client01 = { lib, ... }:
+      client01 =
+        { lib, ... }:
         {
           nix.settings.require-sigs = false;
           nix.settings.substituters = lib.mkForce [ "http://harmonia" ];
@@ -44,4 +47,5 @@
       client01.wait_until_succeeds("nix copy --from http://harmonia/ ${pkgs.hello}")
       client01.succeed("${pkgs.hello}/bin/hello")
     '';
-  })
+  }
+)
