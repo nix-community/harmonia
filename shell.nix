@@ -13,7 +13,7 @@
   nixVersions ? pkgs.nixVersions,
   nlohmann_json ? pkgs.nlohmann_json,
   openssl ? pkgs.openssl,
-  rust-analzyer ? pkgs.rust-analyzer,
+  rust-analyzer ? pkgs.rust-analyzer,
   rustfmt ? pkgs.rustfmt,
   stdenv ? pkgs.stdenv,
 }:
@@ -37,7 +37,7 @@ pkgs.mkShell {
     cargo-outdated
     cargo-audit
     openssl
-    rust-analzyer
+    rust-analyzer
   ] ++ lib.optional (stdenv.isDarwin) [ libiconv ];
 
   # provide a dummy configuration for testing
