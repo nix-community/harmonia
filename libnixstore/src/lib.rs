@@ -45,8 +45,7 @@ mod ffi {
         fn query_path_info(path: &str, base32: bool) -> Result<InternalPathInfo>;
         fn query_path_from_hash_part(hash_part: &str) -> Result<String>;
         fn convert_hash(algo: &str, s: &str, to_base_32: bool) -> Result<String>;
-        fn sign_string(secret_key: &str, msg: &str) -> Result<String>;
-        fn check_signature(public_key: &str, sig: &str, msg: &str) -> Result<bool>;
+        fn sign_detached(secret_key: &[u8], msg: &str) -> Vec<u8>;
         fn derivation_from_path(drv_path: &str) -> Result<InternalDrv>;
         fn get_store_dir() -> String;
         fn get_real_store_dir() -> String;
@@ -178,14 +177,8 @@ pub fn convert_hash(algo: &str, s: &str, to_radix: Radix) -> Result<String, cxx:
 
 #[inline]
 /// Return a detached signature of the given string.
-pub fn sign_string(secret_key: &str, msg: &str) -> Result<String, cxx::Exception> {
-    ffi::sign_string(secret_key, msg)
-}
-
-#[inline]
-/// Verify that `sig` is a valid signature for `msg`, using the signer's `public_key`.
-pub fn check_signature(public_key: &str, sig: &str, msg: &str) -> Result<bool, cxx::Exception> {
-    ffi::check_signature(public_key, sig, msg)
+pub fn sign_detached(secret_key: &[u8], msg: &str) -> Vec<u8> {
+    ffi::sign_detached(secret_key, msg)
 }
 
 #[inline]

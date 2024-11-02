@@ -44,7 +44,7 @@
               t04-tls = import ./tests/t04-tls.nix testArgs;
             }
             // {
-              clippy = config.packages.harmonia.override ({ enableClippy = true; });
+              clippy = config.packages.harmonia.override { enableClippy = true; };
             };
           devShells.default = pkgs.callPackage ./shell.nix { };
 

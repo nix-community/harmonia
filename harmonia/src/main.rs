@@ -14,6 +14,7 @@ mod narinfo;
 mod narlist;
 mod root;
 mod serve;
+mod signing;
 mod store;
 mod version;
 

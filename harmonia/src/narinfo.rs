@@ -1,10 +1,12 @@
 use std::{error::Error, path::Path};
 
 use actix_web::{http, web, HttpResponse};
+use anyhow::Result;
 use libnixstore::Radix;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
+use crate::config::{Config, SigningKey};
+use crate::signing::{fingerprint_path, sign_string};
 use crate::{cache_control_max_age_1d, nixhash, some_or_404};
 
 #[derive(Debug, Deserialize)]
@@ -26,44 +28,6 @@ struct NarInfo {
     ca: Option<String>,
 }
 
-fn fingerprint_path(
-    store_path: &str,
-    nar_hash: &str,
-    nar_size: u64,
-    refs: &[String],
-) -> Result<Option<String>, Box<dyn Error>> {
-    let root_store_dir = libnixstore::get_store_dir();
-    if store_path[0..root_store_dir.len()] != root_store_dir || &nar_hash[0..7] != "sha256:" {
-        return Ok(None);
-    }
-
-    let mut nar_hash = nar_hash.to_owned();
-    if nar_hash.len() == 71 {
-        nar_hash = format!(
-            "sha256:{}",
-            libnixstore::convert_hash("sha256", &nar_hash[7..], Radix::default())?
-        );
-    }
-
-    if nar_hash.len() != 59 {
-        return Ok(None);
-    }
-
-    for r in refs {
-        if r[0..root_store_dir.len()] != root_store_dir {
-            return Ok(None);
-        }
-    }
-
-    Ok(Some(format!(
-        "1;{};{};{};{}",
-        store_path,
-        nar_hash,
-        nar_size,
-        refs.join(",")
-    )))
-}
-
 fn extract_filename(path: &str) -> Option<String> {
     Path::new(path)
         .file_name()
@@ -73,7 +37,7 @@ fn extract_filename(path: &str) -> Option<String> {
 fn query_narinfo(
     store_path: &str,
     hash: &str,
-    sign_keys: &Vec<String>,
+    sign_keys: &Vec<SigningKey>,
 ) -> Result<NarInfo, Box<dyn Error>> {
     let path_info = libnixstore::query_path_info(store_path, Radix::default())?;
     let mut res = NarInfo {
@@ -110,10 +74,10 @@ fn query_narinfo(
         }
     }
 
+    let fingerprint = fingerprint_path(store_path, &res.nar_hash, res.nar_size, &refs)?;
     for sk in sign_keys {
-        let fingerprint = fingerprint_path(store_path, &res.nar_hash, res.nar_size, &refs)?;
-        if let Some(fp) = fingerprint {
-            res.sigs.push(libnixstore::sign_string(sk, &fp)?);
+        if let Some(ref fp) = fingerprint {
+            res.sigs.push(sign_string(sk, fp));
         }
     }
 

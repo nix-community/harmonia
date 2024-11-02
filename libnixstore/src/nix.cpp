@@ -16,9 +16,7 @@
 #include <nlohmann/json.hpp>
 #include <sodium.h>
 
-#include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 // C++17 std::visit boilerplate
 template <class... Ts> struct overloaded : Ts... {
@@ -129,27 +127,20 @@ rust::String query_path_from_hash_part(rust::Str hash_part) {
       get_store()->queryPathFromHashPart(STRING_VIEW(hash_part)));
 }
 
-rust::String convert_hash(rust::Str algo, rust::Str s, bool to_base_32) {
-  nix::Hash h = nix::Hash::parseAny(STRING_VIEW(s),
-                                    nix::parseHashAlgo(STRING_VIEW(algo)));
-  return h.to_string(
-      to_base_32 ? nix::HashFormat::Nix32 : nix::HashFormat::Base16, false);
-}
-
-rust::String sign_string(rust::Str secret_key, rust::Str msg) {
-  return nix::SecretKey(STRING_VIEW(secret_key)).signDetached(STRING_VIEW(msg));
-}
-
-bool check_signature(rust::Str public_key, rust::Str sig, rust::Str msg) {
-  if (public_key.length() != crypto_sign_PUBLICKEYBYTES) {
-    throw nix::Error("public key is not valid");
+rust::Vec<unsigned char>
+sign_detached(rust::Slice<const unsigned char> secret_key, rust::Str msg) {
+  rust::Vec<unsigned char> sig;
+  sig.reserve(crypto_sign_BYTES);
+  unsigned long long sigLen;
+  for (size_t i = 0; i < crypto_sign_BYTES; i++) {
+    sig.push_back(0);
   }
-  if (sig.length() != crypto_sign_BYTES) {
-    throw nix::Error("signature is not valid");
-  }
-  return crypto_sign_verify_detached((unsigned char *)sig.data(),
-                                     (unsigned char *)msg.data(), msg.length(),
-                                     (unsigned char *)public_key.data()) == 0;
+
+  crypto_sign_detached(sig.data(), &sigLen, (unsigned char *)msg.data(),
+                       msg.size(), (unsigned char *)secret_key.data());
+  sig.truncate(sigLen);
+
+  return sig;
 }
 
 InternalDrv derivation_from_path(rust::Str drv_path) {
@@ -252,11 +243,4 @@ rust::String get_nar_list(rust::Str store_path) {
 
   return j.dump();
 }
-
-class StopDump : public std::exception {
-public:
-  const char *what() const noexcept override {
-    return "Stop dumping nar";
-  }
-};
 } // namespace libnixstore

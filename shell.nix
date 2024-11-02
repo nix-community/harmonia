@@ -19,6 +19,7 @@ pkgs.mkShell {
   nativeBuildInputs = with pkgs; [
     rustc
     cargo
+    cargo-watch
     pkg-config
   ];
   buildInputs = [
