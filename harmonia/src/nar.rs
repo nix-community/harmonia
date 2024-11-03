@@ -352,6 +352,7 @@ pub(crate) async fn get(
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));
     }
+    let store_path = PathBuf::from(&store_path);
 
     let mut rlength = info.size;
     let offset;
@@ -394,7 +395,7 @@ pub(crate) async fn get(
 
             let err = dump_path(settings.store.get_real_path(&store_path), &tx2).await;
             if let Err(err) = err {
-                log::error!("Error dumping path {}: {:?}", store_path, err);
+                log::error!("Error dumping path {}: {:?}", store_path.display(), err);
             }
         });
         // we keep this closure extra to avoid unaligned copies in the non-range request case.
@@ -434,7 +435,7 @@ pub(crate) async fn get(
         task::spawn(async move {
             let err = dump_path(settings.store.get_real_path(&store_path), &tx).await;
             if let Err(err) = err {
-                log::error!("Error dumping path {}: {:?}", store_path, err);
+                log::error!("Error dumping path {}: {:?}", store_path.display(), err);
             }
         });
     };
@@ -456,7 +457,7 @@ mod test {
         let store = Store::new();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
-            let e = dump_path(store.get_real_path(&path), &tx).await;
+            let e = dump_path(store.get_real_path(&PathBuf::from(&path)), &tx).await;
             if let Err(e) = e {
                 eprintln!("Error dumping path: {:?}", e);
             }

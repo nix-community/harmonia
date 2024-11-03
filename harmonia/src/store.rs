@@ -1,9 +1,10 @@
+use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Default, Debug)]
 pub struct Store {
-    virtual_store: String,
-    real_store: Option<String>,
+    virtual_store: PathBuf,
+    real_store: Option<PathBuf>,
 }
 
 impl Store {
@@ -13,30 +14,25 @@ impl Store {
 
         if virtual_store == real_store {
             return Self {
-                virtual_store,
+                virtual_store: PathBuf::from(virtual_store),
                 real_store: None,
             };
         }
         Self {
-            virtual_store,
-            real_store: Some(real_store),
+            virtual_store: PathBuf::from(virtual_store),
+            real_store: Some(PathBuf::from(real_store)),
         }
     }
-    pub fn get_real_path(&self, virtual_path: &str) -> PathBuf {
+    pub fn get_real_path(&self, virtual_path: &Path) -> PathBuf {
         if let Some(real_store) = &self.real_store {
             if virtual_path.starts_with(&self.virtual_store) {
-                return PathBuf::from(format!(
-                    "{}{}",
-                    real_store,
-                    &virtual_path[self.virtual_store.len()..]
-                ));
+                return real_store.join(virtual_path.strip_prefix(&self.virtual_store).unwrap());
             }
         }
         PathBuf::from(virtual_path)
     }
-    pub fn real_store(&self) -> &str {
-        self.real_store
-            .as_ref()
-            .map_or(&self.virtual_store, |s| s.as_str())
+
+    pub fn real_store(&self) -> &Path {
+        self.real_store.as_ref().unwrap_or(&self.virtual_store)
     }
 }

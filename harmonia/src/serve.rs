@@ -51,7 +51,7 @@ fn file_size(bytes: u64) -> String {
 pub(crate) fn directory_listing(
     url_prefix: &Path,
     fs_path: &Path,
-    real_store: &str,
+    real_store: &Path,
 ) -> ServerResult {
     let path_without_store = fs_path.strip_prefix(real_store).unwrap_or(fs_path);
     let index_of = format!(
@@ -135,7 +135,9 @@ pub(crate) async fn get(
     let (hash, dir) = path.into_inner();
     let dir = dir.strip_prefix("/").unwrap_or(&dir);
 
-    let store_path = settings.store.get_real_path(&some_or_404!(nixhash(&hash)));
+    let store_path = settings
+        .store
+        .get_real_path(&PathBuf::from(&some_or_404!(nixhash(&hash))));
     let full_path = if dir == Path::new("") {
         store_path.clone()
     } else {

@@ -147,7 +147,7 @@ pub(crate) async fn get(
     hash: web::Path<String>,
     settings: web::Data<Config>,
 ) -> Result<HttpResponse, Box<dyn Error>> {
-    let store_path = some_or_404!(nixhash(&hash));
+    let store_path = PathBuf::from(some_or_404!(nixhash(&hash)));
 
     let nar_list = get_nar_list(settings.store.get_real_path(&store_path)).await?;
     Ok(HttpResponse::Ok()
