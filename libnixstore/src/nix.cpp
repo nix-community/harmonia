@@ -41,20 +41,6 @@ static nix::ref<nix::Store> get_store() {
   return nix::ref<nix::Store>(_store);
 }
 
-static nix::DerivedPath to_derived_path(const nix::StorePath &store_path) {
-  if (store_path.isDerivation()) {
-    auto drv = get_store()->readDerivation(store_path);
-    return nix::DerivedPath::Built{
-        .drvPath = nix::makeConstantStorePathRef(store_path),
-        .outputs = drv.outputNames(),
-    };
-  } else {
-    return nix::DerivedPath::Opaque{
-        .path = store_path,
-    };
-  }
-}
-
 static inline rust::String
 extract_opt_path(const std::optional<nix::StorePath> &v) {
   // TODO(conni2461): Replace with option
@@ -138,44 +124,6 @@ rust::String get_real_store_dir() {
     return fsstore->getRealStoreDir();
   else
     return get_store_dir();
-}
-
-rust::String get_build_log(rust::Str derivation_path) {
-  auto store = get_store();
-  auto path = store->parseStorePath(STRING_VIEW(derivation_path));
-  auto subs = std::list<nix::ref<nix::Store>>{store};
-  // FIXME:
-  // This now introduces infinite recursion the binary cache is in the
-  // substituter list. We might need to make this a setting by having a list of
-  // substituters instead provided by the user.
-
-  // auto subs = nix::getDefaultSubstituters();
-  // subs.push_front(store);
-
-  auto b = to_derived_path(path);
-
-  for (auto &sub : subs) {
-    nix::LogStore *log_store = dynamic_cast<nix::LogStore *>(&*sub);
-    if (!log_store) {
-      continue;
-    }
-    std::optional<std::string> log = std::visit(
-        overloaded{
-            [&](const nix::DerivedPath::Opaque &bo) {
-              return log_store->getBuildLog(bo.path);
-            },
-            [&](const nix::DerivedPath::Built &bfd) {
-              return log_store->getBuildLog(bfd.drvPath->getBaseStorePath());
-            },
-        },
-        b.raw());
-    if (!log) {
-      continue;
-    }
-    return *log;
-  }
-  // TODO(conni2461): Replace with option
-  return "";
 }
 
 } // namespace libnixstore

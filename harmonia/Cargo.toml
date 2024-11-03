@@ -31,6 +31,8 @@ percent-encoding = "2.3.1"
 anyhow = "1.0.91"
 tempfile = "3.10.1"
 url = "2.4.1"
+async-compression = { version = "0.4.17", features = ["tokio", "bzip2"] }
+tokio-util = "0.7.12"
 
 
 libnixstore = { path = "../libnixstore" }

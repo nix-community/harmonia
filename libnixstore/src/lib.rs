@@ -31,7 +31,6 @@ mod ffi {
         fn query_path_from_hash_part(hash_part: &str) -> Result<String>;
         fn get_store_dir() -> String;
         fn get_real_store_dir() -> String;
-        fn get_build_log(derivation_path: &str) -> Result<String>;
     }
 }
 
@@ -140,14 +139,4 @@ pub fn get_store_dir() -> String {
 /// Returns the physical path to the nix store.
 pub fn get_real_store_dir() -> String {
     ffi::get_real_store_dir()
-}
-
-#[inline]
-#[must_use]
-/// Return the build log of the specified store path, if available, or null otherwise.
-pub fn get_build_log(derivation_path: &str) -> Option<String> {
-    match ffi::get_build_log(derivation_path) {
-        Ok(v) => string_to_opt(v),
-        Err(_) => None,
-    }
 }
