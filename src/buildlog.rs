@@ -2,7 +2,7 @@ use actix_files::NamedFile;
 use actix_web::http::header::HeaderValue;
 use actix_web::Responder;
 use actix_web::{http, web, HttpRequest, HttpResponse};
-use anyhow::Context;
+use anyhow::{Context, Result};
 use async_compression::tokio::bufread::BzDecoder;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
@@ -14,7 +14,7 @@ use tokio_util::io::ReaderStream;
 use crate::config::Config;
 use crate::{cache_control_max_age_1y, cache_control_no_store, nixhash, some_or_404};
 
-async fn query_drv_path(settings: &web::Data<Config>, drv: &str) -> Option<String> {
+async fn query_drv_path(settings: &web::Data<Config>, drv: &str) -> Result<Option<String>> {
     nixhash(settings, if drv.len() > 32 { &drv[0..32] } else { drv }).await
 }
 
@@ -48,7 +48,9 @@ pub(crate) async fn get(
     req: HttpRequest,
     settings: web::Data<Config>,
 ) -> Result<HttpResponse, Box<dyn std::error::Error>> {
-    let drv_path = some_or_404!(query_drv_path(&settings, &drv).await);
+    let drv_path = some_or_404!(query_drv_path(&settings, &drv)
+        .await
+        .context("Could query nar hash in database")?);
     match settings
         .store
         .daemon
@@ -71,7 +73,7 @@ pub(crate) async fn get(
     }
     let build_log = some_or_404!(get_build_log(
         settings.store.real_store(),
-        &PathBuf::from(drv_path)
+        &PathBuf::from(drv_path.to_owned())
     ));
     let ext = match build_log.extension() {
         Some(ext) => ext,
