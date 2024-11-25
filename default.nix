@@ -2,15 +2,11 @@
   pkgs ?
     (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem},
   rustPlatform ? pkgs.rustPlatform,
-  nixVersions ? pkgs.nixVersions,
-  nixForHarmonia ? nixVersions.latest,
   nix-gitignore ? pkgs.nix-gitignore,
   lib ? pkgs.lib,
   clippy ? pkgs.clippy,
   pkg-config ? pkgs.pkg-config,
-  nlohmann_json ? pkgs.nlohmann_json,
   libsodium ? pkgs.libsodium,
-  boost ? pkgs.boost,
   openssl ? pkgs.openssl,
   enableClippy ? false,
 }:
@@ -32,10 +28,7 @@ rustPlatform.buildRustPackage (
 
     nativeBuildInputs = [ pkg-config ] ++ lib.optionals enableClippy [ clippy ];
     buildInputs = [
-      nixForHarmonia
-      nlohmann_json
       libsodium
-      boost
       openssl
     ];
     doCheck = false;
