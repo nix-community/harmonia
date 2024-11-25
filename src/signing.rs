@@ -156,7 +156,6 @@ mod test {
 
     fn test_assets_path() -> PathBuf {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("..");
         path.push("tests");
         path
     }
