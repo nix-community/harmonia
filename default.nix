@@ -34,7 +34,7 @@ rustPlatform.buildRustPackage (
     doCheck = false;
 
     meta = with lib; {
-      description = "Nix binary cache implemented in rust using libnix-store";
+      description = "Nix binary cache implemented in rust";
       homepage = "https://github.com/nix-community/harmonia";
       license = with licenses; [ mit ];
       maintainers = [ maintainers.conni2461 ];
