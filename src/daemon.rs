@@ -48,7 +48,7 @@ impl From<ProtocolVersion> for u64 {
 
 const MINIMUM_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion {
     major: 1,
-    minor: 38,
+    minor: 21,
 };
 
 const CLIENT_VERSION: ProtocolVersion = ProtocolVersion {
@@ -360,12 +360,17 @@ async fn handshake(socket: &mut UnixStream) -> Result<Handshake> {
         .context("Failed to write flags")?; // reserve space, obsolete
 
     /* Exchange features. */
-    let server_features = read_string_list(socket)
-        .await
-        .context("Failed to read daemon features")?;
-    write_string_list(socket, &[])
-        .await
-        .context("Failed to write supported features")?;
+    let server_features = if protocol_version >= 0x126 {
+        let features = read_string_list(socket)
+            .await
+            .context("Failed to read daemon features")?;
+        write_string_list(socket, &[])
+            .await
+            .context("Failed to write supported features")?;
+        features
+    } else {
+        Vec::new()
+    };
 
     let daemon_version = read_string(socket)
         .await
