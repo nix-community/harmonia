@@ -9,6 +9,9 @@ use tokio::{
 
 const SOCKET_PATH: &str = "/nix/var/nix/daemon-socket/socket";
 
+const MAX_STRING_SIZE: u64 = 0x1000000; // 16M
+const MAX_STRING_LIST_SIZE: u64 = 0x10000; // 64K
+
 #[derive(Debug, Default)]
 pub(crate) struct DaemonConnection {
     socket: Option<UnixStream>,
@@ -289,6 +292,9 @@ async fn read_string(socket: &mut UnixStream) -> Result<String> {
     let len = read_num::<u64>(socket)
         .await
         .context("Failed to read string length")?;
+    if len > MAX_STRING_SIZE {
+        bail!("String too long: {} > {}", len, MAX_STRING_SIZE);
+    }
     let aligned_len = (len + 7) & !7; // Align to the next multiple of 8
     let mut buf = vec![0; aligned_len as usize];
     socket
@@ -302,6 +308,9 @@ async fn read_string(socket: &mut UnixStream) -> Result<String> {
 
 async fn read_string_list(socket: &mut UnixStream) -> Result<Vec<String>> {
     let len = read_num::<u64>(socket).await?;
+    if len > MAX_STRING_LIST_SIZE {
+        bail!("String list too long: {} > {}", len, MAX_STRING_LIST_SIZE);
+    }
     let mut res = Vec::with_capacity(len as usize);
     for _ in 0..len {
         res.push(read_string(socket).await?);
