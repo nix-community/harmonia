@@ -1,6 +1,6 @@
 use crate::signing::parse_secret_key;
 use crate::store::Store;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
@@ -32,7 +32,8 @@ pub(crate) struct SigningKey {
 }
 
 // TODO(conni2461): users to restrict access
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     #[serde(default = "default_bind")]
     pub(crate) bind: String,
@@ -46,6 +47,7 @@ pub(crate) struct Config {
     #[serde(default = "default_virtual_store")]
     pub(crate) virtual_nix_store: String,
 
+    #[serde(default)]
     pub(crate) real_nix_store: Option<String>,
 
     #[serde(default)]
@@ -63,18 +65,51 @@ pub(crate) struct Config {
     pub(crate) store: Store,
 }
 
-pub(crate) fn load() -> Result<Config> {
-    let settings_file = std::env::var("CONFIG_FILE").unwrap_or_else(|_| "settings.toml".to_owned());
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            bind: default_bind(),
+            workers: default_workers(),
+            max_connection_rate: default_connection_rate(),
+            priority: default_priority(),
+            virtual_nix_store: default_virtual_store(),
+            real_nix_store: None,
+            sign_key_path: None,
+            sign_key_paths: Vec::new(),
+            tls_cert_path: None,
+            tls_key_path: None,
+            secret_keys: Vec::new(),
+            store: Store::new(default_virtual_store(), None),
+        }
+    }
+}
 
-    let mut settings: Config = if Path::new(&settings_file).exists() {
+impl Config {
+    pub(crate) fn load(settings_file: &Path) -> Result<Config> {
         toml::from_str(
-            &read_to_string(&settings_file)
-                .with_context(|| format!("Couldn't read config file '{settings_file}'"))?,
+            &read_to_string(settings_file).with_context(|| {
+                format!("Couldn't read config file '{}'", settings_file.display())
+            })?,
         )
-        .with_context(|| format!("Couldn't parse config file '{settings_file}'"))?
-    } else {
-        Config::default()
+        .with_context(|| format!("Couldn't parse config file '{}'", settings_file.display()))
+    }
+}
+
+pub(crate) fn load() -> Result<Config> {
+    let mut settings = match std::env::var("CONFIG_FILE") {
+        Err(_) => {
+            if Path::new("settings.toml").exists() {
+                Config::load(Path::new("settings.toml"))?
+            } else {
+                return Ok(Config::default());
+            }
+        }
+        Ok(settings_file) => Config::load(Path::new(&settings_file))?,
     };
+
+    if settings.workers == 0 {
+        bail!("workers must be greater than 0");
+    }
 
     if let Some(sign_key_path) = &settings.sign_key_path {
         log::warn!(
