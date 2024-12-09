@@ -32,7 +32,7 @@ anyhow = "1.0.93"
 tempfile = "3.14.0"
 url = "2.5.4"
 async-compression = { version = "0.4.18", features = ["tokio", "bzip2"] }
-tokio-util = "0.7.12"
+tokio-util = "0.7.13"
 
 
 [build-dependencies]
