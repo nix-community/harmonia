@@ -28,9 +28,9 @@ if [[ "$unpushed_commits" != "" ]]; then
   echo -e "\nThere are unpushed changes, exiting:\n$unpushed_commits" >&2
   exit 1
 fi
-sed -i -e "s!^version = \".*\"\$!version = \"${version}\"!" harmonia/Cargo.toml
+sed -i -e "s!^version = \".*\"\$!version = \"${version}\"!" Cargo.toml
 cargo build
-git add Cargo.lock harmonia/Cargo.toml
+git add Cargo.lock Cargo.toml
 nix flake check -vL
 git commit -m "bump version harmonia-v${version}"
 git tag "harmonia-v${version}"
