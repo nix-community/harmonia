@@ -20,17 +20,14 @@ async fn query_drv_path(settings: &web::Data<Config>, drv: &str) -> Result<Optio
 
 pub fn get_build_log(store: &Path, drv_path: &Path) -> Option<PathBuf> {
     let drv_name = drv_path.file_name()?.as_bytes();
-    let log_path = match store.parent().map(|p| {
+    let log_path = store.parent().map(|p| {
         p.join("var")
             .join("log")
             .join("nix")
             .join("drvs")
             .join(OsStr::from_bytes(&drv_name[0..2]))
             .join(OsStr::from_bytes(&drv_name[2..]))
-    }) {
-        Some(log_path) => log_path,
-        None => return None,
-    };
+    })?;
     if log_path.exists() {
         return Some(log_path);
     }
