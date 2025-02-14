@@ -452,7 +452,7 @@ pub(crate) async fn get(
             while let Some(Ok(data)) = rx2.recv().await {
                 let len = data.len() as u64;
                 if send + len > offset {
-                    let start = if send < offset { offset - send } else { 0 };
+                    let start = offset.saturating_sub(send);
                     let end = if send + data.len() as u64 > offset + rlength {
                         start + rlength
                     } else {
