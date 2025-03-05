@@ -16,4 +16,4 @@ jobs:
         uses: DeterminateSystems/update-flake-lock@v24
         with:
           pr-labels:
-            merge-queue
+            auto-merge
