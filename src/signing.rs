@@ -1,25 +1,13 @@
-use anyhow::bail;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose, Engine};
+use ed25519_dalek::{Signer, SigningKey as DalekSigningKey};
+use log::debug;
 use std::path::Path;
 
 use crate::config::SigningKey;
 
-// this is from the nix32 crate
-
-// omitted: E O U T
+// nix32 encoding constants
 const BASE32_CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
-
-#[link(name = "sodium")]
-extern "C" {
-    fn crypto_sign_detached(
-        sig: *mut u8,
-        sig_len: *mut usize,
-        msg: *const u8,
-        msg_len: usize,
-        sk: *const u8,
-    ) -> i32;
-}
 
 /// Converts the given byte slice to a nix-compatible base32 encoded String.
 fn to_nix_base32(bytes: &[u8]) -> String {
@@ -73,6 +61,8 @@ pub(crate) fn convert_base16_to_nix32(hash_str: &str) -> Result<String> {
 }
 
 pub(crate) fn parse_secret_key(path: &Path) -> Result<SigningKey> {
+    debug!("Parsing signing key from: {}", path.display());
+
     let sign_key = std::fs::read_to_string(path).context("Couldn't read sign_key file")?;
     let (sign_name, sign_key64) = sign_key
         .split_once(':')
@@ -80,7 +70,23 @@ pub(crate) fn parse_secret_key(path: &Path) -> Result<SigningKey> {
     let sign_keyno64 = general_purpose::STANDARD
         .decode(sign_key64.trim())
         .context("Couldn't base64::decode sign key")?;
-    if sign_keyno64.len() == 64 {
+
+    if sign_keyno64.len() == 64 || sign_keyno64.len() == 32 {
+        if sign_keyno64.len() == 32 {
+            let key_bytes: [u8; 32] = sign_keyno64
+                .as_slice()
+                .try_into()
+                .context("Failed to convert key bytes to [u8; 32]")?;
+            let _ = DalekSigningKey::from_bytes(&key_bytes);
+        } else if sign_keyno64.len() == 64 {
+            let keypair_bytes: [u8; 64] = sign_keyno64
+                .as_slice()
+                .try_into()
+                .context("Failed to convert key bytes to [u8; 64]")?;
+            let _ = DalekSigningKey::from_keypair_bytes(&keypair_bytes)
+                .context("Invalid Ed25519 keypair")?;
+        }
+
         return Ok(SigningKey {
             name: sign_name.to_string(),
             key: sign_keyno64,
@@ -88,9 +94,34 @@ pub(crate) fn parse_secret_key(path: &Path) -> Result<SigningKey> {
     }
 
     Err(anyhow::anyhow!(
-        "Invalid signing key. Expected 64 bytes, got {}",
+        "Invalid signing key. Expected 32 or 64 bytes, got {}",
         sign_keyno64.len()
     ))
+}
+
+pub(crate) fn sign_string(sign_key: &SigningKey, msg: &str) -> String {
+    let dalek_key = if sign_key.key.len() == 32 {
+        let key_bytes: [u8; 32] = sign_key
+            .key
+            .as_slice()
+            .try_into()
+            .expect("Invalid key length for Ed25519");
+        DalekSigningKey::from_bytes(&key_bytes)
+    } else if sign_key.key.len() == 64 {
+        let keypair_bytes: [u8; 64] = sign_key
+            .key
+            .as_slice()
+            .try_into()
+            .expect("Invalid key length for Ed25519 keypair");
+        DalekSigningKey::from_keypair_bytes(&keypair_bytes).expect("Invalid Ed25519 keypair")
+    } else {
+        panic!("Invalid signing key length: {}", sign_key.key.len());
+    };
+
+    let signature = dalek_key.sign(msg.as_bytes());
+
+    let base64 = general_purpose::STANDARD.encode(signature.to_bytes());
+    format!("{}:{}", sign_key.name, base64)
 }
 
 pub(crate) fn fingerprint_path(
@@ -129,23 +160,6 @@ pub(crate) fn fingerprint_path(
         nar_size,
         refs.join(",")
     )))
-}
-
-pub(crate) fn sign_string(sign_key: &SigningKey, msg: &str) -> String {
-    let mut signature = vec![0u8; 64]; // crypto_sign_BYTES -> 64
-    let mut signature_len: usize = 0;
-    let msg = msg.as_bytes();
-    unsafe {
-        crypto_sign_detached(
-            signature.as_mut_ptr(),
-            &mut signature_len,
-            msg.as_ptr(),
-            msg.len(),
-            sign_key.key.as_ptr(),
-        )
-    };
-    let base64 = general_purpose::STANDARD.encode(&signature[..signature_len]);
-    format!("{}:{}", sign_key.name, base64)
 }
 
 #[cfg(test)]
