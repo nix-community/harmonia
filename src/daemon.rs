@@ -345,7 +345,7 @@ async fn handshake(socket: &mut UnixStream) -> Result<Handshake> {
     let protocol_version = read_num::<u64>(socket)
         .await
         .context("Failed to read protocol version")?;
-    if protocol_version < MINIMUM_PROTOCOL_VERSION.into() {
+    if protocol_version < u64::from(MINIMUM_PROTOCOL_VERSION) {
         bail!("Protocol version mismatch: got {}", protocol_version);
     }
 

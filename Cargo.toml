@@ -13,7 +13,7 @@ repository = "https://github.com/nix-community/harmonia.git"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix-web = { version = "4", default-features = false, features = ["macros", "compress-zstd", "cookies", "openssl"] }
+actix-web = { version = "4.10.2", default-features = false, features = ["macros", "compress-zstd", "cookies", "openssl"] }
 openssl = { version = "0.10" }
 actix-files = "0.6.6"
 log = "0.4"
