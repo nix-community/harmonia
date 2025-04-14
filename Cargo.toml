@@ -28,7 +28,7 @@ tokio-stream = { version = "0.1" }
 http-range = "0.1"
 askama_escape = "0.13.0"
 percent-encoding = "2.3.1"
-anyhow = "1.0.97"
+anyhow = "1.0.98"
 tempfile = "3.19.1"
 url = "2.5.4"
 async-compression = { version = "0.4.22", features = ["tokio", "bzip2"] }
