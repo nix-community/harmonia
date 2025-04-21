@@ -77,7 +77,9 @@ in
         SIGN_KEY_PATHS = lib.strings.concatMapStringsSep " " (
           credential: "%d/${credential.id}"
         ) credentials;
-        RUST_LOG = "info";
+        # print stack traces
+        RUST_LOG = "actix_web=debug";
+        RUST_BACKTRACE = "1";
       };
 
       # Note: it's important to set this for nix-store, because it wants to use
