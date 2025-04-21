@@ -141,7 +141,7 @@ pub(crate) async fn get(
     let hash = hash.into_inner();
     let store_path = some_or_404!(nixhash(&settings, &hash)
         .await
-        .context("Could query nar hash in database")?);
+        .context("Could not query nar hash in database")?);
     let narinfo = match query_narinfo(
         settings.store.virtual_store(),
         &store_path,

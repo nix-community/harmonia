@@ -139,7 +139,7 @@ pub(crate) async fn get(
         .store
         .get_real_path(&PathBuf::from(&some_or_404!(nixhash(&settings, &hash)
             .await
-            .context("Could query nar hash in database")?)));
+            .context("Could not query nar hash in database")?)));
     let full_path = if dir == Path::new("") {
         store_path.clone()
     } else {

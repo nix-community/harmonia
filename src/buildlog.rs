@@ -47,7 +47,7 @@ pub(crate) async fn get(
 ) -> Result<HttpResponse, Box<dyn std::error::Error>> {
     let drv_path = some_or_404!(query_drv_path(&settings, &drv)
         .await
-        .context("Could query nar hash in database")?);
+        .context("Could not query nar hash in database")?);
     match settings
         .store
         .daemon
