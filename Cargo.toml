@@ -29,11 +29,14 @@ http-range = "0.1"
 askama_escape = "0.13.0"
 percent-encoding = "2.3.1"
 anyhow = "1.0.98"
-tempfile = "3.19.1"
+tempfile = "3.19"
 url = "2.5.4"
 async-compression = { version = "0.4.22", features = ["tokio", "bzip2"] }
 tokio-util = "0.7.14"
-
+ed25519-dalek = "2.1.1"
 
 [build-dependencies]
 pkg-config = "0.3"
+
+[lints.rust]
+unsafe_code = "deny"
