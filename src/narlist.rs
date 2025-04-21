@@ -149,7 +149,7 @@ pub(crate) async fn get(
 ) -> Result<HttpResponse, Box<dyn Error>> {
     let store_path = PathBuf::from(some_or_404!(nixhash(&settings, &hash)
         .await
-        .context("Could query nar hash in database")?));
+        .context("Could not query nar hash in database")?));
 
     let nar_list = get_nar_list(settings.store.get_real_path(&store_path)).await?;
     Ok(HttpResponse::Ok()
