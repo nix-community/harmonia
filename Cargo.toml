@@ -37,3 +37,6 @@ ed25519-dalek = "2.1.0"
 
 [build-dependencies]
 pkg-config = "0.3"
+
+[lints.rust]
+unsafe_code = "deny"
