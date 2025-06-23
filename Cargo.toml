@@ -31,7 +31,7 @@ percent-encoding = "2.3.1"
 anyhow = "1.0.98"
 tempfile = "3.20"
 url = "2.5.4"
-async-compression = { version = "0.4.24", features = ["tokio", "bzip2"] }
+async-compression = { version = "0.4.25", features = ["tokio", "bzip2"] }
 tokio-util = "0.7.15"
 ed25519-dalek = "2.1.1"
 
