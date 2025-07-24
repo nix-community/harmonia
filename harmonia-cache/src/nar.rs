@@ -341,14 +341,18 @@ pub(crate) async fn get(
         path.outhash.as_deref()
     };
     let store_path = match outhash {
-        Some(outhash) => settings
-            .store
-            .daemon
-            .lock()
-            .await
-            .query_path_from_hash_part(outhash)
-            .await
-            .context("failed to query path from hash part")?,
+        Some(outhash) => {
+            let mut daemon_guard = settings
+                .store
+                .get_daemon()
+                .await
+                .context("Failed to get daemon connection")?;
+            let daemon = daemon_guard.as_mut().unwrap();
+            daemon
+                .query_path_from_hash_part(outhash)
+                .await
+                .context("failed to query path from hash part")?
+        }
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(crate::cache_control_no_store())
@@ -365,22 +369,23 @@ pub(crate) async fn get(
     };
 
     // lookup the path info.
-    let info = match settings
-        .store
-        .daemon
-        .lock()
-        .await
-        .query_path_info(&store_path)
-        .await?
-        .path
-    {
-        Some(info) => info,
-        None => {
-            return Ok(HttpResponse::NotFound()
-                .insert_header(crate::cache_control_no_store())
-                .body("path info not found"))
+    let info = {
+        let mut daemon_guard = settings
+            .store
+            .get_daemon()
+            .await
+            .context("Failed to get daemon connection")?;
+        let daemon = daemon_guard.as_mut().unwrap();
+
+        match daemon.query_path_info(&store_path).await? {
+            Some(info) => info,
+            None => {
+                return Ok(HttpResponse::NotFound()
+                    .insert_header(crate::cache_control_no_store())
+                    .body("path info not found"))
+            }
         }
-    };
+    }; // daemon_guard is dropped here
 
     let info_hash_nix32 = match convert_base16_to_nix32(&info.hash) {
         Ok(info_hash_nix32) => info_hash_nix32,
@@ -395,8 +400,6 @@ pub(crate) async fn get(
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));
     }
-
-    let store_path = PathBuf::from(store_path);
 
     let mut rlength = info.nar_size;
     let offset;
@@ -444,7 +447,7 @@ pub(crate) async fn get(
 
             let err = dump_path(settings.store.get_real_path(&store_path), &tx2).await;
             if let Err(err) = err {
-                log::error!("Error dumping path {}: {:?}", store_path.display(), err);
+                log::error!("Error dumping path {}: {:?}", store_path, err);
             }
         });
         // we keep this closure extra to avoid unaligned copies in the non-range request case.
@@ -484,7 +487,7 @@ pub(crate) async fn get(
         task::spawn(async move {
             let err = dump_path(settings.store.get_real_path(&store_path), &tx).await;
             if let Err(err) = err {
-                log::error!("Error dumping path {}: {:?}", store_path.display(), err);
+                log::error!("Error dumping path {}: {:?}", store_path, err);
             }
         });
     };
@@ -500,13 +503,15 @@ pub(crate) async fn get(
 mod test {
     use super::*;
     use crate::store::Store;
+    use harmonia_store_remote::protocol::StorePath;
     use std::process::Command;
 
     async fn dump_to_vec(path: String) -> Result<Vec<u8>> {
         let store = Store::new("/nix/store".to_string(), None);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
-            let e = dump_path(store.get_real_path(&PathBuf::from(&path)), &tx).await;
+            let store_path = StorePath::new(path);
+            let e = dump_path(store.get_real_path(&store_path), &tx).await;
             if let Err(e) = e {
                 eprintln!("Error dumping path: {:?}", e);
             }

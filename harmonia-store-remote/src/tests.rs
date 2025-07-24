@@ -1,0 +1,390 @@
+use crate::client::DaemonClient;
+use crate::protocol::{StorePath, ValidPathInfo, CURRENT_PROTOCOL_VERSION};
+use crate::serialization::{Deserialize, Serialize};
+use std::io::Cursor;
+use std::path::Path;
+use std::process::Command;
+use std::time::Duration;
+use tempfile::TempDir;
+use tokio::time::sleep;
+
+const SOCKET_PATH: &str = "/nix/var/nix/daemon-socket/socket";
+
+#[tokio::test]
+async fn test_serialization_roundtrip() {
+    // Test u64
+    let num: u64 = 42;
+    let mut buf = Vec::new();
+    num.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    let mut cursor = Cursor::new(buf);
+    let deserialized = u64::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(num, deserialized);
+
+    // Test string
+    let s = "hello world".to_string();
+    let mut buf = Vec::new();
+    s.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    let mut cursor = Cursor::new(buf);
+    let deserialized = String::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(s, deserialized);
+
+    // Test string padding
+    let s = "test"; // 4 bytes, needs 4 bytes padding
+    let mut buf = Vec::new();
+    s.to_string()
+        .serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(buf.len(), 8 + 8); // 8 bytes for length + 8 bytes for padded string
+
+    // Test bool
+    let b = true;
+    let mut buf = Vec::new();
+    b.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    let mut cursor = Cursor::new(buf);
+    let deserialized = bool::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(b, deserialized);
+
+    // Test Option<String>
+    let opt: Option<String> = Some("test".to_string());
+    let mut buf = Vec::new();
+    opt.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    let mut cursor = Cursor::new(buf);
+    let deserialized = Option::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(opt, deserialized);
+
+    // Test None
+    let opt: Option<String> = None;
+    let mut buf = Vec::new();
+    opt.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    let mut cursor = Cursor::new(buf);
+    let deserialized = Option::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(opt, deserialized);
+
+    // Test Vec<String>
+    let vec = vec!["one".to_string(), "two".to_string(), "three".to_string()];
+    let mut buf = Vec::new();
+    vec.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    let mut cursor = Cursor::new(buf);
+    let deserialized = Vec::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(vec, deserialized);
+}
+
+#[tokio::test]
+async fn test_valid_path_info_serialization() {
+    let info = ValidPathInfo {
+        deriver: Some(StorePath::new("/nix/store/abc-test.drv".to_string())),
+        hash: "sha256:abcdef".to_string(),
+        references: vec![
+            StorePath::new("/nix/store/ref1".to_string()),
+            StorePath::new("/nix/store/ref2".to_string()),
+        ],
+        registration_time: 1234567890,
+        nar_size: 9876,
+        ultimate: true,
+        signatures: vec!["sig1".to_string(), "sig2".to_string()],
+        content_address: Some("fixed:sha256:xyz".to_string()),
+    };
+
+    let mut buf = Vec::new();
+    info.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+    let mut cursor = Cursor::new(buf);
+    let deserialized = ValidPathInfo::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+        .await
+        .unwrap();
+
+    assert_eq!(info, deserialized);
+}
+
+async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = DaemonClient::connect(socket_path).await?;
+
+    // Create a test file and add it to the store
+    let temp_dir = TempDir::new()?;
+    let temp_file = temp_dir.path().join("test.txt");
+    std::fs::write(&temp_file, b"hello from harmonia-store-remote")?;
+
+    let output = Command::new("nix-store")
+        .arg("--add")
+        .arg(&temp_file)
+        .output()?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "nix-store --add failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+
+    let store_path = String::from_utf8(output.stdout)?.trim().to_string();
+    let store_path = StorePath::new(store_path);
+
+    // Test is_valid_path
+    let is_valid = client.is_valid_path(&store_path).await?;
+    assert!(is_valid);
+
+    // Test query_path_info
+    let path_info = client.query_path_info(&store_path).await?;
+    assert!(path_info.is_some());
+    let path_info = path_info.unwrap();
+    assert!(path_info.nar_size > 0);
+    assert!(!path_info.hash.is_empty());
+
+    // Test query_path_from_hash_part
+    let hash_part = store_path
+        .as_str()
+        .strip_prefix("/nix/store/")
+        .ok_or("Invalid store path format")?
+        .chars()
+        .take(32)
+        .collect::<String>();
+
+    let found_path = client.query_path_from_hash_part(&hash_part).await?;
+    assert_eq!(found_path, Some(store_path));
+
+    // Test with non-existent hash
+    let not_found = client
+        .query_path_from_hash_part("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+        .await?;
+    assert_eq!(not_found, None);
+
+    // Test is_valid_path with non-existent path
+    let invalid_path =
+        StorePath::new("/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake".to_string());
+    let is_valid = client.is_valid_path(&invalid_path).await?;
+    assert!(!is_valid);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_daemon_integration() -> Result<(), Box<dyn std::error::Error>> {
+    if !Path::new(SOCKET_PATH).exists() {
+        eprintln!("Skipping test: nix-daemon socket not found");
+        return Ok(());
+    }
+
+    test_daemon_operations(Path::new(SOCKET_PATH)).await
+}
+
+async fn wait_for_daemon_server(
+    socket_path: &Path,
+    timeout: std::time::Duration,
+) -> Result<DaemonClient, Box<dyn std::error::Error>> {
+    let start = std::time::Instant::now();
+    let retry_interval = Duration::from_millis(10);
+
+    loop {
+        match DaemonClient::connect(socket_path).await {
+            Ok(client) => return Ok(client),
+            Err(e) => {
+                if start.elapsed() > timeout {
+                    return Err(
+                        format!("Failed to connect to daemon after {timeout:?}: {e}").into(),
+                    );
+                }
+                sleep(retry_interval).await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::error::ProtocolError;
+    use crate::server::{DaemonServer, RequestHandler};
+    use std::collections::HashMap;
+    use std::time::Duration;
+    use tempfile::tempdir;
+
+    // Create a test handler with some mock data
+    #[derive(Clone)]
+    struct TestHandler {
+        store_paths: HashMap<String, ValidPathInfo>,
+        hash_to_path: HashMap<String, StorePath>,
+    }
+
+    impl TestHandler {
+        fn new() -> Self {
+            let mut handler = Self {
+                store_paths: HashMap::new(),
+                hash_to_path: HashMap::new(),
+            };
+
+            // Add some test data
+            let test_path = StorePath::new(
+                "/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1".to_string(),
+            );
+            let test_info = ValidPathInfo {
+                deriver: Some(StorePath::new(
+                    "/nix/store/xyz789abc123def456ghi789jkl012m-hello-2.12.1.drv".to_string(),
+                )),
+                hash: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                    .to_string(),
+                references: vec![
+                    StorePath::new(
+                        "/nix/store/111111111111111111111111111111111-glibc-2.38".to_string(),
+                    ),
+                    StorePath::new(
+                        "/nix/store/222222222222222222222222222222222-gcc-13.2.0-lib".to_string(),
+                    ),
+                ],
+                registration_time: 1700000000,
+                nar_size: 123456,
+                ultimate: false,
+                signatures: vec![
+                    "cache.nixos.org-1:signature123abc".to_string(),
+                    "test-cache-1:testsignature456def".to_string(),
+                ],
+                content_address: Some(
+                    "fixed:sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+                        .to_string(),
+                ),
+            };
+
+            handler
+                .store_paths
+                .insert(test_path.as_str().to_string(), test_info);
+            handler.hash_to_path.insert(
+                "abc123def456ghi789jkl012mno345p".to_string(),
+                test_path.clone(),
+            );
+
+            // Add another test path
+            let bash_path = StorePath::new(
+                "/nix/store/qrs456tuv789wxy012abc345def678g-bash-5.2-p21".to_string(),
+            );
+            let bash_info = ValidPathInfo {
+                deriver: Some(StorePath::new(
+                    "/nix/store/mno345pqr678stu901vwx234yz567ab-bash-5.2-p21.drv".to_string(),
+                )),
+                hash: "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
+                    .to_string(),
+                references: vec![
+                    StorePath::new(
+                        "/nix/store/111111111111111111111111111111111-glibc-2.38".to_string(),
+                    ),
+                    StorePath::new(
+                        "/nix/store/333333333333333333333333333333333-readline-8.2p7".to_string(),
+                    ),
+                    StorePath::new(
+                        "/nix/store/444444444444444444444444444444444-ncurses-6.4".to_string(),
+                    ),
+                ],
+                registration_time: 1700000100,
+                nar_size: 987654,
+                ultimate: true,
+                signatures: vec!["cache.nixos.org-1:bashsignature789xyz".to_string()],
+                content_address: None,
+            };
+
+            handler
+                .store_paths
+                .insert(bash_path.as_str().to_string(), bash_info);
+            handler
+                .hash_to_path
+                .insert("qrs456tuv789wxy012abc345def678g".to_string(), bash_path);
+
+            handler
+        }
+    }
+
+    impl RequestHandler for TestHandler {
+        async fn handle_query_path_info(
+            &self,
+            path: &StorePath,
+        ) -> Result<Option<ValidPathInfo>, ProtocolError> {
+            Ok(self.store_paths.get(path.as_str()).cloned())
+        }
+
+        async fn handle_query_path_from_hash_part(
+            &self,
+            hash: &str,
+        ) -> Result<Option<StorePath>, ProtocolError> {
+            // Support partial hash matching like real nix-daemon
+            for (full_hash, path) in &self.hash_to_path {
+                if full_hash.starts_with(hash) {
+                    return Ok(Some(path.clone()));
+                }
+            }
+            Ok(None)
+        }
+
+        async fn handle_is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
+            Ok(self.store_paths.contains_key(path.as_str()))
+        }
+    }
+
+    // Create a temporary directory for the socket
+    let temp_dir = tempdir()?;
+    let socket_path = temp_dir.path().join("test-daemon.socket");
+
+    // Spawn the server
+    let server = DaemonServer::new(TestHandler::new(), socket_path.clone());
+    let server_handle = tokio::spawn(async move {
+        let _ = server.serve().await;
+    });
+
+    // Wait for server to be ready
+    let mut client = wait_for_daemon_server(&socket_path, Duration::from_secs(5)).await?;
+
+    // Test valid path operations
+    let hello_path =
+        StorePath::new("/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1".to_string());
+    assert!(client.is_valid_path(&hello_path).await?);
+
+    let path_info = client.query_path_info(&hello_path).await?;
+    assert!(path_info.is_some());
+    let info = path_info.unwrap();
+    assert_eq!(info.nar_size, 123456);
+    assert_eq!(info.references.len(), 2);
+    assert_eq!(info.signatures.len(), 2);
+    assert!(info.content_address.is_some());
+
+    // Test hash part lookup
+    let found_path = client.query_path_from_hash_part("abc123").await?;
+    assert_eq!(found_path, Some(hello_path.clone()));
+
+    // Test partial hash matching
+    let bash_path = client.query_path_from_hash_part("qrs456").await?;
+    assert!(bash_path.is_some());
+    assert!(bash_path.unwrap().as_str().contains("bash"));
+
+    // Test with non-existent data
+    let fake_path = StorePath::new("/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake".to_string());
+    assert!(!client.is_valid_path(&fake_path).await?);
+    assert_eq!(client.query_path_info(&fake_path).await?, None);
+    assert_eq!(client.query_path_from_hash_part("zzzzz").await?, None);
+
+    // Cleanup: abort the server task
+    server_handle.abort();
+
+    Ok(())
+}

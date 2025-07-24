@@ -1,5 +1,5 @@
 [workspace]
-members = ["harmonia-cache", "harmonia-client", "harmonia-daemon"]
+members = ["harmonia-cache", "harmonia-client", "harmonia-daemon", "harmonia-store-remote"]
 resolver = "2"
 
 [workspace.package]

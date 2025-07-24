@@ -12,12 +12,12 @@ use std::{fmt::Display, time::Duration};
 use url::Url;
 
 use actix_web::{http, web, App, HttpResponse, HttpServer};
+use harmonia_store_remote::protocol::StorePath;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 mod buildlog;
 mod cacheinfo;
 mod config;
-mod daemon;
 mod health;
 mod nar;
 mod narinfo;
@@ -28,15 +28,15 @@ mod signing;
 mod store;
 mod version;
 
-async fn nixhash(settings: &web::Data<Config>, hash: &str) -> Result<Option<String>> {
+async fn nixhash(settings: &web::Data<Config>, hash: &str) -> Result<Option<StorePath>> {
     if hash.len() != 32 {
         bail!("Hash is too short");
     }
-    settings
-        .store
-        .daemon
-        .lock()
-        .await
+
+    let mut daemon_guard = settings.store.get_daemon().await?;
+    let daemon = daemon_guard.as_mut().unwrap();
+
+    daemon
         .query_path_from_hash_part(hash)
         .await
         .context("Failed to query path")

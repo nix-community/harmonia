@@ -4,6 +4,7 @@ use actix_web::Responder;
 use actix_web::{http, web, HttpRequest, HttpResponse};
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::BzDecoder;
+use harmonia_store_remote::protocol::StorePath;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -14,11 +15,12 @@ use tokio_util::io::ReaderStream;
 use crate::config::Config;
 use crate::{cache_control_max_age_1y, cache_control_no_store, nixhash, some_or_404};
 
-async fn query_drv_path(settings: &web::Data<Config>, drv: &str) -> Result<Option<String>> {
+async fn query_drv_path(settings: &web::Data<Config>, drv: &str) -> Result<Option<StorePath>> {
     nixhash(settings, if drv.len() > 32 { &drv[0..32] } else { drv }).await
 }
 
-pub fn get_build_log(store: &Path, drv_path: &Path) -> Option<PathBuf> {
+pub fn get_build_log(store: &Path, drv_path: &StorePath) -> Option<PathBuf> {
+    let drv_path = Path::new(drv_path.as_str());
     let drv_name = drv_path.file_name()?.as_bytes();
     let log_path = store.parent().map(|p| {
         p.join("var")
@@ -48,14 +50,14 @@ pub(crate) async fn get(
     let drv_path = some_or_404!(query_drv_path(&settings, &drv)
         .await
         .context("Could not query nar hash in database")?);
-    match settings
+    let mut daemon_guard = settings
         .store
-        .daemon
-        .lock()
+        .get_daemon()
         .await
-        .is_valid_path(&drv_path)
-        .await
-    {
+        .context("Failed to get daemon connection")?;
+    let daemon = daemon_guard.as_mut().unwrap();
+
+    match daemon.is_valid_path(&drv_path).await {
         Ok(true) => (),
         Ok(false) => {
             return Ok(HttpResponse::NotFound()
@@ -68,10 +70,7 @@ pub(crate) async fn get(
                 .body(format!("Failed to query path info: {e}")))
         }
     }
-    let build_log = some_or_404!(get_build_log(
-        settings.store.real_store(),
-        &PathBuf::from(drv_path.to_owned())
-    ));
+    let build_log = some_or_404!(get_build_log(settings.store.real_store(), &drv_path));
     let ext = match build_log.extension() {
         Some(ext) => ext,
         None => {

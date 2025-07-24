@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose, Engine};
 use ed25519_dalek::{Signer, SigningKey as DalekSigningKey};
+use harmonia_store_remote::protocol::StorePath;
 use std::path::Path;
 
 use crate::config::SigningKey;
@@ -125,15 +126,16 @@ pub(crate) fn sign_string(sign_key: &SigningKey, msg: &str) -> String {
 
 pub(crate) fn fingerprint_path(
     virtual_nix_store: &str,
-    store_path: &str,
+    store_path: &StorePath,
     nar_hash: &str,
     nar_size: u64,
-    refs: &[String],
+    refs: &[StorePath],
 ) -> Result<Option<String>> {
-    if store_path.len() < virtual_nix_store.len() {
+    let store_path_str = store_path.as_str();
+    if store_path_str.len() < virtual_nix_store.len() {
         bail!("store path too short");
     }
-    if &store_path[0..virtual_nix_store.len()] != virtual_nix_store {
+    if &store_path_str[0..virtual_nix_store.len()] != virtual_nix_store {
         bail!("store path does not start with store dir");
     }
 
@@ -147,17 +149,30 @@ pub(crate) fn fingerprint_path(
     }
 
     for r in refs {
-        if &r[0..virtual_nix_store.len()] != virtual_nix_store {
+        if &r.as_str()[0..virtual_nix_store.len()] != virtual_nix_store {
             bail!("ref path invalid");
         }
     }
 
+    let refs_str = if refs.is_empty() {
+        String::new()
+    } else {
+        // Pre-calculate capacity: sum of all lengths + commas
+        let capacity = refs.iter().map(|r| r.as_str().len()).sum::<usize>() + refs.len() - 1;
+        refs.iter()
+            .map(|r| r.as_str())
+            .fold(String::with_capacity(capacity), |mut acc, r| {
+                if !acc.is_empty() {
+                    acc.push(',');
+                }
+                acc.push_str(r);
+                acc
+            })
+    };
+
     Ok(Some(format!(
         "1;{};{};{};{}",
-        store_path,
-        nar_hash,
-        nar_size,
-        refs.join(",")
+        store_path_str, nar_hash, nar_size, refs_str
     )))
 }
 
@@ -169,6 +184,7 @@ mod test {
 
     fn test_assets_path() -> PathBuf {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("..");
         path.push("tests");
         path
     }
@@ -177,18 +193,20 @@ mod test {
     fn test_signing() -> Result<()> {
         let sign_key = test_assets_path().join("cache.sk");
 
-        let references = [
-            String::from("/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1"),
-            String::from("/nix/store/sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36"),
+        let store_path =
+            StorePath::new("/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_string());
+        let references = vec![
+            StorePath::new("/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_string()),
+            StorePath::new("/nix/store/sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36".to_string()),
         ];
         let key = parse_secret_key(&sign_key)
             .with_context(|| format!("Could not parse signing key: {}", sign_key.display()))?;
         let finger_print = fingerprint_path(
             "/nix/store",
-            "/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1",
+            &store_path,
             "sha256:1mkvday29m2qxg1fnbv8xh9s6151bh8a2xzhh0k86j7lqhyfwibh",
             226560,
-            references.as_ref(),
+            &references,
         )?;
         let signature = sign_string(&key, &finger_print.unwrap());
         assert_eq!(signature, "cache.example.com-1:6wzr1QlOPHG+knFuJIaw+85Z5ivwbdI512JikexG+nQ7JDSZM2hw8zzlcLrguzoLEpCA9VzaEEQflZEHVwy9AA==");

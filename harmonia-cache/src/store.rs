@@ -1,5 +1,6 @@
-use crate::daemon::DaemonConnection;
 use core::str;
+use harmonia_store_remote::client::DaemonClient;
+use harmonia_store_remote::protocol::StorePath;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::sync::Mutex;
@@ -8,7 +9,7 @@ use tokio::sync::Mutex;
 pub struct Store {
     virtual_store: String,
     real_store: Option<String>,
-    pub daemon: Mutex<DaemonConnection>,
+    pub daemon: Mutex<Option<DaemonClient>>,
 }
 
 impl Store {
@@ -16,10 +17,11 @@ impl Store {
         Self {
             virtual_store,
             real_store,
-            daemon: Default::default(),
+            daemon: Mutex::new(None),
         }
     }
-    pub fn get_real_path(&self, virtual_path: &Path) -> PathBuf {
+    pub fn get_real_path(&self, store_path: &StorePath) -> PathBuf {
+        let virtual_path = Path::new(store_path.as_str());
         if self.real_store.is_some() && virtual_path.starts_with(&self.virtual_store) {
             return self
                 .real_store()
@@ -34,5 +36,24 @@ impl Store {
 
     pub fn virtual_store(&self) -> &str {
         &self.virtual_store
+    }
+
+    pub async fn get_daemon(
+        &self,
+    ) -> Result<tokio::sync::MutexGuard<'_, Option<DaemonClient>>, anyhow::Error> {
+        use anyhow::Context;
+
+        let mut daemon_guard = self.daemon.lock().await;
+
+        // Connect to daemon if not already connected
+        if daemon_guard.is_none() {
+            let client =
+                DaemonClient::connect(std::path::Path::new("/nix/var/nix/daemon-socket/socket"))
+                    .await
+                    .context("Failed to connect to nix daemon")?;
+            *daemon_guard = Some(client);
+        }
+
+        Ok(daemon_guard)
     }
 }

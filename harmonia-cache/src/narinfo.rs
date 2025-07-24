@@ -3,6 +3,7 @@ use std::{error::Error, path::Path};
 use actix_web::{http, web, HttpResponse};
 use anyhow::Context;
 use anyhow::Result;
+use harmonia_store_remote::protocol::StorePath;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, SigningKey};
@@ -36,20 +37,15 @@ fn extract_filename(path: &str) -> Option<String> {
 
 async fn query_narinfo(
     virtual_nix_store: &str,
-    store_path: &str,
+    store_path: &StorePath,
     hash: &str,
     sign_keys: &Vec<SigningKey>,
     settings: &web::Data<Config>,
 ) -> Result<Option<NarInfo>> {
-    let path_info = match settings
-        .store
-        .daemon
-        .lock()
-        .await
-        .query_path_info(store_path)
-        .await?
-        .path
-    {
+    let mut daemon_guard = settings.store.get_daemon().await?;
+    let daemon = daemon_guard.as_mut().unwrap();
+
+    let path_info = match daemon.query_path_info(store_path).await? {
         Some(info) => info,
         None => {
             return Ok(None);
@@ -58,27 +54,25 @@ async fn query_narinfo(
     let nar_hash =
         convert_base16_to_nix32(&path_info.hash).context("failed to convert path info hash")?;
     let mut res = NarInfo {
-        store_path: store_path.into(),
+        store_path: store_path.to_string(),
         url: format!("nar/{}.nar?hash={}", nar_hash, hash),
         compression: "none".into(),
         nar_hash: format!("sha256:{}", nar_hash),
         nar_size: path_info.nar_size,
         references: vec![],
-        deriver: if path_info.deriver.is_empty() {
-            None
-        } else {
-            extract_filename(&path_info.deriver)
-        },
+        deriver: path_info
+            .deriver
+            .as_ref()
+            .and_then(|d| extract_filename(&d.to_string())),
         sigs: vec![],
-        ca: path_info.content_address,
+        ca: path_info.content_address.clone(),
     };
 
-    let refs = path_info.references.clone();
     if !path_info.references.is_empty() {
         res.references = path_info
             .references
-            .into_iter()
-            .filter_map(|r| extract_filename(&r))
+            .iter()
+            .filter_map(|r| extract_filename(r.as_str()))
             .collect::<Vec<String>>();
     }
 
@@ -87,7 +81,7 @@ async fn query_narinfo(
         store_path,
         &res.nar_hash,
         res.nar_size,
-        &refs,
+        &path_info.references,
     )?;
     for sk in sign_keys {
         if let Some(ref fp) = fingerprint {
@@ -96,7 +90,7 @@ async fn query_narinfo(
     }
 
     if res.sigs.is_empty() {
-        res.sigs.clone_from(&path_info.sigs);
+        res.sigs = path_info.signatures.clone();
     }
 
     Ok(Some(res))
