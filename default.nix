@@ -8,6 +8,8 @@
   pkg-config ? pkgs.pkg-config,
   libsodium ? pkgs.libsodium,
   openssl ? pkgs.openssl,
+  nix ? pkgs.nix,
+  makeWrapper ? pkgs.makeWrapper,
   enableClippy ? false,
 }:
 
@@ -26,17 +28,21 @@ rustPlatform.buildRustPackage (
       ]
     );
     cargoLock.lockFile = ./Cargo.lock;
-    cargoBuildFlags = [
-      "-p"
-      "harmonia-cache"
-    ];
 
-    nativeBuildInputs = [ pkg-config ] ++ lib.optionals enableClippy [ clippy ];
+    nativeBuildInputs = [
+      pkg-config
+      makeWrapper
+    ] ++ lib.optionals enableClippy [ clippy ];
     buildInputs = [
       libsodium
       openssl
     ];
     doCheck = false;
+
+    postInstall = ''
+      wrapProgram $out/bin/harmonia \
+        --prefix PATH : ${lib.makeBinPath [ nix ]}
+    '';
 
     meta = with lib; {
       description = "Nix binary cache implemented in rust";

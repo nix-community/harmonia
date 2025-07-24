@@ -7,6 +7,10 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "harmonia"
+path = "src/main.rs"
+
 [dependencies]
 
 [lints]
