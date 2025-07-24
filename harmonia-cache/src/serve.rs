@@ -8,6 +8,7 @@ use askama_escape::{escape as escape_html_entity, Html};
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use std::fmt::Write;
 
+use crate::template::{DIRECTORY_ROW_TEMPLATE, DIRECTORY_TEMPLATE, render, render_page};
 use crate::{
     config::Config, nixhash, some_or_404, ServerResult, BOOTSTRAP_SOURCE, CARGO_NAME, CARGO_VERSION,
 };
@@ -38,7 +39,7 @@ macro_rules! encode_file_name {
 // human readable file size
 fn file_size(bytes: u64) -> String {
     if bytes < 1024 {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
         format!("{:.2} KiB", bytes as f64 / 1024.0)
     } else if bytes < 1024 * 1024 * 1024 {

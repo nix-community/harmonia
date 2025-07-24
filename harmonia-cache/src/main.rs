@@ -119,7 +119,9 @@ async fn inner_main() -> Result<()> {
     let config_data = c.clone();
 
     log::info!("listening on {}", c.bind);
-    let mut server = HttpServer::new(move || {
+    let mut server = 
+        
+        HttpServer::new(move || {
         App::new()
             .wrap(middleware::Compress::default())
             .app_data(config_data.clone())
@@ -129,7 +131,7 @@ async fn inner_main() -> Result<()> {
             .route("/{hash}.narinfo", web::get().to(narinfo::get))
             .route("/{hash}.narinfo", web::head().to(narinfo::get))
             .route(
-                &format!("/nar/{{narhash:[{0}]{{52}}}}.nar", NIXBASE32_ALPHABET),
+                &format!("/nar/{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar"),
                 web::get().to(nar::get),
             )
             .route(
@@ -137,8 +139,7 @@ async fn inner_main() -> Result<()> {
                 // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
                 // will stay in client caches for a while - so support them anyway.
                 &format!(
-                    "/nar/{{outhash:[{0}]{{32}}}}-{{narhash:[{0}]{{52}}}}.nar",
-                    NIXBASE32_ALPHABET
+                    "/nar/{{outhash:[{NIXBASE32_ALPHABET}]{{32}}}}-{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar"
                 ),
                 web::get().to(nar::get),
             )
@@ -196,7 +197,5 @@ async fn inner_main() -> Result<()> {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    inner_main()
-        .await
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    inner_main().await.map_err(std::io::Error::other)
 }

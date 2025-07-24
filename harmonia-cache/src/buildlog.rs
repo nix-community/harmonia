@@ -65,7 +65,7 @@ pub(crate) async fn get(
         Err(e) => {
             return Ok(HttpResponse::InternalServerError()
                 .insert_header(cache_control_no_store())
-                .body(format!("Failed to query path info: {}", e)))
+                .body(format!("Failed to query path info: {e}")))
         }
     }
     let build_log = some_or_404!(get_build_log(

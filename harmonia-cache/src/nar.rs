@@ -428,7 +428,7 @@ pub(crate) async fn get(
                     ),
                 ));
             } else {
-                res.insert_header((http::header::CONTENT_RANGE, format!("bytes */{}", rlength)));
+                res.insert_header((http::header::CONTENT_RANGE, format!("bytes */{rlength}")));
                 return Ok(res.status(http::StatusCode::RANGE_NOT_SATISFIABLE).finish());
             };
         } else {
@@ -555,7 +555,7 @@ mod test {
                     line.push(' ');
                 }
             }
-            println!("{}", line);
+            println!("{line}");
             i += 16;
         }
     }

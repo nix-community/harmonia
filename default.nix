@@ -13,7 +13,8 @@
 
 rustPlatform.buildRustPackage (
   {
-    name = "harmonia";
+    pname = "harmonia";
+    version = "2.1.0";
     src = nix-gitignore.gitignoreSource [ ] (
       lib.sources.sourceFilesBySuffices (lib.cleanSource ./.) [
         ".rs"
@@ -25,6 +26,10 @@ rustPlatform.buildRustPackage (
       ]
     );
     cargoLock.lockFile = ./Cargo.lock;
+    cargoBuildFlags = [
+      "-p"
+      "harmonia-cache"
+    ];
 
     nativeBuildInputs = [ pkg-config ] ++ lib.optionals enableClippy [ clippy ];
     buildInputs = [

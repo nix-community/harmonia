@@ -776,7 +776,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "harmonia"
+name = "harmonia-cache"
 version = "2.1.0"
 dependencies = [
  "actix-files",
@@ -802,6 +802,14 @@ dependencies = [
  "toml",
  "url",
 ]
+
+[[package]]
+name = "harmonia-client"
+version = "2.1.0"
+
+[[package]]
+name = "harmonia-daemon"
+version = "2.1.0"
 
 [[package]]
 name = "hashbrown"

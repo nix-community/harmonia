@@ -252,7 +252,7 @@ mod test {
         println!("get_nar_list:");
         println!("{}", serde_json::to_string_pretty(&json.root).unwrap());
         println!("nix nar ls --json --recursive:");
-        println!("{}", pretty_string);
+        println!("{pretty_string}");
         assert_eq!(json.root, reference_json);
 
         Ok(())
