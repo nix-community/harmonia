@@ -88,7 +88,7 @@ in
       environment.HOME = "/run/harmonia";
 
       serviceConfig = {
-        ExecStart = "${cfg.package}/bin/harmonia";
+        ExecStart = "${cfg.package}/bin/harmonia-cache";
 
         User = "harmonia";
         Group = "harmonia";
