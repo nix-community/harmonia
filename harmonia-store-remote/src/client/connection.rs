@@ -20,7 +20,7 @@ pub struct Connection {
 impl Connection {
     pub async fn connect(
         path: &Path,
-    ) -> Result<(Self, ProtocolVersion, Vec<String>), ProtocolError> {
+    ) -> Result<(Self, ProtocolVersion, Vec<Vec<u8>>), ProtocolError> {
         let mut stream = UnixStream::connect(path)
             .await
             .io_context(format!("Failed to connect to {path:?}"))?;
@@ -66,8 +66,8 @@ impl Connection {
                 major: 1,
                 minor: 38,
             }) {
-            let server_features = Vec::<String>::deserialize(&mut stream, server_version).await?;
-            Vec::<String>::new()
+            let server_features = Vec::<Vec<u8>>::deserialize(&mut stream, server_version).await?;
+            Vec::<Vec<u8>>::new()
                 .serialize(&mut stream, server_version)
                 .await?;
             server_features
@@ -76,7 +76,7 @@ impl Connection {
         };
 
         // Read daemon version string
-        let _daemon_version = String::deserialize(&mut stream, server_version).await?;
+        let _daemon_version = <Vec<u8>>::deserialize(&mut stream, server_version).await?;
 
         // Read trust status
         let _is_trusted = bool::deserialize(&mut stream, server_version).await?;

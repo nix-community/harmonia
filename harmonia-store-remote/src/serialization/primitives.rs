@@ -109,6 +109,73 @@ impl Deserialize for String {
     }
 }
 
+impl Serialize for &[u8] {
+    async fn serialize<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        version: ProtocolVersion,
+    ) -> Result<(), ProtocolError> {
+        let len = self.len() as u64;
+        len.serialize(writer, version)
+            .await
+            .io_context("Failed to write bytes length")?;
+        writer
+            .write_all(self)
+            .await
+            .io_context("Failed to write bytes data")?;
+
+        // Padding to 8-byte boundary
+        let padding_size = (8 - len % 8) % 8;
+        if padding_size > 0 {
+            let padding = [0u8; 8];
+            writer
+                .write_all(&padding[..padding_size as usize])
+                .await
+                .io_context("Failed to write bytes padding")?;
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for Vec<u8> {
+    async fn serialize<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        version: ProtocolVersion,
+    ) -> Result<(), ProtocolError> {
+        self.as_slice().serialize(writer, version).await
+    }
+}
+
+impl Deserialize for Vec<u8> {
+    async fn deserialize<R: AsyncRead + Unpin>(
+        reader: &mut R,
+        version: ProtocolVersion,
+    ) -> Result<Self, ProtocolError> {
+        let len = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read bytes length")?;
+
+        if len > MAX_STRING_SIZE {
+            return Err(ProtocolError::StringTooLong {
+                length: len,
+                max: MAX_STRING_SIZE,
+            });
+        }
+
+        // Align to the next multiple of 8
+        let aligned_len = (len + 7) & !7;
+        let mut buf = vec![0; aligned_len as usize];
+        reader
+            .read_exact(&mut buf)
+            .await
+            .io_context("Failed to read bytes data")?;
+
+        buf.truncate(len as usize);
+        Ok(buf)
+    }
+}
+
 impl<T: Serialize> Serialize for Vec<T> {
     async fn serialize<W: AsyncWrite + Unpin>(
         &self,
@@ -128,14 +195,14 @@ impl<T: Serialize> Serialize for Vec<T> {
     }
 }
 
-impl Deserialize for Vec<String> {
+impl Deserialize for Vec<Vec<u8>> {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
         let len = u64::deserialize(reader, version)
             .await
-            .io_context("Failed to read Vec<String> length")?;
+            .io_context("Failed to read Vec<Vec<u8>> length")?;
 
         if len > MAX_STRING_LIST_SIZE {
             return Err(ProtocolError::StringListTooLong {
@@ -147,9 +214,9 @@ impl Deserialize for Vec<String> {
         let mut result = Vec::with_capacity(len as usize);
         for i in 0..len {
             result.push(
-                String::deserialize(reader, version)
+                Vec::<u8>::deserialize(reader, version)
                     .await
-                    .io_context(format!("Failed to read Vec<String> item {}", i))?,
+                    .io_context(format!("Failed to read Vec<Vec<u8>> item {i}"))?,
             );
         }
         Ok(result)

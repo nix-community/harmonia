@@ -42,11 +42,11 @@ impl DaemonClient {
 
     pub async fn query_path_from_hash_part(
         &self,
-        hash: &str,
+        hash: &[u8],
     ) -> Result<Option<StorePath>, ProtocolError> {
         // Special case: Nix uses empty string for None
-        let response: String = self
-            .execute_operation(OpCode::QueryPathFromHashPart, &hash.to_string())
+        let response: Vec<u8> = self
+            .execute_operation(OpCode::QueryPathFromHashPart, &hash)
             .await?;
 
         Ok(if response.is_empty() {

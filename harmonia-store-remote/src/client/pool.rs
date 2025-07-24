@@ -47,7 +47,7 @@ struct PooledConnection {
     last_used: Instant,
     version: ProtocolVersion,
     #[allow(dead_code)]
-    features: Vec<String>,
+    features: Vec<Vec<u8>>,
 }
 
 impl PooledConnection {

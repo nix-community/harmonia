@@ -2,47 +2,53 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorePath {
-    path: String,
+    path: Vec<u8>,
 }
 
 impl StorePath {
-    pub fn new(path: String) -> Self {
+    pub fn new(path: Vec<u8>) -> Self {
         Self { path }
     }
 
-    pub fn as_str(&self) -> &str {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.path
     }
 }
 
 impl fmt::Display for StorePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.path)
+        write!(f, "{}", String::from_utf8_lossy(&self.path))
     }
 }
 
 impl From<String> for StorePath {
     fn from(path: String) -> Self {
-        Self::new(path)
+        Self::new(path.into_bytes())
     }
 }
 
 impl From<&str> for StorePath {
     fn from(path: &str) -> Self {
-        Self::new(path.to_string())
+        Self::new(path.as_bytes().to_vec())
+    }
+}
+
+impl From<Vec<u8>> for StorePath {
+    fn from(path: Vec<u8>) -> Self {
+        Self::new(path)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidPathInfo {
     pub deriver: Option<StorePath>,
-    pub hash: String,
+    pub hash: Vec<u8>,
     pub references: Vec<StorePath>,
     pub registration_time: u64,
     pub nar_size: u64,
     pub ultimate: bool,
-    pub signatures: Vec<String>,
-    pub content_address: Option<String>,
+    pub signatures: Vec<Vec<u8>>,
+    pub content_address: Option<Vec<u8>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

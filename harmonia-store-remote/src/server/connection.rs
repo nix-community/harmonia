@@ -35,16 +35,15 @@ pub async fn handle_connection<H: RequestHandler>(
             }
 
             OpCode::QueryPathFromHashPart => {
-                let hash = String::deserialize(&mut stream, version).await?;
+                let hash = <Vec<u8>>::deserialize(&mut stream, version).await?;
                 send_stderr_last(&mut stream, version).await?;
 
                 let result = handler.handle_query_path_from_hash_part(&hash).await?;
                 // Nix protocol uses empty string for None
-                let response = match result {
-                    Some(path) => path.as_str().to_string(),
-                    None => String::new(),
-                };
-                response.serialize(&mut stream, version).await?;
+                match result {
+                    Some(path) => path.as_bytes().serialize(&mut stream, version).await?,
+                    None => (&[] as &[u8]).serialize(&mut stream, version).await?,
+                }
             }
 
             OpCode::IsValidPath => {
@@ -110,16 +109,16 @@ async fn handshake(stream: &mut UnixStream) -> Result<ProtocolVersion, ProtocolE
         })
     {
         // Send server features
-        Vec::<String>::new()
+        Vec::<Vec<u8>>::new()
             .serialize(stream, client_version)
             .await?;
         // Read client features
-        let _client_features = Vec::<String>::deserialize(stream, client_version).await?;
+        let _client_features = Vec::<Vec<u8>>::deserialize(stream, client_version).await?;
     }
 
     // Send daemon version string
-    "harmonia-store-remote 0.1.0"
-        .to_string()
+    b"harmonia-store-remote 0.1.0"
+        .to_vec()
         .serialize(stream, client_version)
         .await?;
 

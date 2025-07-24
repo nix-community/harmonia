@@ -10,7 +10,7 @@ pub trait RequestHandler: Send + Sync {
 
     fn handle_query_path_from_hash_part(
         &self,
-        hash: &str,
+        hash: &[u8],
     ) -> impl Future<Output = Result<Option<StorePath>, ProtocolError>> + Send;
 
     fn handle_is_valid_path(
