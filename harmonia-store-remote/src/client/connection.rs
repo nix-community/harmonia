@@ -1,4 +1,4 @@
-use crate::error::ProtocolError;
+use crate::error::{IoErrorContext, ProtocolError};
 use crate::protocol::{
     LoggerField, Msg, OpCode, ProtocolVersion, StderrError, StderrStartActivity, Trace,
 };
@@ -21,7 +21,9 @@ impl Connection {
     pub async fn connect(
         path: &Path,
     ) -> Result<(Self, ProtocolVersion, Vec<String>), ProtocolError> {
-        let mut stream = UnixStream::connect(path).await?;
+        let mut stream = UnixStream::connect(path)
+            .await
+            .io_context(format!("Failed to connect to {path:?}"))?;
 
         // Handshake
         WORKER_MAGIC_1

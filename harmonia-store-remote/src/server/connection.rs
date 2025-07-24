@@ -1,4 +1,4 @@
-use crate::error::ProtocolError;
+use crate::error::{IoErrorContext, ProtocolError};
 use crate::protocol::{OpCode, ProtocolVersion, StorePath};
 use crate::protocol::{
     CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, WORKER_MAGIC_1, WORKER_MAGIC_2,
@@ -77,12 +77,14 @@ async fn handshake(stream: &mut UnixStream) -> Result<ProtocolVersion, ProtocolE
     // Send server magic
     WORKER_MAGIC_2
         .serialize(stream, CURRENT_PROTOCOL_VERSION)
-        .await?;
+        .await
+        .io_context("Failed to write server magic number")?;
 
     // Send server version
     u64::from(CURRENT_PROTOCOL_VERSION)
         .serialize(stream, CURRENT_PROTOCOL_VERSION)
-        .await?;
+        .await
+        .io_context("Failed to write server protocol version")?;
 
     // Read client version
     let client_version =

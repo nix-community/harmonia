@@ -1,11 +1,17 @@
-use crate::client::DaemonClient;
+use crate::client::{DaemonClient, PoolConfig};
+use crate::error::ProtocolError;
 use crate::protocol::{StorePath, ValidPathInfo, CURRENT_PROTOCOL_VERSION};
 use crate::serialization::{Deserialize, Serialize};
+use crate::server::{DaemonServer, RequestHandler};
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use tempfile::TempDir;
+use tempfile::{tempdir, TempDir};
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 const SOCKET_PATH: &str = "/nix/var/nix/daemon-socket/socket";
@@ -123,7 +129,7 @@ async fn test_valid_path_info_serialization() {
 }
 
 async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = DaemonClient::connect(socket_path).await?;
+    let client = DaemonClient::connect(socket_path).await?;
 
     // Create a test file and add it to the store
     let temp_dir = TempDir::new()?;
@@ -218,12 +224,6 @@ async fn wait_for_daemon_server(
 
 #[tokio::test]
 async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
-    use crate::error::ProtocolError;
-    use crate::server::{DaemonServer, RequestHandler};
-    use std::collections::HashMap;
-    use std::time::Duration;
-    use tempfile::tempdir;
-
     // Create a test handler with some mock data
     #[derive(Clone)]
     struct TestHandler {
@@ -353,7 +353,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Wait for server to be ready
-    let mut client = wait_for_daemon_server(&socket_path, Duration::from_secs(5)).await?;
+    let client = wait_for_daemon_server(&socket_path, Duration::from_secs(5)).await?;
 
     // Test valid path operations
     let hello_path =
@@ -385,6 +385,235 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cleanup: abort the server task
     server_handle.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::error::Error>> {
+    dbg!("Starting test");
+
+    // Create a test handler that tracks requests
+    #[derive(Clone)]
+    struct TestHandler {
+        id: String,
+        store_paths: HashMap<String, ValidPathInfo>,
+        request_count: Arc<StdMutex<u32>>,
+    }
+
+    impl TestHandler {
+        fn new(id: &str) -> Self {
+            let mut handler = Self {
+                id: id.to_string(),
+                store_paths: HashMap::new(),
+                request_count: Arc::new(StdMutex::new(0)),
+            };
+
+            // Add test data
+            let test_path = StorePath::new(
+                "/nix/store/test123abc456def789ghi012jkl345m-test-package".to_string(),
+            );
+            let test_info = ValidPathInfo {
+                deriver: None,
+                hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                    .to_string(),
+                references: vec![],
+                registration_time: 1700000000,
+                nar_size: 42,
+                ultimate: true,
+                signatures: vec![],
+                content_address: None,
+            };
+
+            handler
+                .store_paths
+                .insert(test_path.as_str().to_string(), test_info);
+
+            handler
+        }
+    }
+
+    impl RequestHandler for TestHandler {
+        async fn handle_query_path_info(
+            &self,
+            path: &StorePath,
+        ) -> Result<Option<ValidPathInfo>, ProtocolError> {
+            let count = {
+                let mut count = self.request_count.lock().unwrap();
+                *count += 1;
+                *count
+            };
+            println!(
+                "TestHandler[{}]::handle_query_path_info called, count={}",
+                self.id, count
+            );
+            Ok(self.store_paths.get(path.as_str()).cloned())
+        }
+
+        async fn handle_query_path_from_hash_part(
+            &self,
+            _hash: &str,
+        ) -> Result<Option<StorePath>, ProtocolError> {
+            let count = {
+                let mut count = self.request_count.lock().unwrap();
+                *count += 1;
+                *count
+            };
+            println!(
+                "TestHandler[{}]::handle_query_path_from_hash_part called, count={}",
+                self.id, count
+            );
+            Ok(None)
+        }
+
+        async fn handle_is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
+            let count = {
+                let mut count = self.request_count.lock().unwrap();
+                *count += 1;
+                *count
+            };
+            println!(
+                "TestHandler[{}]::handle_is_valid_path called, count={}",
+                self.id, count
+            );
+            Ok(self.store_paths.contains_key(path.as_str()))
+        }
+    }
+
+    // Helper function to start a server
+    async fn start_server(
+        handler: TestHandler,
+        socket_path: &Path,
+    ) -> (Arc<DaemonServer<TestHandler>>, JoinHandle<()>) {
+        let server = Arc::new(DaemonServer::new(handler, socket_path.to_path_buf()));
+        let server_clone = server.clone();
+        let handle = tokio::spawn(async move {
+            let _ = server_clone.serve().await;
+        });
+        (server, handle)
+    }
+
+    // Create a temporary directory for the socket
+    dbg!("Creating temp dir");
+    let temp_dir = tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
+    dbg!("Temp dir created");
+    let socket_path = temp_dir.path().join("test-daemon-retry.socket");
+    dbg!(&socket_path);
+
+    // Start the first server
+    dbg!("Creating handler1");
+    let handler1 = TestHandler::new("server1");
+    let request_count_ref = handler1.request_count.clone();
+    dbg!("Starting server1");
+    let (server1, server_handle1) = start_server(handler1, &socket_path).await;
+    dbg!("Server1 started");
+
+    // Create client with custom pool config
+    let pool_config = PoolConfig {
+        max_size: 3,                               // Allow 3 connections in pool
+        max_idle_time: Duration::from_millis(100), // Short idle time
+        connection_timeout: Duration::from_millis(500),
+    };
+    dbg!("Connecting client");
+    let client = DaemonClient::connect_with_config(&socket_path, pool_config)
+        .await
+        .map_err(|e| format!("Failed to connect client: {e:?}"))?;
+    dbg!("Client connected");
+
+    // Make some requests to establish connections in the pool
+    let test_path =
+        StorePath::new("/nix/store/test123abc456def789ghi012jkl345m-test-package".to_string());
+
+    // Make some concurrent requests to exercise the connection pool
+    let client1 = client.clone();
+    let client2 = client.clone();
+    let client3 = client.clone();
+    let path1 = test_path.clone();
+    let path2 = test_path.clone();
+    let path3 = test_path.clone();
+
+    // Launch concurrent requests
+    let (r1, r2, r3) = tokio::join!(
+        async { client1.is_valid_path(&path1).await },
+        async { client2.query_path_info(&path2).await },
+        async { client3.is_valid_path(&path3).await }
+    );
+
+    assert!(r1.map_err(|e| format!("First is_valid_path failed: {e:?}"))?);
+    assert!(r2
+        .map_err(|e| format!("query_path_info failed: {e:?}"))?
+        .is_some());
+    assert!(r3.map_err(|e| format!("Second is_valid_path failed: {e:?}"))?);
+
+    let initial_request_count = *request_count_ref.lock().unwrap();
+    assert_eq!(initial_request_count, 3, "Should have made 3 requests");
+
+    // Stop the first server
+    println!("Stopping first server...");
+    server1.shutdown().await; // Shutdown all connections
+    server_handle1.abort();
+    let _ = server_handle1.await; // Wait for it to actually stop
+
+    // Remove the socket file to ensure clean restart
+    if socket_path.exists() {
+        println!("Removing socket file: {socket_path:?}");
+        std::fs::remove_file(&socket_path)?;
+    }
+
+    // Start a new server with a new handler immediately
+    // The client's retry mechanism should handle any connection failures
+    println!("Starting new server...");
+    let handler2 = TestHandler::new("server2");
+    let request_count_ref2 = handler2.request_count.clone();
+    let (server2, server_handle2) = start_server(handler2, &socket_path).await;
+
+    // Make concurrent requests - the client should handle the reconnection automatically
+    // All pooled connections should fail, triggering retry logic for each
+    println!("Making concurrent requests to new server...");
+
+    let client1 = client.clone();
+    let client2 = client.clone();
+    let client3 = client.clone();
+    let path1 = test_path.clone();
+    let path2 = test_path.clone();
+    let path3 = test_path.clone();
+
+    // All three should retry and succeed with the new server
+    let (r1, r2, r3) = tokio::join!(
+        async {
+            println!("Request 1 starting...");
+            let result = client1.is_valid_path(&path1).await;
+            println!("Request 1 result: {result:?}");
+            result
+        },
+        async {
+            println!("Request 2 starting...");
+            let result = client2.query_path_info(&path2).await;
+            println!("Request 2 result: {result:?}");
+            result
+        },
+        async {
+            println!("Request 3 starting...");
+            let result = client3.is_valid_path(&path3).await;
+            println!("Request 3 result: {result:?}");
+            result
+        }
+    );
+
+    assert!(r1?);
+    assert!(r2?.is_some());
+    assert!(r3?);
+
+    let new_request_count = *request_count_ref2.lock().unwrap();
+    println!("New server request count: {new_request_count}");
+    assert_eq!(
+        new_request_count, 3,
+        "New server should have received 3 requests"
+    );
+
+    // Cleanup
+    server2.shutdown().await;
+    server_handle2.abort();
 
     Ok(())
 }

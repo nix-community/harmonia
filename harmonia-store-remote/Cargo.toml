@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true }
 thiserror = "2.0"
 bytes = "1.0"
 
 [dev-dependencies]
 tempfile = "3.0"
-tokio = { workspace = true, features = ["net", "time"] }
+tokio = { workspace = true }

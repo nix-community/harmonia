@@ -1,4 +1,4 @@
-use crate::error::ProtocolError;
+use crate::error::{IoErrorContext, ProtocolError};
 use crate::protocol::{ProtocolVersion, StorePath, ValidPathInfo, MAX_STRING_LIST_SIZE};
 use crate::serialization::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -18,7 +18,11 @@ impl Deserialize for StorePath {
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
-        Ok(StorePath::new(String::deserialize(reader, version).await?))
+        Ok(StorePath::new(
+            String::deserialize(reader, version)
+                .await
+                .io_context("Failed to deserialize StorePath")?,
+        ))
     }
 }
 
@@ -27,7 +31,9 @@ impl Deserialize for Vec<StorePath> {
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version).await?;
+        let len = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read Vec<StorePath> length")?;
 
         if len > MAX_STRING_LIST_SIZE {
             return Err(ProtocolError::StringListTooLong {
@@ -37,8 +43,12 @@ impl Deserialize for Vec<StorePath> {
         }
 
         let mut result = Vec::with_capacity(len as usize);
-        for _ in 0..len {
-            result.push(StorePath::deserialize(reader, version).await?);
+        for i in 0..len {
+            result.push(
+                StorePath::deserialize(reader, version)
+                    .await
+                    .io_context(format!("Failed to read Vec<StorePath> item {}", i))?,
+            );
         }
         Ok(result)
     }
@@ -52,12 +62,23 @@ impl Serialize for ValidPathInfo {
     ) -> Result<(), ProtocolError> {
         // Serialize deriver (empty string if None)
         match &self.deriver {
-            None => String::new().serialize(writer, version).await?,
-            Some(path) => path.as_str().to_string().serialize(writer, version).await?,
+            None => String::new()
+                .serialize(writer, version)
+                .await
+                .io_context("Failed to write empty deriver")?,
+            Some(path) => path
+                .as_str()
+                .to_string()
+                .serialize(writer, version)
+                .await
+                .io_context("Failed to write deriver")?,
         }
 
         // Serialize hash
-        self.hash.serialize(writer, version).await?;
+        self.hash
+            .serialize(writer, version)
+            .await
+            .io_context("Failed to write hash")?;
 
         // Serialize references
         let ref_strings: Vec<String> = self
@@ -65,24 +86,45 @@ impl Serialize for ValidPathInfo {
             .iter()
             .map(|p| p.as_str().to_string())
             .collect();
-        ref_strings.serialize(writer, version).await?;
+        ref_strings
+            .serialize(writer, version)
+            .await
+            .io_context("Failed to write references")?;
 
         // Serialize registration time
-        self.registration_time.serialize(writer, version).await?;
+        self.registration_time
+            .serialize(writer, version)
+            .await
+            .io_context("Failed to write registration_time")?;
 
         // Serialize nar size
-        self.nar_size.serialize(writer, version).await?;
+        self.nar_size
+            .serialize(writer, version)
+            .await
+            .io_context("Failed to write nar_size")?;
 
         // Serialize ultimate flag
-        self.ultimate.serialize(writer, version).await?;
+        self.ultimate
+            .serialize(writer, version)
+            .await
+            .io_context("Failed to write ultimate")?;
 
         // Serialize signatures
-        self.signatures.serialize(writer, version).await?;
+        self.signatures
+            .serialize(writer, version)
+            .await
+            .io_context("Failed to write signatures")?;
 
         // Serialize content address (empty string if None)
         match &self.content_address {
-            None => String::new().serialize(writer, version).await?,
-            Some(ca) => ca.serialize(writer, version).await?,
+            None => String::new()
+                .serialize(writer, version)
+                .await
+                .io_context("Failed to write empty content_address")?,
+            Some(ca) => ca
+                .serialize(writer, version)
+                .await
+                .io_context("Failed to write content_address")?,
         }
 
         Ok(())
@@ -95,7 +137,9 @@ impl Deserialize for ValidPathInfo {
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
         // Deserialize deriver
-        let deriver_str = String::deserialize(reader, version).await?;
+        let deriver_str = String::deserialize(reader, version)
+            .await
+            .io_context("Failed to read deriver")?;
         let deriver = if deriver_str.is_empty() {
             None
         } else {
@@ -103,26 +147,40 @@ impl Deserialize for ValidPathInfo {
         };
 
         // Deserialize hash
-        let hash = String::deserialize(reader, version).await?;
+        let hash = String::deserialize(reader, version)
+            .await
+            .io_context("Failed to read hash")?;
 
         // Deserialize references
-        let ref_strings = Vec::<String>::deserialize(reader, version).await?;
+        let ref_strings = Vec::<String>::deserialize(reader, version)
+            .await
+            .io_context("Failed to read references")?;
         let references: Vec<StorePath> = ref_strings.into_iter().map(StorePath::new).collect();
 
         // Deserialize registration time
-        let registration_time = u64::deserialize(reader, version).await?;
+        let registration_time = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read registration_time")?;
 
         // Deserialize nar size
-        let nar_size = u64::deserialize(reader, version).await?;
+        let nar_size = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read nar_size")?;
 
         // Deserialize ultimate flag
-        let ultimate = bool::deserialize(reader, version).await?;
+        let ultimate = bool::deserialize(reader, version)
+            .await
+            .io_context("Failed to read ultimate")?;
 
         // Deserialize signatures
-        let signatures = Vec::<String>::deserialize(reader, version).await?;
+        let signatures = Vec::<String>::deserialize(reader, version)
+            .await
+            .io_context("Failed to read signatures")?;
 
         // Deserialize content address
-        let ca_str = String::deserialize(reader, version).await?;
+        let ca_str = String::deserialize(reader, version)
+            .await
+            .io_context("Failed to read content_address")?;
         let content_address = if ca_str.is_empty() {
             None
         } else {

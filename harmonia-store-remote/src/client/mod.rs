@@ -1,44 +1,54 @@
 pub mod connection;
+pub mod pool;
 
 use crate::error::ProtocolError;
-use crate::protocol::{OpCode, ProtocolVersion, StorePath, ValidPathInfo};
+use crate::protocol::{OpCode, StorePath, ValidPathInfo};
 use crate::serialization::{Deserialize, Serialize};
-use connection::Connection;
+use harmonia_store_core::StorePath;
+use pool::ConnectionPool;
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 
-#[derive(Debug)]
+// Re-export PoolConfig for public use
+pub use pool::PoolConfig;
+
+#[derive(Clone, Debug)]
 pub struct DaemonClient {
-    connection: Connection,
-    version: ProtocolVersion,
-    #[allow(dead_code)]
-    features: Vec<String>,
+    pool: Arc<ConnectionPool>,
 }
 
 impl DaemonClient {
+    /// Create a new DaemonClient with default pool configuration
     pub async fn connect(path: &Path) -> Result<Self, ProtocolError> {
-        let (connection, version, features) = Connection::connect(path).await?;
-        Ok(Self {
-            connection,
-            version,
-            features,
-        })
+        Self::connect_with_config(path, pool::PoolConfig::default()).await
+    }
+
+    /// Create a new DaemonClient with custom configuration
+    pub async fn connect_with_config(
+        path: &Path,
+        pool_config: PoolConfig,
+    ) -> Result<Self, ProtocolError> {
+        let pool = Arc::new(ConnectionPool::new(path.to_path_buf(), pool_config));
+        Ok(Self { pool })
     }
 
     pub async fn query_path_info(
-        &mut self,
+        &self,
         path: &StorePath,
     ) -> Result<Option<ValidPathInfo>, ProtocolError> {
         self.execute_operation(OpCode::QueryPathInfo, path).await
     }
 
     pub async fn query_path_from_hash_part(
-        &mut self,
+        &self,
         hash: &str,
     ) -> Result<Option<StorePath>, ProtocolError> {
         // Special case: Nix uses empty string for None
         let response: String = self
             .execute_operation(OpCode::QueryPathFromHashPart, &hash.to_string())
             .await?;
+
         Ok(if response.is_empty() {
             None
         } else {
@@ -46,20 +56,91 @@ impl DaemonClient {
         })
     }
 
-    pub async fn is_valid_path(&mut self, path: &StorePath) -> Result<bool, ProtocolError> {
+    pub async fn is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
         self.execute_operation(OpCode::IsValidPath, path).await
     }
 
     async fn execute_operation<Req: Serialize, Resp: Deserialize>(
-        &mut self,
+        &self,
         opcode: OpCode,
         request: &Req,
     ) -> Result<Resp, ProtocolError> {
-        self.connection.send_opcode(opcode).await?;
-        request
-            .serialize(&mut self.connection, self.version)
-            .await?;
-        self.connection.process_stderr().await?;
-        Resp::deserialize(&mut self.connection, self.version).await
+        // Retry configuration
+        const MAX_ATTEMPTS: u32 = 3;
+
+        let mut last_error = None;
+
+        for attempt in 0..MAX_ATTEMPTS {
+            let mut guard = match self.pool.acquire().await {
+                Ok(guard) => guard,
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < MAX_ATTEMPTS - 1 {
+                        tokio::time::sleep(Self::calculate_delay(attempt)).await;
+                        continue;
+                    }
+                    break;
+                }
+            };
+
+            // Try to execute the operation
+            let result = async {
+                let (conn, version) = guard.connection_and_version();
+
+                conn.send_opcode(opcode).await?;
+                request.serialize(conn, version).await?;
+                conn.process_stderr().await?;
+                Resp::deserialize(conn, version).await
+            }
+            .await;
+
+            match result {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    // Determine if error is retryable
+                    let should_retry = matches!(
+                        &e,
+                        ProtocolError::Io { .. }
+                            | ProtocolError::ConnectionTimeout
+                            | ProtocolError::PoolTimeout
+                    );
+
+                    if should_retry {
+                        guard.mark_broken();
+                    }
+
+                    last_error = Some(e);
+
+                    // If not retryable or last attempt, return error
+                    if !should_retry || attempt == MAX_ATTEMPTS - 1 {
+                        break;
+                    }
+
+                    // Wait before retrying
+                    tokio::time::sleep(Self::calculate_delay(attempt)).await;
+                }
+            }
+        }
+
+        Err(last_error.unwrap())
+    }
+
+    fn calculate_delay(attempt: u32) -> Duration {
+        const INITIAL_DELAY: Duration = Duration::from_millis(100);
+        const MAX_DELAY: Duration = Duration::from_secs(5);
+        const BACKOFF_MULTIPLIER: f64 = 2.0;
+
+        let mut delay = INITIAL_DELAY.as_secs_f64() * BACKOFF_MULTIPLIER.powi(attempt as i32);
+        delay = delay.min(MAX_DELAY.as_secs_f64());
+
+        // Add simple jitter based on current time
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as f64;
+        let jitter = (seed % 20.0) / 100.0; // 0-20% jitter
+        delay *= 1.0 + jitter;
+
+        Duration::from_secs_f64(delay)
     }
 }

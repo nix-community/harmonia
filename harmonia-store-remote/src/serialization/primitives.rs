@@ -1,4 +1,4 @@
-use crate::error::ProtocolError;
+use crate::error::{IoErrorContext, ProtocolError};
 use crate::protocol::{ProtocolVersion, MAX_STRING_LIST_SIZE, MAX_STRING_SIZE};
 use crate::serialization::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -9,7 +9,10 @@ impl Serialize for u64 {
         writer: &mut W,
         _version: ProtocolVersion,
     ) -> Result<(), ProtocolError> {
-        writer.write_all(&self.to_le_bytes()).await?;
+        writer
+            .write_all(&self.to_le_bytes())
+            .await
+            .io_context("Failed to write u64")?;
         Ok(())
     }
 }
@@ -20,7 +23,10 @@ impl Deserialize for u64 {
         _version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
         let mut buf = [0; 8];
-        reader.read_exact(&mut buf).await?;
+        reader
+            .read_exact(&mut buf)
+            .await
+            .io_context("Failed to read u64")?;
         Ok(u64::from_le_bytes(buf))
     }
 }
@@ -40,7 +46,10 @@ impl Deserialize for bool {
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
-        Ok(u64::deserialize(reader, version).await? != 0)
+        let value = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read bool")?;
+        Ok(value != 0)
     }
 }
 
@@ -51,14 +60,22 @@ impl Serialize for String {
         version: ProtocolVersion,
     ) -> Result<(), ProtocolError> {
         let len = self.len() as u64;
-        len.serialize(writer, version).await?;
-        writer.write_all(self.as_bytes()).await?;
+        len.serialize(writer, version)
+            .await
+            .io_context("Failed to write string length")?;
+        writer
+            .write_all(self.as_bytes())
+            .await
+            .io_context("Failed to write string data")?;
 
         // Padding to 8-byte boundary
         let padding_size = (8 - len % 8) % 8;
         if padding_size > 0 {
             let padding = [0u8; 8];
-            writer.write_all(&padding[..padding_size as usize]).await?;
+            writer
+                .write_all(&padding[..padding_size as usize])
+                .await
+                .io_context("Failed to write string padding")?;
         }
         Ok(())
     }
@@ -69,7 +86,9 @@ impl Deserialize for String {
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version).await?;
+        let len = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read string length")?;
 
         if len > MAX_STRING_SIZE {
             return Err(ProtocolError::StringTooLong {
@@ -81,7 +100,10 @@ impl Deserialize for String {
         // Align to the next multiple of 8
         let aligned_len = (len + 7) & !7;
         let mut buf = vec![0; aligned_len as usize];
-        reader.read_exact(&mut buf).await?;
+        reader
+            .read_exact(&mut buf)
+            .await
+            .io_context("Failed to read string data")?;
 
         Ok(std::str::from_utf8(&buf[..len as usize])?.to_owned())
     }
@@ -93,9 +115,14 @@ impl<T: Serialize> Serialize for Vec<T> {
         writer: &mut W,
         version: ProtocolVersion,
     ) -> Result<(), ProtocolError> {
-        (self.len() as u64).serialize(writer, version).await?;
-        for item in self {
-            item.serialize(writer, version).await?;
+        (self.len() as u64)
+            .serialize(writer, version)
+            .await
+            .io_context("Failed to write Vec length")?;
+        for (i, item) in self.iter().enumerate() {
+            item.serialize(writer, version)
+                .await
+                .io_context(format!("Failed to write Vec item {i}"))?;
         }
         Ok(())
     }
@@ -106,7 +133,9 @@ impl Deserialize for Vec<String> {
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version).await?;
+        let len = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read Vec<String> length")?;
 
         if len > MAX_STRING_LIST_SIZE {
             return Err(ProtocolError::StringListTooLong {
@@ -116,8 +145,12 @@ impl Deserialize for Vec<String> {
         }
 
         let mut result = Vec::with_capacity(len as usize);
-        for _ in 0..len {
-            result.push(String::deserialize(reader, version).await?);
+        for i in 0..len {
+            result.push(
+                String::deserialize(reader, version)
+                    .await
+                    .io_context(format!("Failed to read Vec<String> item {}", i))?,
+            );
         }
         Ok(result)
     }
@@ -130,10 +163,18 @@ impl<T: Serialize> Serialize for Option<T> {
         version: ProtocolVersion,
     ) -> Result<(), ProtocolError> {
         match self {
-            None => 0u64.serialize(writer, version).await,
+            None => 0u64
+                .serialize(writer, version)
+                .await
+                .io_context("Failed to write Option None discriminant"),
             Some(value) => {
-                1u64.serialize(writer, version).await?;
-                value.serialize(writer, version).await
+                1u64.serialize(writer, version)
+                    .await
+                    .io_context("Failed to write Option Some discriminant")?;
+                value
+                    .serialize(writer, version)
+                    .await
+                    .io_context("Failed to write Option value")
             }
         }
     }
@@ -144,11 +185,17 @@ impl<T: Deserialize> Deserialize for Option<T> {
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
-        let present = u64::deserialize(reader, version).await?;
+        let present = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read Option discriminant")?;
         if present == 0 {
             Ok(None)
         } else {
-            Ok(Some(T::deserialize(reader, version).await?))
+            Ok(Some(
+                T::deserialize(reader, version)
+                    .await
+                    .io_context("Failed to read Option value")?,
+            ))
         }
     }
 }
