@@ -10,6 +10,6 @@
   };
 
   testScript = ''
-    harmonia.wait_until_succeeds("curl --cacert ${./tls-cert.pem} https://localhost:5000/version")
+    harmonia.wait_until_succeeds("timeout 1 curl --cacert ${./tls-cert.pem} https://localhost:5000/version")
   '';
 }

@@ -44,7 +44,7 @@
     testScript = ''
       start_all()
 
-      client01.wait_until_succeeds("curl -f http://harmonia:5000/version")
+      client01.wait_until_succeeds("timeout 1 curl -f http://harmonia:5000/version")
       client01.succeed("curl -f http://harmonia:5000/nix-cache-info")
 
       client01.wait_until_succeeds("${copyScript} ${./cache.pk} /root/test-store ${hello}")
