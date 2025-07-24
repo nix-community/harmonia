@@ -50,7 +50,7 @@ pub(crate) async fn get(config: web::Data<config::Config>) -> Result<HttpRespons
 </body>
 </html>
 "#,
-            store = config.store.virtual_store(),
+            store = String::from_utf8_lossy(config.store.virtual_store()),
             priority = config.priority,
         )))
 }

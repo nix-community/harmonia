@@ -87,33 +87,34 @@ async fn test_serialization_roundtrip() {
         .unwrap();
     assert_eq!(opt, deserialized);
 
-    // Test Vec<String>
-    let vec = vec!["one".to_string(), "two".to_string(), "three".to_string()];
+    // Test Vec<Vec<u8>>
+    let vec = vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()];
     let mut buf = Vec::new();
     vec.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = Vec::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
-        .await
-        .unwrap();
+    let deserialized =
+        <Vec<Vec<u8>> as Deserialize>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+            .await
+            .unwrap();
     assert_eq!(vec, deserialized);
 }
 
 #[tokio::test]
 async fn test_valid_path_info_serialization() {
     let info = ValidPathInfo {
-        deriver: Some(StorePath::new("/nix/store/abc-test.drv".to_string())),
-        hash: "sha256:abcdef".to_string(),
+        deriver: Some(StorePath::from(b"/nix/store/abc-test.drv".to_vec())),
+        hash: b"sha256:abcdef".to_vec(),
         references: vec![
-            StorePath::new("/nix/store/ref1".to_string()),
-            StorePath::new("/nix/store/ref2".to_string()),
+            StorePath::from(b"/nix/store/ref1".to_vec()),
+            StorePath::from(b"/nix/store/ref2".to_vec()),
         ],
         registration_time: 1234567890,
         nar_size: 9876,
         ultimate: true,
-        signatures: vec!["sig1".to_string(), "sig2".to_string()],
-        content_address: Some("fixed:sha256:xyz".to_string()),
+        signatures: vec![b"sig1".to_vec(), b"sig2".to_vec()],
+        content_address: Some(b"fixed:sha256:xyz".to_vec()),
     };
 
     let mut buf = Vec::new();
@@ -150,7 +151,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     }
 
     let store_path = String::from_utf8(output.stdout)?.trim().to_string();
-    let store_path = StorePath::new(store_path);
+    let store_path = StorePath::from(store_path);
 
     // Test is_valid_path
     let is_valid = client.is_valid_path(&store_path).await?;
@@ -165,25 +166,26 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
 
     // Test query_path_from_hash_part
     let hash_part = store_path
-        .as_str()
+        .to_string()
         .strip_prefix("/nix/store/")
         .ok_or("Invalid store path format")?
         .chars()
         .take(32)
         .collect::<String>();
 
-    let found_path = client.query_path_from_hash_part(&hash_part).await?;
+    let found_path = client
+        .query_path_from_hash_part(hash_part.as_bytes())
+        .await?;
     assert_eq!(found_path, Some(store_path));
 
     // Test with non-existent hash
     let not_found = client
-        .query_path_from_hash_part("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+        .query_path_from_hash_part(b"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
         .await?;
     assert_eq!(not_found, None);
 
     // Test is_valid_path with non-existent path
-    let invalid_path =
-        StorePath::new("/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake".to_string());
+    let invalid_path = StorePath::from("/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake");
     let is_valid = client.is_valid_path(&invalid_path).await?;
     assert!(!is_valid);
 
@@ -227,8 +229,8 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     // Create a test handler with some mock data
     #[derive(Clone)]
     struct TestHandler {
-        store_paths: HashMap<String, ValidPathInfo>,
-        hash_to_path: HashMap<String, StorePath>,
+        store_paths: HashMap<Vec<u8>, ValidPathInfo>,
+        hash_to_path: HashMap<Vec<u8>, StorePath>,
     }
 
     impl TestHandler {
@@ -239,78 +241,69 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             // Add some test data
-            let test_path = StorePath::new(
-                "/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1".to_string(),
-            );
+            let test_path =
+                StorePath::from("/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1");
             let test_info = ValidPathInfo {
-                deriver: Some(StorePath::new(
-                    "/nix/store/xyz789abc123def456ghi789jkl012m-hello-2.12.1.drv".to_string(),
-                )),
-                hash: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-                    .to_string(),
+                deriver: Some(StorePath::from("/nix/store/xyz789abc123def456ghi789jkl012m-hello-2.12.1.drv")),
+                hash: b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_vec(),
                 references: vec![
-                    StorePath::new(
-                        "/nix/store/111111111111111111111111111111111-glibc-2.38".to_string(),
-                    ),
-                    StorePath::new(
-                        "/nix/store/222222222222222222222222222222222-gcc-13.2.0-lib".to_string(),
-                    ),
+                    StorePath::from(b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec()),
+                    StorePath::from(b"/nix/store/222222222222222222222222222222222-gcc-13.2.0-lib".to_vec()),
                 ],
                 registration_time: 1700000000,
                 nar_size: 123456,
                 ultimate: false,
                 signatures: vec![
-                    "cache.nixos.org-1:signature123abc".to_string(),
-                    "test-cache-1:testsignature456def".to_string(),
+                    b"cache.nixos.org-1:signature123abc".to_vec(),
+                    b"test-cache-1:testsignature456def".to_vec(),
                 ],
                 content_address: Some(
-                    "fixed:sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-                        .to_string(),
+                    b"fixed:sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890".to_vec(),
                 ),
             };
 
             handler
                 .store_paths
-                .insert(test_path.as_str().to_string(), test_info);
+                .insert(test_path.as_bytes().to_vec(), test_info);
             handler.hash_to_path.insert(
-                "abc123def456ghi789jkl012mno345p".to_string(),
+                b"abc123def456ghi789jkl012mno345p".to_vec(),
                 test_path.clone(),
             );
 
             // Add another test path
-            let bash_path = StorePath::new(
-                "/nix/store/qrs456tuv789wxy012abc345def678g-bash-5.2-p21".to_string(),
+            let bash_path = StorePath::from(
+                b"/nix/store/qrs456tuv789wxy012abc345def678g-bash-5.2-p21".to_vec(),
             );
             let bash_info = ValidPathInfo {
-                deriver: Some(StorePath::new(
-                    "/nix/store/mno345pqr678stu901vwx234yz567ab-bash-5.2-p21.drv".to_string(),
+                deriver: Some(StorePath::from(
+                    b"/nix/store/mno345pqr678stu901vwx234yz567ab-bash-5.2-p21.drv".to_vec(),
                 )),
-                hash: "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
-                    .to_string(),
+                hash: b"sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
+                    .to_vec(),
                 references: vec![
-                    StorePath::new(
-                        "/nix/store/111111111111111111111111111111111-glibc-2.38".to_string(),
+                    StorePath::from(
+                        b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec(),
                     ),
-                    StorePath::new(
-                        "/nix/store/333333333333333333333333333333333-readline-8.2p7".to_string(),
+                    StorePath::from(
+                        b"/nix/store/333333333333333333333333333333333-readline-8.2p7".to_vec(),
                     ),
-                    StorePath::new(
-                        "/nix/store/444444444444444444444444444444444-ncurses-6.4".to_string(),
+                    StorePath::from(
+                        b"/nix/store/444444444444444444444444444444444-ncurses-6.4".to_vec(),
                     ),
                 ],
                 registration_time: 1700000100,
                 nar_size: 987654,
                 ultimate: true,
-                signatures: vec!["cache.nixos.org-1:bashsignature789xyz".to_string()],
+                signatures: vec![b"cache.nixos.org-1:bashsignature789xyz".to_vec()],
                 content_address: None,
             };
 
             handler
                 .store_paths
-                .insert(bash_path.as_str().to_string(), bash_info);
+                .insert(bash_path.as_bytes().to_vec(), bash_info);
             handler
                 .hash_to_path
-                .insert("qrs456tuv789wxy012abc345def678g".to_string(), bash_path);
+                .insert(b"qrs456tuv789wxy012abc345def678g".to_vec(), bash_path);
 
             handler
         }
@@ -321,12 +314,12 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             &self,
             path: &StorePath,
         ) -> Result<Option<ValidPathInfo>, ProtocolError> {
-            Ok(self.store_paths.get(path.as_str()).cloned())
+            Ok(self.store_paths.get(path.as_bytes()).cloned())
         }
 
         async fn handle_query_path_from_hash_part(
             &self,
-            hash: &str,
+            hash: &[u8],
         ) -> Result<Option<StorePath>, ProtocolError> {
             // Support partial hash matching like real nix-daemon
             for (full_hash, path) in &self.hash_to_path {
@@ -338,7 +331,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         async fn handle_is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
-            Ok(self.store_paths.contains_key(path.as_str()))
+            Ok(self.store_paths.contains_key(path.as_bytes()))
         }
     }
 
@@ -357,7 +350,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test valid path operations
     let hello_path =
-        StorePath::new("/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1".to_string());
+        StorePath::from(b"/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1".to_vec());
     assert!(client.is_valid_path(&hello_path).await?);
 
     let path_info = client.query_path_info(&hello_path).await?;
@@ -369,19 +362,19 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     assert!(info.content_address.is_some());
 
     // Test hash part lookup
-    let found_path = client.query_path_from_hash_part("abc123").await?;
+    let found_path = client.query_path_from_hash_part(b"abc123").await?;
     assert_eq!(found_path, Some(hello_path.clone()));
 
     // Test partial hash matching
-    let bash_path = client.query_path_from_hash_part("qrs456").await?;
+    let bash_path = client.query_path_from_hash_part(b"qrs456").await?;
     assert!(bash_path.is_some());
-    assert!(bash_path.unwrap().as_str().contains("bash"));
+    assert!(bash_path.unwrap().to_string().contains("bash"));
 
     // Test with non-existent data
-    let fake_path = StorePath::new("/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake".to_string());
+    let fake_path = StorePath::from(b"/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake".to_vec());
     assert!(!client.is_valid_path(&fake_path).await?);
     assert_eq!(client.query_path_info(&fake_path).await?, None);
-    assert_eq!(client.query_path_from_hash_part("zzzzz").await?, None);
+    assert_eq!(client.query_path_from_hash_part(b"zzzzz").await?, None);
 
     // Cleanup: abort the server task
     server_handle.abort();
@@ -397,7 +390,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
     #[derive(Clone)]
     struct TestHandler {
         id: String,
-        store_paths: HashMap<String, ValidPathInfo>,
+        store_paths: HashMap<Vec<u8>, ValidPathInfo>,
         request_count: Arc<StdMutex<u32>>,
     }
 
@@ -410,13 +403,13 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
             };
 
             // Add test data
-            let test_path = StorePath::new(
-                "/nix/store/test123abc456def789ghi012jkl345m-test-package".to_string(),
+            let test_path = StorePath::from(
+                b"/nix/store/test123abc456def789ghi012jkl345m-test-package".to_vec(),
             );
             let test_info = ValidPathInfo {
                 deriver: None,
-                hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-                    .to_string(),
+                hash: b"sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                    .to_vec(),
                 references: vec![],
                 registration_time: 1700000000,
                 nar_size: 42,
@@ -427,7 +420,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
 
             handler
                 .store_paths
-                .insert(test_path.as_str().to_string(), test_info);
+                .insert(test_path.as_bytes().to_vec(), test_info);
 
             handler
         }
@@ -447,12 +440,12 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                 "TestHandler[{}]::handle_query_path_info called, count={}",
                 self.id, count
             );
-            Ok(self.store_paths.get(path.as_str()).cloned())
+            Ok(self.store_paths.get(path.as_bytes()).cloned())
         }
 
         async fn handle_query_path_from_hash_part(
             &self,
-            _hash: &str,
+            _hash: &[u8],
         ) -> Result<Option<StorePath>, ProtocolError> {
             let count = {
                 let mut count = self.request_count.lock().unwrap();
@@ -476,7 +469,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                 "TestHandler[{}]::handle_is_valid_path called, count={}",
                 self.id, count
             );
-            Ok(self.store_paths.contains_key(path.as_str()))
+            Ok(self.store_paths.contains_key(path.as_bytes()))
         }
     }
 
@@ -522,7 +515,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
 
     // Make some requests to establish connections in the pool
     let test_path =
-        StorePath::new("/nix/store/test123abc456def789ghi012jkl345m-test-package".to_string());
+        StorePath::from(b"/nix/store/test123abc456def789ghi012jkl345m-test-package".to_vec());
 
     // Make some concurrent requests to exercise the connection pool
     let client1 = client.clone();

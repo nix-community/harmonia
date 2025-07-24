@@ -15,12 +15,12 @@ use tokio_util::io::ReaderStream;
 use crate::config::Config;
 use crate::{cache_control_max_age_1y, cache_control_no_store, nixhash, some_or_404};
 
-async fn query_drv_path(settings: &web::Data<Config>, drv: &str) -> Result<Option<StorePath>> {
+async fn query_drv_path(settings: &web::Data<Config>, drv: &[u8]) -> Result<Option<StorePath>> {
     nixhash(settings, if drv.len() > 32 { &drv[0..32] } else { drv }).await
 }
 
 pub fn get_build_log(store: &Path, drv_path: &StorePath) -> Option<PathBuf> {
-    let drv_path = Path::new(drv_path.as_str());
+    let drv_path = Path::new(std::ffi::OsStr::from_bytes(drv_path.as_bytes()));
     let drv_name = drv_path.file_name()?.as_bytes();
     let log_path = store.parent().map(|p| {
         p.join("var")
@@ -47,7 +47,7 @@ pub(crate) async fn get(
     req: HttpRequest,
     settings: web::Data<Config>,
 ) -> Result<HttpResponse, Box<dyn std::error::Error>> {
-    let drv_path = some_or_404!(query_drv_path(&settings, &drv)
+    let drv_path = some_or_404!(query_drv_path(&settings, drv.as_bytes())
         .await
         .context("Could not query nar hash in database")?);
     let mut daemon_guard = settings

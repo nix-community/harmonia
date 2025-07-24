@@ -15,6 +15,20 @@ use actix_web::{http, web, App, HttpResponse, HttpServer};
 use harmonia_store_remote::protocol::StorePath;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
+/// Macro for building byte vectors efficiently from parts
+#[macro_export]
+macro_rules! build_bytes {
+    ($($part:expr),* $(,)?) => {{
+        let parts: &[&[u8]] = &[$($part),*];
+        let capacity = parts.iter().map(|p| p.len()).sum();
+        let mut result = Vec::with_capacity(capacity);
+        for part in parts {
+            result.extend_from_slice(part);
+        }
+        result
+    }};
+}
+
 mod buildlog;
 mod cacheinfo;
 mod config;
@@ -28,7 +42,7 @@ mod signing;
 mod store;
 mod version;
 
-async fn nixhash(settings: &web::Data<Config>, hash: &str) -> Result<Option<StorePath>> {
+async fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
     if hash.len() != 32 {
         bail!("Hash is too short");
     }

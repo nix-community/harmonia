@@ -349,7 +349,7 @@ pub(crate) async fn get(
                 .context("Failed to get daemon connection")?;
             let daemon = daemon_guard.as_mut().unwrap();
             daemon
-                .query_path_from_hash_part(outhash)
+                .query_path_from_hash_part(outhash.as_bytes())
                 .await
                 .context("failed to query path from hash part")?
         }
@@ -395,7 +395,7 @@ pub(crate) async fn get(
                 .body("failed to convert hash to nix32"));
         }
     };
-    if narhash != info_hash_nix32 {
+    if narhash.as_bytes() != info_hash_nix32 {
         return Ok(HttpResponse::NotFound()
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));
@@ -507,10 +507,10 @@ mod test {
     use std::process::Command;
 
     async fn dump_to_vec(path: String) -> Result<Vec<u8>> {
-        let store = Store::new("/nix/store".to_string(), None);
+        let store = Store::new(b"/nix/store".to_vec(), None);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
-            let store_path = StorePath::new(path);
+            let store_path = StorePath::from(path);
             let e = dump_path(store.get_real_path(&store_path), &tx).await;
             if let Err(e) = e {
                 eprintln!("Error dumping path: {:?}", e);

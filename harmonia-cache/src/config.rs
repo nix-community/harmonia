@@ -21,8 +21,8 @@ fn default_priority() -> usize {
     30
 }
 
-fn default_virtual_store() -> String {
-    "/nix/store".into()
+fn default_virtual_store() -> Vec<u8> {
+    b"/nix/store".to_vec()
 }
 
 #[derive(Debug)]
@@ -45,7 +45,7 @@ pub(crate) struct Config {
     pub(crate) priority: usize,
 
     #[serde(default = "default_virtual_store")]
-    pub(crate) virtual_nix_store: String,
+    pub(crate) virtual_nix_store: Vec<u8>,
 
     #[serde(default)]
     pub(crate) real_nix_store: Option<String>,
@@ -138,7 +138,12 @@ pub(crate) fn load() -> Result<Config> {
                 )
             })?);
     }
-    let store_dir = std::env::var("NIX_STORE_DIR").unwrap_or(settings.virtual_nix_store.clone());
-    settings.store = Store::new(store_dir, settings.real_nix_store.clone());
+    let store_dir = std::env::var_os("NIX_STORE_DIR")
+        .map(|s| s.into_encoded_bytes())
+        .unwrap_or_else(|| settings.virtual_nix_store.clone());
+    settings.store = Store::new(
+        store_dir,
+        settings.real_nix_store.clone().map(|s| s.into_bytes()),
+    );
     Ok(settings)
 }

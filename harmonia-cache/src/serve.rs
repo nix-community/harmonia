@@ -136,7 +136,7 @@ pub(crate) async fn get(
     let (hash, dir) = path.into_inner();
     let dir = dir.strip_prefix("/").unwrap_or(&dir);
 
-    let store_path_obj = some_or_404!(nixhash(&settings, &hash)
+    let store_path_obj = some_or_404!(nixhash(&settings, hash.as_bytes())
         .await
         .context("Could not query nar hash in database")?);
     let store_path = settings.store.get_real_path(&store_path_obj);

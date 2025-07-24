@@ -11,8 +11,8 @@ use crate::config::SigningKey;
 // omitted: E O U T
 const BASE32_CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
 
-/// Converts the given byte slice to a nix-compatible base32 encoded String.
-fn to_nix_base32(bytes: &[u8]) -> String {
+/// Converts the given byte slice to a nix-compatible base32 encoded Vec<u8>.
+fn to_nix_base32(bytes: &[u8]) -> Vec<u8> {
     let len = (bytes.len() * 8 - 1) / 5 + 1;
 
     (0..len)
@@ -30,7 +30,7 @@ fn to_nix_base32(bytes: &[u8]) -> String {
                 bytes[i + 1].checked_shl(8 - j as u32).unwrap_or(0)
             };
             let v: usize = (v1 | v2) as usize;
-            char::from(BASE32_CHARS[v % BASE32_CHARS.len()])
+            BASE32_CHARS[v % BASE32_CHARS.len()]
         })
         .collect()
 }
@@ -56,9 +56,9 @@ fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Vec<u8>> {
         .collect()
 }
 
-pub(crate) fn convert_base16_to_nix32(hash_str: &str) -> Result<String> {
-    let bytes =
-        from_hex(hash_str).with_context(|| format!("Failed to convert hash: {}", hash_str))?;
+pub(crate) fn convert_base16_to_nix32(hash_bytes: &[u8]) -> Result<Vec<u8>> {
+    let bytes = from_hex(hash_bytes)
+        .with_context(|| format!("Failed to convert hash: {:?}", hash_bytes))?;
     Ok(to_nix_base32(&bytes))
 }
 
@@ -99,7 +99,7 @@ pub(crate) fn parse_secret_key(path: &Path) -> Result<SigningKey> {
     ))
 }
 
-pub(crate) fn sign_string(sign_key: &SigningKey, msg: &str) -> String {
+pub(crate) fn sign_string(sign_key: &SigningKey, msg: &[u8]) -> Vec<u8> {
     let dalek_key = if sign_key.key.len() == 32 {
         let key_bytes: [u8; 32] = sign_key
             .key
@@ -118,28 +118,30 @@ pub(crate) fn sign_string(sign_key: &SigningKey, msg: &str) -> String {
         panic!("Invalid signing key length: {}", sign_key.key.len());
     };
 
-    let signature = dalek_key.sign(msg.as_bytes());
-
+    let signature = dalek_key.sign(msg);
     let base64 = general_purpose::STANDARD.encode(signature.to_bytes());
-    format!("{}:{}", sign_key.name, base64)
+
+    crate::build_bytes!(sign_key.name.as_bytes(), b":", base64.as_bytes())
 }
 
 pub(crate) fn fingerprint_path(
-    virtual_nix_store: &str,
+    virtual_nix_store: &[u8],
     store_path: &StorePath,
-    nar_hash: &str,
+    nar_hash: &[u8],
     nar_size: u64,
     refs: &[StorePath],
-) -> Result<Option<String>> {
-    let store_path_str = store_path.as_str();
-    if store_path_str.len() < virtual_nix_store.len() {
+) -> Result<Option<Vec<u8>>> {
+    let store_path_bytes = store_path.as_bytes();
+    if store_path_bytes.len() < virtual_nix_store.len() {
         bail!("store path too short");
     }
-    if &store_path_str[0..virtual_nix_store.len()] != virtual_nix_store {
+    if &store_path_bytes[0..virtual_nix_store.len()] != virtual_nix_store {
         bail!("store path does not start with store dir");
     }
 
-    assert!(nar_hash.starts_with("sha256:"));
+    if !nar_hash.starts_with(b"sha256:") {
+        bail!("nar hash must start with sha256:");
+    }
 
     if nar_hash.len() != 59 {
         bail!(
@@ -149,31 +151,51 @@ pub(crate) fn fingerprint_path(
     }
 
     for r in refs {
-        if &r.as_str()[0..virtual_nix_store.len()] != virtual_nix_store {
+        let r_bytes = r.as_bytes();
+        if &r_bytes[0..virtual_nix_store.len()] != virtual_nix_store {
             bail!("ref path invalid");
         }
     }
 
-    let refs_str = if refs.is_empty() {
-        String::new()
+    let nar_size_str = nar_size.to_string();
+    let nar_size_bytes = nar_size_str.as_bytes();
+
+    // Build parts slice for the fixed portion
+    let parts: &[&[u8]] = &[
+        b"1;",
+        store_path_bytes,
+        b";",
+        nar_hash,
+        b";",
+        nar_size_bytes,
+        b";",
+    ];
+
+    // Calculate total capacity including references
+    let fixed_len: usize = parts.iter().map(|p| p.len()).sum();
+    let refs_len = if refs.is_empty() {
+        0
     } else {
-        // Pre-calculate capacity: sum of all lengths + commas
-        let capacity = refs.iter().map(|r| r.as_str().len()).sum::<usize>() + refs.len() - 1;
-        refs.iter()
-            .map(|r| r.as_str())
-            .fold(String::with_capacity(capacity), |mut acc, r| {
-                if !acc.is_empty() {
-                    acc.push(',');
-                }
-                acc.push_str(r);
-                acc
-            })
+        refs.iter().map(|r| r.as_bytes().len()).sum::<usize>() + refs.len().saturating_sub(1)
+        // commas between refs
     };
 
-    Ok(Some(format!(
-        "1;{};{};{};{}",
-        store_path_str, nar_hash, nar_size, refs_str
-    )))
+    let mut result = Vec::with_capacity(fixed_len + refs_len);
+
+    // Add fixed parts
+    for part in parts {
+        result.extend_from_slice(part);
+    }
+
+    // Add references if present (comma-separated)
+    for (i, r) in refs.iter().enumerate() {
+        if i > 0 {
+            result.push(b',');
+        }
+        result.extend_from_slice(r.as_bytes());
+    }
+
+    Ok(Some(result))
 }
 
 #[cfg(test)]
@@ -194,22 +216,22 @@ mod test {
         let sign_key = test_assets_path().join("cache.sk");
 
         let store_path =
-            StorePath::new("/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_string());
+            StorePath::new(b"/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_vec());
         let references = vec![
-            StorePath::new("/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_string()),
-            StorePath::new("/nix/store/sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36".to_string()),
+            StorePath::new(b"/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_vec()),
+            StorePath::new(b"/nix/store/sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36".to_vec()),
         ];
         let key = parse_secret_key(&sign_key)
             .with_context(|| format!("Could not parse signing key: {}", sign_key.display()))?;
         let finger_print = fingerprint_path(
-            "/nix/store",
+            b"/nix/store",
             &store_path,
-            "sha256:1mkvday29m2qxg1fnbv8xh9s6151bh8a2xzhh0k86j7lqhyfwibh",
+            b"sha256:1mkvday29m2qxg1fnbv8xh9s6151bh8a2xzhh0k86j7lqhyfwibh",
             226560,
             &references,
         )?;
         let signature = sign_string(&key, &finger_print.unwrap());
-        assert_eq!(signature, "cache.example.com-1:6wzr1QlOPHG+knFuJIaw+85Z5ivwbdI512JikexG+nQ7JDSZM2hw8zzlcLrguzoLEpCA9VzaEEQflZEHVwy9AA==");
+        assert_eq!(signature, b"cache.example.com-1:6wzr1QlOPHG+knFuJIaw+85Z5ivwbdI512JikexG+nQ7JDSZM2hw8zzlcLrguzoLEpCA9VzaEEQflZEHVwy9AA==");
         Ok(())
     }
 }

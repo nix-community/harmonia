@@ -4,15 +4,17 @@ use crate::config;
 use actix_web::{http, web, HttpResponse};
 
 pub(crate) async fn get(config: web::Data<config::Config>) -> Result<HttpResponse, Box<dyn Error>> {
+    let priority_str = config.priority.to_string();
+
+    let body = crate::build_bytes!(
+        b"StoreDir: ",
+        config.store.virtual_store(),
+        b"\nWantMassQuery: 1\nPriority: ",
+        priority_str.as_bytes(),
+        b"\n"
+    );
+
     Ok(HttpResponse::Ok()
         .insert_header((http::header::CONTENT_TYPE, "text/x-nix-cache-info"))
-        .body(
-            [
-                format!("StoreDir: {}", config.store.virtual_store()),
-                "WantMassQuery: 1".to_owned(),
-                format!("Priority: {}", config.priority),
-                "".to_owned(),
-            ]
-            .join("\n"),
-        ))
+        .body(body))
 }
