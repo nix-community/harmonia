@@ -1,10 +1,9 @@
-use anyhow::{bail, Context, Result};
+use crate::config::SigningKey;
+use crate::error::{CacheError, IoErrorContext, Result, SigningError};
 use base64::{engine::general_purpose, Engine};
 use ed25519_dalek::{Signer, SigningKey as DalekSigningKey};
 use harmonia_store_remote::protocol::StorePath;
 use std::path::Path;
-
-use crate::config::SigningKey;
 
 // this is from the nix32 crate
 
@@ -40,14 +39,20 @@ fn val(c: u8, idx: usize) -> Result<u8> {
         b'A'..=b'F' => Ok(c - b'A' + 10),
         b'a'..=b'f' => Ok(c - b'a' + 10),
         b'0'..=b'9' => Ok(c - b'0'),
-        _ => bail!("invalid hex character: c: {}, index: {}", c as char, idx),
+        _ => Err(SigningError::Operation {
+            reason: format!("invalid hex character: c: {}, index: {}", c as char, idx),
+        }
+        .into()),
     }
 }
 
 fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Vec<u8>> {
     let hex = hex.as_ref();
     if hex.len() % 2 != 0 {
-        bail!("Odd length");
+        return Err(SigningError::Operation {
+            reason: "Odd length hex string".to_string(),
+        }
+        .into());
     }
 
     hex.chunks(2)
@@ -57,34 +62,60 @@ fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Vec<u8>> {
 }
 
 pub(crate) fn convert_base16_to_nix32(hash_bytes: &[u8]) -> Result<Vec<u8>> {
-    let bytes = from_hex(hash_bytes)
-        .with_context(|| format!("Failed to convert hash: {:?}", hash_bytes))?;
+    let bytes = from_hex(hash_bytes).map_err(|e| {
+        // Extract just the error message to avoid nested "Signing error: Signing operation failed:" prefixes
+        let error_msg = if let CacheError::Signing(SigningError::Operation { reason }) = &e {
+            reason.clone()
+        } else {
+            e.to_string()
+        };
+        SigningError::Operation {
+            reason: format!(
+                "Failed to convert hash '{}': {}",
+                String::from_utf8_lossy(hash_bytes),
+                error_msg
+            ),
+        }
+    })?;
     Ok(to_nix_base32(&bytes))
 }
 
 pub(crate) fn parse_secret_key(path: &Path) -> Result<SigningKey> {
-    let sign_key = std::fs::read_to_string(path).context("Couldn't read sign_key file")?;
-    let (sign_name, sign_key64) = sign_key
-        .split_once(':')
-        .context("Sign key does not contain a ':'")?;
+    let sign_key = std::fs::read_to_string(path)
+        .io_context(format!("Couldn't read sign_key file: {}", path.display()))?;
+    let (sign_name, sign_key64) =
+        sign_key
+            .split_once(':')
+            .ok_or_else(|| SigningError::ParseKey {
+                reason: "Sign key does not contain a ':'".to_string(),
+            })?;
     let sign_keyno64 = general_purpose::STANDARD
         .decode(sign_key64.trim())
-        .context("Couldn't base64::decode sign key")?;
+        .map_err(SigningError::Base64Decode)?;
 
     if sign_keyno64.len() == 64 || sign_keyno64.len() == 32 {
         if sign_keyno64.len() == 32 {
-            let key_bytes: [u8; 32] = sign_keyno64
-                .as_slice()
-                .try_into()
-                .context("Failed to convert key bytes to [u8; 32]")?;
+            let key_bytes: [u8; 32] =
+                sign_keyno64
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| SigningError::ParseKey {
+                        reason: "Failed to convert key bytes to [u8; 32]".to_string(),
+                    })?;
             let _ = DalekSigningKey::from_bytes(&key_bytes);
         } else if sign_keyno64.len() == 64 {
-            let keypair_bytes: [u8; 64] = sign_keyno64
-                .as_slice()
-                .try_into()
-                .context("Failed to convert key bytes to [u8; 64]")?;
-            let _ = DalekSigningKey::from_keypair_bytes(&keypair_bytes)
-                .context("Invalid Ed25519 keypair")?;
+            let keypair_bytes: [u8; 64] =
+                sign_keyno64
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| SigningError::ParseKey {
+                        reason: "Failed to convert key bytes to [u8; 64]".to_string(),
+                    })?;
+            let _ = DalekSigningKey::from_keypair_bytes(&keypair_bytes).map_err(|e| {
+                SigningError::ParseKey {
+                    reason: format!("Invalid Ed25519 keypair: {e}"),
+                }
+            })?;
         }
 
         return Ok(SigningKey {
@@ -93,10 +124,13 @@ pub(crate) fn parse_secret_key(path: &Path) -> Result<SigningKey> {
         });
     }
 
-    Err(anyhow::anyhow!(
-        "Invalid signing key. Expected 32 or 64 bytes, got {}",
-        sign_keyno64.len()
-    ))
+    Err(SigningError::ParseKey {
+        reason: format!(
+            "Invalid signing key. Expected 32 or 64 bytes, got {}",
+            sign_keyno64.len()
+        ),
+    }
+    .into())
 }
 
 pub(crate) fn sign_string(sign_key: &SigningKey, msg: &[u8]) -> Vec<u8> {
@@ -133,27 +167,42 @@ pub(crate) fn fingerprint_path(
 ) -> Result<Option<Vec<u8>>> {
     let store_path_bytes = store_path.as_bytes();
     if store_path_bytes.len() < virtual_nix_store.len() {
-        bail!("store path too short");
+        return Err(SigningError::InvalidSignature {
+            reason: "store path too short".to_string(),
+        }
+        .into());
     }
     if &store_path_bytes[0..virtual_nix_store.len()] != virtual_nix_store {
-        bail!("store path does not start with store dir");
+        return Err(SigningError::InvalidSignature {
+            reason: "store path does not start with store dir".to_string(),
+        }
+        .into());
     }
 
     if !nar_hash.starts_with(b"sha256:") {
-        bail!("nar hash must start with sha256:");
+        return Err(SigningError::InvalidSignature {
+            reason: "nar hash must start with sha256:".to_string(),
+        }
+        .into());
     }
 
     if nar_hash.len() != 59 {
-        bail!(
-            "nar has not the right length, expected 59, got {}",
-            nar_hash.len()
-        );
+        return Err(SigningError::InvalidSignature {
+            reason: format!(
+                "nar has not the right length, expected 59, got {}",
+                nar_hash.len()
+            ),
+        }
+        .into());
     }
 
     for r in refs {
         let r_bytes = r.as_bytes();
         if &r_bytes[0..virtual_nix_store.len()] != virtual_nix_store {
-            bail!("ref path invalid");
+            return Err(SigningError::InvalidSignature {
+                reason: "ref path invalid".to_string(),
+            }
+            .into());
         }
     }
 
@@ -201,7 +250,6 @@ pub(crate) fn fingerprint_path(
 #[cfg(test)]
 mod test {
     use super::*;
-    use anyhow::Result;
     use std::path::PathBuf;
 
     fn test_assets_path() -> PathBuf {
@@ -221,8 +269,7 @@ mod test {
             StorePath::new(b"/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_vec()),
             StorePath::new(b"/nix/store/sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36".to_vec()),
         ];
-        let key = parse_secret_key(&sign_key)
-            .with_context(|| format!("Could not parse signing key: {}", sign_key.display()))?;
+        let key = parse_secret_key(&sign_key)?;
         let finger_print = fingerprint_path(
             b"/nix/store",
             &store_path,

@@ -1,8 +1,8 @@
+use crate::error::{BuildLogError, CacheError, IoErrorContext, Result, StoreError};
 use actix_files::NamedFile;
 use actix_web::http::header::HeaderValue;
 use actix_web::Responder;
 use actix_web::{http, web, HttpRequest, HttpResponse};
-use anyhow::{Context, Result};
 use async_compression::tokio::bufread::BzDecoder;
 use harmonia_store_remote::protocol::StorePath;
 use std::ffi::OsStr;
@@ -46,15 +46,17 @@ pub(crate) async fn get(
     drv: web::Path<String>,
     req: HttpRequest,
     settings: web::Data<Config>,
-) -> Result<HttpResponse, Box<dyn std::error::Error>> {
+) -> crate::ServerResult {
     let drv_path = some_or_404!(query_drv_path(&settings, drv.as_bytes())
         .await
-        .context("Could not query nar hash in database")?);
-    let mut daemon_guard = settings
-        .store
-        .get_daemon()
-        .await
-        .context("Failed to get daemon connection")?;
+        .map_err(|e| CacheError::from(BuildLogError::QueryFailed {
+            reason: format!("Could not query nar hash in database for {drv}: {e}"),
+        }))?);
+    let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
+        CacheError::from(StoreError::Operation {
+            reason: format!("Failed to get daemon connection: {e}"),
+        })
+    })?;
     let daemon = daemon_guard.as_mut().unwrap();
 
     match daemon.is_valid_path(&drv_path).await {
@@ -89,7 +91,7 @@ pub(crate) async fn get(
         // Decompress the bz2 file and serve the decompressed content
         let file = tokio::fs::File::open(&build_log)
             .await
-            .with_context(|| format!("Failed to open build log: {:?}", build_log.display()))?;
+            .io_context(format!("Failed to open build log: {}", build_log.display()))?;
         let reader = BufReader::new(file);
         let decompressed_stream = BzDecoder::new(reader);
         let stream = ReaderStream::new(decompressed_stream);
@@ -110,7 +112,7 @@ pub(crate) async fn get(
 
     let log = NamedFile::open_async(&build_log)
         .await
-        .with_context(|| format!("Failed to open build log: {:?}", build_log.display()))?
+        .io_context(format!("Failed to open build log: {}", build_log.display()))?
         .customize()
         .insert_header(cache_control_max_age_1y())
         .insert_header(("Content-Encoding", encoding));

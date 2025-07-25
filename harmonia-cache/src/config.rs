@@ -1,6 +1,6 @@
+use crate::error::{CacheError, ConfigError, Result};
 use crate::signing::parse_secret_key;
 use crate::store::Store;
-use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
@@ -94,12 +94,11 @@ impl Default for Config {
 
 impl Config {
     pub(crate) fn load(settings_file: &Path) -> Result<Config> {
-        toml::from_str(
-            &read_to_string(settings_file).with_context(|| {
-                format!("Couldn't read config file '{}'", settings_file.display())
-            })?,
-        )
-        .with_context(|| format!("Couldn't parse config file '{}'", settings_file.display()))
+        let contents = read_to_string(settings_file).map_err(|e| ConfigError::ReadFile {
+            path: settings_file.display().to_string(),
+            source: e,
+        })?;
+        toml::from_str(&contents).map_err(|e| CacheError::from(ConfigError::from(e)))
     }
 }
 
@@ -116,7 +115,10 @@ pub(crate) fn load() -> Result<Config> {
     };
 
     if settings.workers == 0 {
-        bail!("workers must be greater than 0");
+        return Err(ConfigError::Invalid {
+            reason: "workers must be greater than 0".to_string(),
+        }
+        .into());
     }
 
     if let Some(sign_key_path) = &settings.sign_key_path {
@@ -139,12 +141,15 @@ pub(crate) fn load() -> Result<Config> {
     for sign_key_path in &settings.sign_key_paths {
         settings
             .secret_keys
-            .push(parse_secret_key(sign_key_path).with_context(|| {
-                format!(
-                    "Couldn't parse secret key from '{}'",
-                    sign_key_path.display()
-                )
-            })?);
+            .push(
+                parse_secret_key(sign_key_path).map_err(|e| ConfigError::InvalidSigningKey {
+                    reason: format!(
+                        "Couldn't parse secret key from '{}': {}",
+                        sign_key_path.display(),
+                        e
+                    ),
+                })?,
+            );
     }
     let store_dir = std::env::var_os("NIX_STORE_DIR")
         .map(|s| s.into_encoded_bytes())

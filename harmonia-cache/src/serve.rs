@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use crate::error::IoErrorContext;
 use actix_files::NamedFile;
 use actix_web::Responder;
 use actix_web::{web, HttpRequest, HttpResponse};
-use anyhow::Context;
 use askama_escape::{escape as escape_html_entity, Html};
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use std::fmt::Write;
@@ -63,7 +63,7 @@ pub(crate) fn directory_listing(
 
     for entry in fs_path
         .read_dir()
-        .with_context(|| format!("cannot read directory: {}", fs_path.display()))?
+        .io_context(format!("cannot read directory: {}", fs_path.display()))?
     {
         let entry = entry.unwrap();
         let p = match entry.path().strip_prefix(fs_path) {
@@ -136,18 +136,17 @@ pub(crate) async fn get(
     let (hash, dir) = path.into_inner();
     let dir = dir.strip_prefix("/").unwrap_or(&dir);
 
-    let store_path_obj = some_or_404!(nixhash(&settings, hash.as_bytes())
-        .await
-        .context("Could not query nar hash in database")?);
+    let store_path_obj = some_or_404!(nixhash(&settings, hash.as_bytes()).await?);
     let store_path = settings.store.get_real_path(&store_path_obj);
     let full_path = if dir == Path::new("") {
         store_path.clone()
     } else {
         store_path.join(dir)
     };
-    let full_path = full_path
-        .canonicalize()
-        .with_context(|| format!("cannot resolve nix store path: {}", full_path.display()))?;
+    let full_path = full_path.canonicalize().io_context(format!(
+        "cannot resolve nix store path: {}",
+        full_path.display()
+    ))?;
 
     if !full_path.starts_with(settings.store.real_store()) {
         return Ok(HttpResponse::NotFound().finish());
@@ -159,7 +158,7 @@ pub(crate) async fn get(
             if stat.is_file() {
                 return Ok(NamedFile::open_async(&index_file)
                     .await
-                    .with_context(|| format!("cannot open {}", index_file.display()))?
+                    .io_context(format!("cannot open {}", index_file.display()))?
                     .respond_to(&req));
             }
         }
@@ -174,7 +173,7 @@ pub(crate) async fn get(
     } else {
         Ok(NamedFile::open_async(&full_path)
             .await
-            .with_context(|| format!("cannot open file: {}", full_path.display()))?
+            .io_context(format!("cannot open file: {}", full_path.display()))?
             .respond_to(&req))
     }
 }

@@ -1,8 +1,7 @@
-use std::{error::Error, path::Path};
+use std::path::Path;
 
+use crate::error::{CacheError, NarInfoError, Result, StoreError};
 use actix_web::{http, web, HttpResponse};
-use anyhow::Context;
-use anyhow::Result;
 use harmonia_store_remote::protocol::StorePath;
 use serde::{Deserialize, Serialize};
 use std::os::unix::ffi::OsStrExt;
@@ -46,14 +45,20 @@ async fn query_narinfo(
     let mut daemon_guard = settings.store.get_daemon().await?;
     let daemon = daemon_guard.as_mut().unwrap();
 
-    let path_info = match daemon.query_path_info(store_path).await? {
+    let path_info = match daemon
+        .query_path_info(store_path)
+        .await
+        .map_err(|e| CacheError::from(StoreError::Remote(e)))?
+    {
         Some(info) => info,
         None => {
             return Ok(None);
         }
     };
     let nar_hash =
-        convert_base16_to_nix32(&path_info.hash).context("failed to convert path info hash")?;
+        convert_base16_to_nix32(&path_info.hash).map_err(|e| NarInfoError::ParseFailed {
+            reason: format!("failed to convert path info hash: {}", e),
+        })?;
     let mut res = NarInfo {
         store_path: store_path.as_bytes().to_vec(),
         url: crate::build_bytes!(b"nar/", &nar_hash, b".nar?hash=", hash.as_bytes(),),
@@ -184,11 +189,14 @@ pub(crate) async fn get(
     hash: web::Path<String>,
     param: web::Query<Param>,
     settings: web::Data<Config>,
-) -> Result<HttpResponse, Box<dyn Error>> {
+) -> crate::ServerResult {
     let hash = hash.into_inner();
-    let store_path = some_or_404!(nixhash(&settings, hash.as_bytes())
-        .await
-        .context("Could not query nar hash in database")?);
+    let store_path =
+        some_or_404!(nixhash(&settings, hash.as_bytes())
+            .await
+            .map_err(|e| CacheError::from(NarInfoError::QueryFailed {
+                reason: format!("Could not query nar hash in database: {e}"),
+            }))?);
     let narinfo = match query_narinfo(
         settings.store.virtual_store(),
         &store_path,

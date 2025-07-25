@@ -1,3 +1,4 @@
+use crate::error::{Result, StoreError};
 use harmonia_store_remote::client::DaemonClient;
 use harmonia_store_remote::protocol::StorePath;
 use std::ffi::OsStr;
@@ -51,23 +52,14 @@ impl Store {
         &self.virtual_store
     }
 
-    pub async fn get_daemon(
-        &self,
-    ) -> Result<tokio::sync::MutexGuard<'_, Option<DaemonClient>>, anyhow::Error> {
-        use anyhow::Context;
-
+    pub async fn get_daemon(&self) -> Result<tokio::sync::MutexGuard<'_, Option<DaemonClient>>> {
         let mut daemon_guard = self.daemon.lock().await;
 
         // Connect to daemon if not already connected
         if daemon_guard.is_none() {
             let client = DaemonClient::connect(&self.daemon_socket)
                 .await
-                .with_context(|| {
-                    format!(
-                        "Failed to connect to nix daemon at '{}'",
-                        self.daemon_socket.display()
-                    )
-                })?;
+                .map_err(StoreError::Remote)?;
             *daemon_guard = Some(client);
         }
 

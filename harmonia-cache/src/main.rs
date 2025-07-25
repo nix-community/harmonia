@@ -1,10 +1,8 @@
 #![warn(clippy::dbg_macro)]
 
 use actix_web::middleware;
-use anyhow::bail;
-use anyhow::Context;
-use anyhow::Result;
 use config::Config;
+use error::{CacheError, IoErrorContext, Result, ServerError as ServerErrorType, StoreError};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -32,6 +30,7 @@ macro_rules! build_bytes {
 mod buildlog;
 mod cacheinfo;
 mod config;
+mod error;
 mod health;
 mod nar;
 mod narinfo;
@@ -44,26 +43,30 @@ mod version;
 
 async fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
     if hash.len() != 32 {
-        bail!("Hash is too short: expected 32 bytes, got {}", hash.len());
+        return Err(StoreError::HashConversion {
+            hash: String::from_utf8_lossy(hash).to_string(),
+            reason: format!("expected 32 bytes, got {}", hash.len()),
+        }
+        .into());
     }
 
-    let mut daemon_guard = settings.store.get_daemon().await.with_context(|| {
-        format!(
-            "Failed to get daemon connection for hash: {}",
-            String::from_utf8_lossy(hash)
-        )
-    })?;
+    let mut daemon_guard =
+        settings
+            .store
+            .get_daemon()
+            .await
+            .map_err(|e| StoreError::Operation {
+                reason: format!("Failed to get daemon connection: {e}"),
+            })?;
     let daemon = daemon_guard.as_mut().unwrap();
 
-    daemon
+    Ok(daemon
         .query_path_from_hash_part(hash)
         .await
-        .with_context(|| {
-            format!(
-                "Failed to query path from daemon for hash: {}",
-                String::from_utf8_lossy(hash)
-            )
-        })
+        .map_err(|e| StoreError::PathQuery {
+            hash: String::from_utf8_lossy(hash).to_string(),
+            reason: e.to_string(),
+        })?)
 }
 
 const BOOTSTRAP_SOURCE: &str = r#"
@@ -113,33 +116,43 @@ pub(crate) use some_or_404;
 
 #[derive(Debug)]
 struct ServerError {
-    err: anyhow::Error,
+    err: CacheError,
 }
 
 impl Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.err)?;
-        for cause in self.err.chain().skip(1) {
-            writeln!(f, "because: {}", cause)?;
-        }
-        Ok(())
+        write!(f, "{}", self.err)
     }
 }
 
-impl actix_web::error::ResponseError for ServerError {}
+impl actix_web::error::ResponseError for ServerError {
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        use actix_web::http::StatusCode;
+        match &self.err {
+            CacheError::Config(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            CacheError::Store(StoreError::PathQuery { .. }) => StatusCode::NOT_FOUND,
+            CacheError::Signing(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            CacheError::Serve(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            CacheError::Nar(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            CacheError::BuildLog(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            CacheError::NarInfo(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
 
-impl From<anyhow::Error> for ServerError {
-    fn from(err: anyhow::Error) -> ServerError {
+impl From<CacheError> for ServerError {
+    fn from(err: CacheError) -> ServerError {
         ServerError { err }
     }
 }
 
-type ServerResult = Result<HttpResponse, ServerError>;
+type ServerResult = std::result::Result<HttpResponse, ServerError>;
 
 async fn inner_main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let c = web::Data::new(config::load().with_context(|| "Failed to load configuration")?);
+    let c = web::Data::new(config::load()?);
     let config_data = c.clone();
 
     log::info!("listening on {}", c.bind);
@@ -187,7 +200,10 @@ async fn inner_main() -> Result<()> {
             } else if url.host().is_none() {
                 (url.path(), true)
             } else {
-                bail!("Can only bind to file URLs without host portion.");
+                return Err(error::ServerError::Startup {
+                    reason: "Can only bind to file URLs without host portion.".to_string(),
+                }
+                .into());
             }
         } else {
             (c.bind.as_str(), false)
@@ -199,24 +215,43 @@ async fn inner_main() -> Result<()> {
             log::error!("TLS is not supported with Unix domain sockets.");
             std::process::exit(1);
         }
-        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())?;
-        builder.set_private_key_file(c.tls_key_path.clone().unwrap(), SslFiletype::PEM)?;
-        builder.set_certificate_chain_file(c.tls_cert_path.clone().unwrap())?;
-        server = server.bind_openssl(c.bind.clone(), builder)?;
+        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).map_err(|e| {
+            ServerErrorType::TlsSetup {
+                reason: e.to_string(),
+            }
+        })?;
+        builder
+            .set_private_key_file(c.tls_key_path.clone().unwrap(), SslFiletype::PEM)
+            .map_err(|e| ServerErrorType::TlsSetup {
+                reason: format!("Failed to set private key: {e}"),
+            })?;
+        builder
+            .set_certificate_chain_file(c.tls_cert_path.clone().unwrap())
+            .map_err(|e| ServerErrorType::TlsSetup {
+                reason: format!("Failed to set certificate chain: {e}"),
+            })?;
+        server = server
+            .bind_openssl(c.bind.clone(), builder)
+            .io_context("Failed to bind with TLS")?;
     } else if uds {
         if !cfg!(unix) {
             log::error!("Binding to Unix domain sockets is only supported on Unix.");
             std::process::exit(1);
         } else {
             let socket_path = Path::new(bind);
-            server = server.bind_uds(socket_path)?;
-            fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))?;
+            server = server
+                .bind_uds(socket_path)
+                .io_context("Failed to bind to Unix domain socket")?;
+            fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))
+                .io_context("Failed to set socket permissions")?;
         }
     } else {
-        server = server.bind(c.bind.clone())?;
+        server = server
+            .bind(c.bind.clone())
+            .io_context("Failed to bind server")?;
     }
 
-    server.run().await.context("Failed to start server")
+    server.run().await.io_context("Failed to start server")
 }
 
 #[actix_web::main]

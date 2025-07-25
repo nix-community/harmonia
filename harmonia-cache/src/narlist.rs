@@ -1,7 +1,6 @@
-use std::error::Error;
-
+use crate::error::{CacheError, IoErrorContext, NarInfoError, Result, ServeError};
+use crate::ServerResult;
 use actix_web::{http, web, HttpResponse};
-use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::Metadata;
 use std::os::unix::fs::PermissionsExt;
@@ -57,26 +56,29 @@ fn file_entry(metadata: Metadata) -> NarEntry {
 }
 
 async fn symlink_entry(path: &Path) -> Result<NarEntry> {
-    let target = tokio::fs::read_link(&path).await?;
+    let target = tokio::fs::read_link(&path)
+        .await
+        .io_context(format!("Failed to read link {}", path.display()))?;
     Ok(NarEntry::Symlink {
         target: target.to_string_lossy().into_owned(),
     })
 }
 
 async fn get_nar_list(path: PathBuf) -> Result<NarList> {
-    let st = symlink_metadata(&path).await?;
+    let st = symlink_metadata(&path).await.io_context(format!(
+        "Failed to get symlink metadata for {}",
+        path.display()
+    ))?;
 
     let file_type = st.file_type();
     let root = if file_type.is_file() {
         file_entry(st)
     } else if file_type.is_symlink() {
-        symlink_entry(&path)
-            .await
-            .with_context(|| format!("Failed to read symlink {:?}", path))?
+        symlink_entry(&path).await?
     } else if file_type.is_dir() {
         let dir_entry = tokio::fs::read_dir(&path)
             .await
-            .with_context(|| format!("Failed to read directory {:?}", path))?;
+            .io_context(format!("Failed to read directory {}", path.display()))?;
         let mut stack = vec![Frame {
             path,
             dir_entry,
@@ -88,10 +90,18 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
         let mut root: Option<NarEntry> = None;
 
         while let Some(frame) = stack.last_mut() {
-            if let Some(entry) = frame.dir_entry.next_entry().await? {
+            if let Some(entry) = frame
+                .dir_entry
+                .next_entry()
+                .await
+                .io_context("Failed to read next directory entry")?
+            {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 let entry_path = entry.path();
-                let entry_st = symlink_metadata(&entry_path).await?;
+                let entry_st = symlink_metadata(&entry_path).await.io_context(format!(
+                    "Failed to get metadata for {}",
+                    entry_path.display()
+                ))?;
                 let entry_file_type = entry_st.file_type();
 
                 let entries = match &mut frame.nar_entry {
@@ -101,14 +111,11 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
                 if entry_file_type.is_file() {
                     entries.insert(name, file_entry(entry_st));
                 } else if entry_file_type.is_symlink() {
-                    entries.insert(
-                        name,
-                        symlink_entry(&entry_path)
-                            .await
-                            .with_context(|| format!("Failed to read symlink {:?}", entry_path))?,
-                    );
+                    entries.insert(name, symlink_entry(&entry_path).await?);
                 } else if entry_file_type.is_dir() {
-                    let dir_entry = tokio::fs::read_dir(&entry_path).await?;
+                    let dir_entry = tokio::fs::read_dir(&entry_path)
+                        .await
+                        .io_context(format!("Failed to read directory {}", entry_path.display()))?;
                     stack.push(Frame {
                         path: entry_path,
                         dir_entry,
@@ -122,7 +129,12 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
                 if let Some(frame) = stack.last_mut() {
                     let name = match entry.path.file_name() {
                         Some(name) => name.to_string_lossy().into_owned(),
-                        None => bail!("Failed to get file name {:?}", entry.path),
+                        None => {
+                            return Err(ServeError::AccessDenied {
+                                path: entry.path.display().to_string(),
+                            }
+                            .into())
+                        }
                     };
                     let entries = match &mut frame.nar_entry {
                         NarEntry::Directory { entries, .. } => entries,
@@ -137,25 +149,35 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
 
         root.unwrap()
     } else {
-        return Err(anyhow::anyhow!("Unsupported file type {:?}", path));
+        return Err(ServeError::ServeFailed {
+            source: std::io::Error::other(format!(
+                "Unsupported file type for path: {}",
+                path.display()
+            )),
+        }
+        .into());
     };
 
     Ok(NarList { version: 1, root })
 }
 
-pub(crate) async fn get(
-    hash: web::Path<String>,
-    settings: web::Data<Config>,
-) -> Result<HttpResponse, Box<dyn Error>> {
-    let store_path = some_or_404!(nixhash(&settings, hash.as_bytes())
-        .await
-        .context("Could not query nar hash in database")?);
+pub(crate) async fn get(hash: web::Path<String>, settings: web::Data<Config>) -> ServerResult {
+    let store_path =
+        some_or_404!(nixhash(&settings, hash.as_bytes())
+            .await
+            .map_err(|e| CacheError::from(NarInfoError::QueryFailed {
+                reason: format!("Could not query nar hash in database: {e}"),
+            }))?);
 
     let nar_list = get_nar_list(settings.store.get_real_path(&store_path)).await?;
     Ok(HttpResponse::Ok()
         .insert_header(cache_control_max_age_1y())
         .insert_header(http::header::ContentType(mime::APPLICATION_JSON))
-        .body(serde_json::to_string(&nar_list)?))
+        .body(serde_json::to_string(&nar_list).map_err(|e| {
+            CacheError::from(ServeError::ServeFailed {
+                source: std::io::Error::other(e),
+            })
+        })?))
 }
 
 #[cfg(test)]
@@ -180,37 +202,23 @@ mod test {
 
     #[tokio::test]
     async fn test_get_nar_list() -> Result<()> {
-        let temp_dir = tempfile::tempdir()
-            .context("Failed to create temp dir")
-            .expect("Failed to create temp dir");
+        let temp_dir = tempfile::tempdir().io_context("Failed to create temp dir")?;
         let dir = temp_dir.path().join("store");
-        fs::create_dir(&dir)
-            .context("Failed to create temp dir")
-            .unwrap();
-        fs::write(dir.join("file"), b"somecontent")
-            .context("Failed to write file")
-            .unwrap();
+        fs::create_dir(&dir).io_context("Failed to create temp dir")?;
+        fs::write(dir.join("file"), b"somecontent").io_context("Failed to write file")?;
 
-        fs::create_dir(dir.join("some_empty_dir"))
-            .context("Failed to create dir")
-            .unwrap();
+        fs::create_dir(dir.join("some_empty_dir")).io_context("Failed to create dir")?;
 
         let some_dir = dir.join("some_dir");
-        fs::create_dir(&some_dir)
-            .context("Failed to create dir")
-            .unwrap();
+        fs::create_dir(&some_dir).io_context("Failed to create dir")?;
 
         let executable_path = some_dir.join("executable");
-        fs::write(&executable_path, b"somescript")
-            .context("Failed to write file")
-            .unwrap();
+        fs::write(&executable_path, b"somescript").io_context("Failed to write file")?;
         fs::set_permissions(&executable_path, fs::Permissions::from_mode(0o755))
-            .context("Failed to set permissions")
-            .unwrap();
+            .io_context("Failed to set permissions")?;
 
         std::os::unix::fs::symlink("sometarget", dir.join("symlink"))
-            .context("Failed to create symlink")
-            .unwrap();
+            .io_context("Failed to create symlink")?;
 
         let json = get_nar_list(dir.to_owned()).await.unwrap();
 
@@ -221,11 +229,11 @@ mod test {
             .arg(dir)
             .stdout(
                 fs::File::create(&nar_file)
-                    .context("Failed to create nar file")
+                    .io_context("Failed to create nar file")
                     .unwrap(),
             )
             .status()
-            .context("Failed to run nix-store --dump")
+            .io_context("Failed to run nix-store --dump")
             .unwrap();
         assert!(res.success());
         // nix nar ls --json --recursive
@@ -239,7 +247,7 @@ mod test {
             .arg(&nar_file)
             .arg("/")
             .output()
-            .context("Failed to run nix nar ls --json --recursive")
+            .io_context("Failed to run nix nar ls --json --recursive")
             .unwrap();
         let parsed_json: serde_json::Value = serde_json::from_slice(&res2.stdout).unwrap();
         let pretty_string = serde_json::to_string_pretty(&parsed_json).unwrap();

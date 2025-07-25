@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::mem::size_of;
 
+use crate::error::{CacheError, IoErrorContext, NarError, Result, StoreError};
 use actix_web::web::Bytes;
 use actix_web::{http, web, HttpRequest, HttpResponse};
-use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::fs::{self, Metadata};
 use std::os::unix::ffi::OsStrExt;
@@ -84,7 +83,7 @@ fn alignment(size: u64) -> usize {
 }
 
 async fn write_byte_slices(
-    tx: &Sender<Result<Bytes, ThreadSafeError>>,
+    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
     slices: &[&[u8]],
 ) -> Result<()> {
     let total_len = slices
@@ -101,48 +100,54 @@ async fn write_byte_slices(
 
     tx.send(Ok(Bytes::from(vec)))
         .await
-        .context("Failed to send")
+        .map_err(|e| NarError::ChannelSend {
+            reason: format!("Failed to send byte slices: {e}"),
+        })?;
+    Ok(())
 }
 
 async fn dump_contents(
     p: &Path,
     expected_size: u64,
-    tx: &Sender<Result<Bytes, ThreadSafeError>>,
+    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
 ) -> Result<()> {
-    let mut file = File::open(p).await.with_context(|| {
+    let mut file = File::open(p).await.map_err(|e| {
         log::warn!("Failed to open file for dumping contents: {}", p.display());
-        format!(
-            "Failed to open file for dumping contents: {}",
-            p.to_string_lossy()
-        )
+        NarError::ReadFile {
+            path: p.display().to_string(),
+            source: e,
+        }
     })?;
     let mut left = expected_size;
 
     loop {
         let mut buf = vec![0; 16384];
 
-        let n = file.read(&mut buf).await.with_context(|| {
-            format!(
-                "Failed to read file for dumping contents: {}",
-                p.to_string_lossy()
-            )
-        })?;
+        let n = file.read(&mut buf).await.io_context(format!(
+            "Failed to read file for dumping contents: {}",
+            p.display()
+        ))?;
         if n == 0 {
             if left != 0 {
                 log::warn!(
                     "Read less bytes than expected while dumping contents: {}",
                     p.to_string_lossy()
                 );
-                bail!(
-                    "Unexpected end of file while dumping contents: {}",
-                    p.to_string_lossy()
-                )
+                return Err(NarError::Streaming {
+                    reason: format!(
+                        "Unexpected end of file while dumping contents: {}",
+                        p.display()
+                    ),
+                }
+                .into());
             }
             // add zero padding at the end
             buf.resize(n + alignment(expected_size), 0);
             tx.send(Ok(Bytes::from(buf)))
                 .await
-                .context("Failed to send")?;
+                .map_err(|e| NarError::ChannelSend {
+                    reason: format!("Failed to send final NAR chunk with padding: {e}"),
+                })?;
             break;
         }
         if n as u64 > left {
@@ -150,16 +155,21 @@ async fn dump_contents(
                 "Read more bytes than expected while dumping contents: {}",
                 p.to_string_lossy()
             );
-            bail!(
-                "Read more bytes than expected while dumping contents: {}",
-                p.to_string_lossy()
-            )
+            return Err(NarError::Streaming {
+                reason: format!(
+                    "Read more bytes than expected while dumping contents: {}",
+                    p.display()
+                ),
+            }
+            .into());
         }
         left -= n as u64;
 
         tx.send(Ok(Bytes::from(buf).slice(0..n)))
             .await
-            .context("Failed to send")?;
+            .map_err(|e| NarError::ChannelSend {
+                reason: format!("Failed to send NAR chunk: {e}"),
+            })?;
     }
     Ok(())
 }
@@ -194,16 +204,20 @@ impl Frame {
     async fn new(path: PathBuf) -> Result<Self> {
         let metadata = tokio::fs::symlink_metadata(&path)
             .await
-            .with_context(|| format!("Failed to get metadata for path: {}", path.display()))?;
+            .io_context(format!(
+                "Failed to get metadata for path: {}",
+                path.display()
+            ))?;
         let children = if metadata.is_dir() {
-            let mut read_dir = tokio::fs::read_dir(&path).await.with_context(|| {
-                format!("Failed to read directory for path: {}", path.display())
-            })?;
+            let mut read_dir = tokio::fs::read_dir(&path).await.io_context(format!(
+                "Failed to read directory for path: {}",
+                path.display()
+            ))?;
             let mut entries = BTreeMap::new();
             while let Some(e) = read_dir
                 .next_entry()
                 .await
-                .context("Failed to read directory")?
+                .io_context("Failed to read directory")?
             {
                 let file_name = e.file_name();
                 if file_name == "." || file_name == ".." {
@@ -229,7 +243,10 @@ impl Frame {
     }
 }
 
-async fn dump_file(frame: &Frame, tx: &Sender<Result<Bytes, ThreadSafeError>>) -> Result<()> {
+async fn dump_file(
+    frame: &Frame,
+    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
+) -> Result<()> {
     if frame.metadata.permissions().mode() & 0o100 != 0 {
         write_byte_slices(
             tx,
@@ -241,19 +258,22 @@ async fn dump_file(frame: &Frame, tx: &Sender<Result<Bytes, ThreadSafeError>>) -
     }
     tx.send(Ok(Bytes::from(frame.metadata.len().to_le_bytes().to_vec())))
         .await
-        .context("Failed to send")?;
+        .map_err(|e| NarError::ChannelSend {
+            reason: format!("Failed to send file size: {e}"),
+        })?;
 
     dump_contents(&frame.path, frame.metadata.len(), tx).await?;
     write_byte_slices(tx, &[b")"]).await?;
     Ok(())
 }
 
-async fn dump_symlink(frame: &Frame, tx: &Sender<Result<Bytes, ThreadSafeError>>) -> Result<()> {
-    let link_target = fs::read_link(&frame.path).with_context(|| {
-        format!(
-            "Failed to read link target for path: {}",
-            frame.path.display()
-        )
+async fn dump_symlink(
+    frame: &Frame,
+    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
+) -> Result<()> {
+    let link_target = fs::read_link(&frame.path).map_err(|e| NarError::SymlinkRead {
+        path: frame.path.display().to_string(),
+        source: e,
     })?;
     write_byte_slices(
         tx,
@@ -270,7 +290,10 @@ async fn dump_symlink(frame: &Frame, tx: &Sender<Result<Bytes, ThreadSafeError>>
     Ok(())
 }
 
-async fn dump_path(path: PathBuf, tx: &Sender<Result<Bytes, ThreadSafeError>>) -> Result<()> {
+async fn dump_path(
+    path: PathBuf,
+    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
+) -> Result<()> {
     write_byte_slices(tx, &[b"nix-archive-1"]).await?;
     let mut stack = vec![Frame::new(path).await?];
 
@@ -313,7 +336,10 @@ async fn dump_path(path: PathBuf, tx: &Sender<Result<Bytes, ThreadSafeError>>) -
             } else if file_type.is_symlink() {
                 dump_symlink(frame, tx).await?;
             } else {
-                bail!("Unsupported file type: {:?}", file_type);
+                return Err(NarError::Streaming {
+                    reason: format!("Unsupported file type for path: {}", frame.path.display()),
+                }
+                .into());
             }
             stack.pop();
         }
@@ -327,7 +353,7 @@ pub(crate) async fn get(
     req: HttpRequest,
     q: web::Query<NarRequest>,
     settings: web::Data<Config>,
-) -> Result<HttpResponse, Box<dyn Error>> {
+) -> crate::ServerResult {
     // Extract the narhash from the query parameter, and bail out if it's missing or invalid.
     let narhash = some_or_404!(Some(path.narhash.as_str()));
 
@@ -342,16 +368,21 @@ pub(crate) async fn get(
     };
     let store_path = match outhash {
         Some(outhash) => {
-            let mut daemon_guard = settings
-                .store
-                .get_daemon()
-                .await
-                .context("Failed to get daemon connection")?;
+            let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
+                CacheError::from(StoreError::Operation {
+                    reason: format!("Failed to get daemon connection: {e}"),
+                })
+            })?;
             let daemon = daemon_guard.as_mut().unwrap();
             daemon
                 .query_path_from_hash_part(outhash.as_bytes())
                 .await
-                .context("failed to query path from hash part")?
+                .map_err(|e| {
+                    CacheError::from(StoreError::PathQuery {
+                        hash: String::from_utf8_lossy(outhash.as_bytes()).to_string(),
+                        reason: e.to_string(),
+                    })
+                })?
         }
         None => {
             return Ok(HttpResponse::NotFound()
@@ -370,14 +401,18 @@ pub(crate) async fn get(
 
     // lookup the path info.
     let info = {
-        let mut daemon_guard = settings
-            .store
-            .get_daemon()
-            .await
-            .context("Failed to get daemon connection")?;
+        let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
+            CacheError::from(StoreError::Operation {
+                reason: format!("Failed to get daemon connection: {e}"),
+            })
+        })?;
         let daemon = daemon_guard.as_mut().unwrap();
 
-        match daemon.query_path_info(&store_path).await? {
+        match daemon
+            .query_path_info(&store_path)
+            .await
+            .map_err(|e| CacheError::from(StoreError::Remote(e)))?
+        {
             Some(info) => info,
             None => {
                 return Ok(HttpResponse::NotFound()
@@ -405,7 +440,7 @@ pub(crate) async fn get(
     let offset;
     let mut res = HttpResponse::Ok();
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
+    let (tx, rx) = tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
     let rx = tokio_stream::wrappers::ReceiverStream::new(rx);
 
     // Credit actix_web actix-files: https://github.com/actix/actix-web/blob/master/actix-files/src/named.rs#L525
@@ -439,7 +474,8 @@ pub(crate) async fn get(
         };
         let mut send: u64 = 0;
 
-        let (tx2, mut rx2) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
+        let (tx2, mut rx2) =
+            tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
             // If Nix is set to a non-root store, physical store paths will differ from
             // logical paths. Below we check if that is the case, and rewrite to physical
@@ -447,7 +483,7 @@ pub(crate) async fn get(
 
             let err = dump_path(settings.store.get_real_path(&store_path), &tx2).await;
             if let Err(err) = err {
-                log::error!("Error dumping path {}: {:?}", store_path, err);
+                log::error!("Error dumping path {store_path}: {err}");
             }
         });
         // we keep this closure extra to avoid unaligned copies in the non-range request case.
@@ -465,14 +501,14 @@ pub(crate) async fn get(
                     let start: usize = match start.try_into() {
                         Ok(v) => v,
                         Err(e) => {
-                            log::error!("BUG: start(u64) is too big for usize: {:?}", e);
+                            log::error!("BUG: start(u64) is too big for usize: {e}");
                             break;
                         }
                     };
                     let end: usize = match end.try_into() {
                         Ok(v) => v,
                         Err(e) => {
-                            log::error!("BUG: end(u64) is too big for usize: {:?}", e);
+                            log::error!("BUG: end(u64) is too big for usize: {e}");
                             break;
                         }
                     };
@@ -487,7 +523,7 @@ pub(crate) async fn get(
         task::spawn(async move {
             let err = dump_path(settings.store.get_real_path(&store_path), &tx).await;
             if let Err(err) = err {
-                log::error!("Error dumping path {}: {:?}", store_path, err);
+                log::error!("Error dumping path {store_path}: {err}");
             }
         });
     };
@@ -512,12 +548,13 @@ mod test {
             None,
             std::path::PathBuf::from("/nix/var/nix/daemon-socket/socket"),
         );
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
             let store_path = StorePath::from(path);
             let e = dump_path(store.get_real_path(&store_path), &tx).await;
             if let Err(e) = e {
-                eprintln!("Error dumping path: {:?}", e);
+                eprintln!("Error dumping path: {e}");
             }
         });
         let mut resp = Vec::new();
@@ -528,7 +565,10 @@ mod test {
                     resp.extend_from_slice(&bytes);
                 }
                 Some(Err(e)) => {
-                    bail!("Got error: {:?}", e);
+                    return Err(NarError::Streaming {
+                        reason: format!("Got error: {e}"),
+                    }
+                    .into());
                 }
                 None => {
                     if i > 100 {
@@ -572,28 +612,34 @@ mod test {
     #[tokio::test]
     async fn test_dump_store() -> Result<()> {
         let temp_dir = tempfile::tempdir()
-            .context("Failed to create temp dir")
+            .map_err(|e| NarError::Streaming {
+                reason: format!("Failed to create temp dir: {e}"),
+            })
             .expect("Failed to create temp dir");
         let dir = temp_dir.path();
-        fs::write(dir.join("file"), b"somecontent")?;
+        fs::write(dir.join("file"), b"somecontent").io_context("Failed to write test file")?;
 
-        fs::create_dir(dir.join("some_empty_dir"))?;
+        fs::create_dir(dir.join("some_empty_dir")).io_context("Failed to create test empty dir")?;
 
         let some_dir = dir.join("some_dir");
-        fs::create_dir(&some_dir)?;
+        fs::create_dir(&some_dir).io_context("Failed to create test dir")?;
 
         let executable_path = some_dir.join("executable");
-        fs::write(&executable_path, b"somescript")?;
-        fs::set_permissions(&executable_path, fs::Permissions::from_mode(0o755))?;
+        fs::write(&executable_path, b"somescript").io_context("Failed to write test executable")?;
+        fs::set_permissions(&executable_path, fs::Permissions::from_mode(0o755))
+            .io_context("Failed to set test executable permissions")?;
 
-        std::os::unix::fs::symlink("sometarget", dir.join("symlink"))?;
+        std::os::unix::fs::symlink("sometarget", dir.join("symlink"))
+            .io_context("Failed to create test symlink")?;
 
         let nar_dump = dump_to_vec(dir.to_str().unwrap().to_owned()).await?;
         let res = Command::new("nix-store")
             .arg("--dump")
             .arg(dir)
             .output()
-            .context("Failed to run nix-store --dump")?;
+            .map_err(|e| NarError::Streaming {
+                reason: format!("Failed to run nix-store --dump: {e}"),
+            })?;
         assert_eq!(res.status.code(), Some(0));
         println!("nar_dump:");
         pretty_hex_dump(&nar_dump);
