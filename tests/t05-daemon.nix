@@ -66,6 +66,13 @@ pkgs.nixosTest {
       # Test that harmonia-cache can serve content
       server.succeed("curl -f http://localhost:5000/nix-cache-info")
       
+      # Get hello hash and try to fetch narinfo
+      hello_hash = "${hashPart pkgs.hello}"
+      server.succeed(f"curl -v http://localhost:5000/{hello_hash}.narinfo >&2 || true")
+
+      # Check harmonia-dev logs for the error
+      server.succeed("journalctl -u harmonia-dev.service --no-pager >&2")
+
       # Test that client can fetch from harmonia-cache using nix copy
       client.wait_until_succeeds("timeout 1 curl -f http://server:5000")
       client.succeed("curl -f http://server:5000/nix-cache-info")
