@@ -44,16 +44,26 @@ mod version;
 
 async fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
     if hash.len() != 32 {
-        bail!("Hash is too short");
+        bail!("Hash is too short: expected 32 bytes, got {}", hash.len());
     }
 
-    let mut daemon_guard = settings.store.get_daemon().await?;
+    let mut daemon_guard = settings.store.get_daemon().await.with_context(|| {
+        format!(
+            "Failed to get daemon connection for hash: {}",
+            String::from_utf8_lossy(hash)
+        )
+    })?;
     let daemon = daemon_guard.as_mut().unwrap();
 
     daemon
         .query_path_from_hash_part(hash)
         .await
-        .context("Failed to query path")
+        .with_context(|| {
+            format!(
+                "Failed to query path from daemon for hash: {}",
+                String::from_utf8_lossy(hash)
+            )
+        })
 }
 
 const BOOTSTRAP_SOURCE: &str = r#"

@@ -60,10 +60,14 @@ impl Store {
 
         // Connect to daemon if not already connected
         if daemon_guard.is_none() {
-            let client =
-                DaemonClient::connect(&self.daemon_socket)
-                    .await
-                    .context("Failed to connect to nix daemon")?;
+            let client = DaemonClient::connect(&self.daemon_socket)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to connect to nix daemon at '{}'",
+                        self.daemon_socket.display()
+                    )
+                })?;
             *daemon_guard = Some(client);
         }
 
