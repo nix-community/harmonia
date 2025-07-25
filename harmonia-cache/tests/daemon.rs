@@ -148,8 +148,6 @@ log_level = "debug"
         let child = Command::new("cargo")
             .args(["run", "-p", "harmonia-daemon", "--"])
             .env("HARMONIA_DAEMON_CONFIG", &config_path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
             .spawn()?;
 
         // Create a guard that owns the config file
