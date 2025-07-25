@@ -119,7 +119,9 @@ impl StoreDb {
         // Build ValidPathInfo
         let info = ValidPathInfo {
             deriver: deriver.map(StorePath::from),
-            hash: hash.into_bytes(),
+            // Extract hex part of hash for protocol (Nix daemon protocol expects plain hex without prefix)
+            // Nix always stores hashes with "sha256:" prefix in the database
+            hash: hash.as_bytes()[7..].to_vec(),
             references,
             registration_time: registration_time as u64,
             nar_size: nar_size as u64,
