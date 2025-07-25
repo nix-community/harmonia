@@ -507,7 +507,11 @@ mod test {
     use std::process::Command;
 
     async fn dump_to_vec(path: String) -> Result<Vec<u8>> {
-        let store = Store::new(b"/nix/store".to_vec(), None);
+        let store = Store::new(
+            b"/nix/store".to_vec(),
+            None,
+            std::path::PathBuf::from("/nix/var/nix/daemon-socket/socket"),
+        );
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
             let store_path = StorePath::from(path);

@@ -25,6 +25,10 @@ fn default_virtual_store() -> Vec<u8> {
     b"/nix/store".to_vec()
 }
 
+fn default_daemon_socket() -> PathBuf {
+    PathBuf::from("/nix/var/nix/daemon-socket/socket")
+}
+
 #[derive(Debug)]
 pub(crate) struct SigningKey {
     pub(crate) name: String,
@@ -59,6 +63,9 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) tls_key_path: Option<String>,
 
+    #[serde(default = "default_daemon_socket")]
+    pub(crate) daemon_socket: PathBuf,
+
     #[serde(skip, default)]
     pub(crate) secret_keys: Vec<SigningKey>,
     #[serde(skip)]
@@ -78,8 +85,9 @@ impl Default for Config {
             sign_key_paths: Vec::new(),
             tls_cert_path: None,
             tls_key_path: None,
+            daemon_socket: default_daemon_socket(),
             secret_keys: Vec::new(),
-            store: Store::new(default_virtual_store(), None),
+            store: Store::new(default_virtual_store(), None, default_daemon_socket()),
         }
     }
 }
@@ -144,6 +152,7 @@ pub(crate) fn load() -> Result<Config> {
     settings.store = Store::new(
         store_dir,
         settings.real_nix_store.clone().map(|s| s.into_bytes()),
+        settings.daemon_socket.clone(),
     );
     Ok(settings)
 }

@@ -6,18 +6,24 @@ use std::path::Path;
 use std::path::PathBuf;
 use tokio::sync::Mutex;
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Store {
     virtual_store: Vec<u8>,
     real_store: Option<Vec<u8>>,
+    daemon_socket: PathBuf,
     pub daemon: Mutex<Option<DaemonClient>>,
 }
 
 impl Store {
-    pub fn new(virtual_store: Vec<u8>, real_store: Option<Vec<u8>>) -> Self {
+    pub fn new(
+        virtual_store: Vec<u8>,
+        real_store: Option<Vec<u8>>,
+        daemon_socket: PathBuf,
+    ) -> Self {
         Self {
             virtual_store,
             real_store,
+            daemon_socket,
             daemon: Mutex::new(None),
         }
     }
@@ -55,12 +61,23 @@ impl Store {
         // Connect to daemon if not already connected
         if daemon_guard.is_none() {
             let client =
-                DaemonClient::connect(std::path::Path::new("/nix/var/nix/daemon-socket/socket"))
+                DaemonClient::connect(&self.daemon_socket)
                     .await
                     .context("Failed to connect to nix daemon")?;
             *daemon_guard = Some(client);
         }
 
         Ok(daemon_guard)
+    }
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Self {
+            virtual_store: b"/nix/store".to_vec(),
+            real_store: None,
+            daemon_socket: PathBuf::from("/nix/var/nix/daemon-socket/socket"),
+            daemon: Mutex::new(None),
+        }
     }
 }
