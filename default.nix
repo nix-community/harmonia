@@ -9,6 +9,7 @@
   openssl ? pkgs.openssl,
   nix ? pkgs.nix,
   makeWrapper ? pkgs.makeWrapper,
+  curl ? pkgs.curl,
   enableClippy ? false,
 }:
 
@@ -30,6 +31,8 @@ rustPlatform.buildRustPackage (
         ./tests/cache.sk
         ./tests/cache2.pk
         ./tests/cache2.sk
+        ./tests/tls-key.pem
+        ./tests/tls-cert.pem
       ];
     };
     cargoLock.lockFile = ./Cargo.lock;
@@ -42,7 +45,11 @@ rustPlatform.buildRustPackage (
       libsodium
       openssl
     ];
-    doCheck = false;
+    doCheck = true;
+    nativeCheckInputs = [
+      nix
+      curl
+    ];
 
     postInstall = ''
       wrapProgram $out/bin/harmonia \

@@ -43,7 +43,6 @@
               t00-simple = import ./tests/t00-simple.nix testArgs;
               t02-varnish = import ./tests/t02-varnish.nix testArgs;
               t03-chroot = import ./tests/t03-chroot.nix testArgs;
-              t04-tls = import ./tests/t04-tls.nix testArgs;
               t05-daemon = import ./tests/t05-daemon.nix testArgs;
             }
             // {
