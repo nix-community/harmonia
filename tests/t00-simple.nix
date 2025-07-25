@@ -22,7 +22,7 @@
         {
           imports = [ ../module.nix ];
 
-          services.harmonia-dev.enable = true;
+          services.harmonia-dev.cache.enable = true;
 
           networking.firewall.allowedTCPPorts = [ 5000 ];
           system.extraDependencies = [

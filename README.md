@@ -17,6 +17,8 @@ It's written in Rust for speed.
 
 ## Configuration for public binary cache on NixOS
 
+### Using NixOS stable (from nixpkgs)
+
 There is a module for harmonia in nixpkgs.
 The following example set's up harmonia as a public binary cache using
 nginx as a frontend webserver with https encryption:
@@ -48,6 +50,49 @@ nginx as a frontend webserver with https encryption:
       enableACME = true;
       forceSSL = true;
 
+      locations."/".extraConfig = ''
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_redirect http:// https://;
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+      '';
+    };
+  };
+}
+```
+
+### Using the flake version (latest features)
+
+To use the latest version with all features, import the harmonia flake:
+
+```nix
+# flake.nix
+{
+  inputs.harmonia.url = "github:nix-community/harmonia";
+  # ... other inputs
+}
+
+# configuration.nix
+{ inputs, config, pkgs, ... }: {
+  imports = [ inputs.harmonia.nixosModules.harmonia ];
+
+  services.harmonia-dev.cache.enable = true;
+  # FIXME: generate a public/private key pair like this:
+  # $ nix-store --generate-binary-cache-key cache.yourdomain.tld-1 /var/lib/secrets/harmonia.secret /var/lib/secrets/harmonia.pub
+  services.harmonia-dev.cache.signKeyPaths = [ "/var/lib/secrets/harmonia.secret" ];
+
+  # All other nginx configuration remains the same as above
+  networking.firewall.allowedTCPPorts = [ 443 80 ];
+
+  services.nginx = {
+    enable = true;
+    recommendedTlsSettings = true;
+    virtualHosts."cache.yourdomain.tld" = {
+      enableACME = true;
+      forceSSL = true;
       locations."/".extraConfig = ''
         proxy_pass http://127.0.0.1:5000;
         proxy_set_header Host $host;
@@ -141,6 +186,47 @@ nix develop
 nix flake check -L
 ```
 
+
+## Harmonia Daemon
+
+This feature is currently only available when using the flake version of the NixOS module.
+Harmonia includes an experimental Nix daemon implementation (`harmonia-daemon`) that can serve as a replacement for the standard `nix-daemon`.
+This daemon implements the Nix daemon protocol and allows Harmonia to operate independently of the system's Nix daemon.
+
+The daemon provides several benefits:
+- **Enhanced security**: Isolates Harmonia's operations from the system Nix daemon, reducing attack surface
+- **Dedicated resource allocation**: Run with separate resource limits without affecting system Nix operations
+
+To use this feature, you need to import the harmonia flake in your NixOS configuration:
+
+```nix
+# flake.nix
+{
+  inputs.harmonia.url = "github:nix-community/harmonia";
+  # ... other inputs
+}
+
+# configuration.nix or your NixOS module
+{ inputs, ... }:
+{
+  imports = [ inputs.harmonia.nixosModules.harmonia ];
+  
+  services.harmonia-dev.daemon.enable = true;
+
+  # Optional: Configure the daemon
+  #services.harmonia-dev.daemon = {
+  #  socketPath = "/run/harmonia-daemon/socket";  # Default
+  #  storeDir = "/nix/store";                      # Default
+  #  dbPath = "/nix/var/nix/db/db.sqlite";        # Default
+  #  logLevel = "info";                            # Default
+  #};
+
+  # The cache will automatically use the daemon when enabled
+  services.harmonia-dev.cache.enable = true;
+}
+```
+
+When the daemon is enabled, the Harmonia cache service will automatically use it instead of connecting to the system's `nix-daemon`.
 
 ## Inspiration
 

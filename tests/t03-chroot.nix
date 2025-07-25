@@ -9,8 +9,8 @@
         {
           imports = [ ../module.nix ];
 
-          services.harmonia-dev.enable = true;
-          services.harmonia-dev.settings.real_nix_store = "/guest/nix/store";
+          services.harmonia-dev.cache.enable = true;
+          services.harmonia-dev.cache.settings.real_nix_store = "/guest/nix/store";
           # We need to manipulate the target store first
           systemd.services."harmonia-dev".wantedBy = pkgs.lib.mkForce [ ];
 

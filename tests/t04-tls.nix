@@ -4,9 +4,9 @@
   nodes.harmonia = {
     imports = [ ../module.nix ];
 
-    services.harmonia-dev.enable = true;
-    services.harmonia-dev.settings.tls_cert_path = ./tls-cert.pem;
-    services.harmonia-dev.settings.tls_key_path = ./tls-key.pem;
+    services.harmonia-dev.cache.enable = true;
+    services.harmonia-dev.cache.settings.tls_cert_path = ./tls-cert.pem;
+    services.harmonia-dev.cache.settings.tls_key_path = ./tls-key.pem;
   };
 
   testScript = ''

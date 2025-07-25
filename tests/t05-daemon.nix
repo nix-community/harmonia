@@ -7,13 +7,13 @@ pkgs.nixosTest {
   nodes = {
     server = {
       imports = [ self.outputs.nixosModules.harmonia ];
-      
+
       # Enable both harmonia-daemon and harmonia-cache
-      services.harmonia-daemon = {
+      services.harmonia-dev.daemon = {
         enable = true;
       };
-      
-      services.harmonia-dev = {
+
+      services.harmonia-dev.cache = {
         enable = true;
         settings = {
           bind = "[::]:5000";
@@ -22,14 +22,14 @@ pkgs.nixosTest {
 
       # Ensure we have some paths in the store for testing
       system.extraDependencies = [ pkgs.hello ];
-      
+
       # Disable the regular nix-daemon to avoid conflicts
       systemd.services.nix-daemon.enable = false;
       systemd.sockets.nix-daemon.enable = false;
-      
+
       networking.firewall.allowedTCPPorts = [ 5000 ];
     };
-    
+
     client = {
       nix.settings = {
         substituters = [ "http://server:5000" ];
@@ -41,7 +41,7 @@ pkgs.nixosTest {
     };
   };
 
-  testScript = 
+  testScript =
     let
       hashPart = pkg: builtins.substring (builtins.stringLength builtins.storeDir + 1) 32 pkg.outPath;
     in
@@ -51,7 +51,7 @@ pkgs.nixosTest {
       # Wait for harmonia-daemon to start
       server.wait_for_unit("harmonia-daemon.service")
       server.wait_for_file("/run/harmonia-daemon/socket")
-      
+
       # Wait for harmonia-cache to start
       server.wait_for_unit("harmonia-dev.service")
       server.wait_for_open_port(5000)
@@ -62,10 +62,10 @@ pkgs.nixosTest {
       # Test that both services are running
       server.succeed("systemctl is-active harmonia-daemon.service")
       server.succeed("systemctl is-active harmonia-dev.service || (systemctl status harmonia-dev.service; false)")
-      
+
       # Test that harmonia-cache can serve content
       server.succeed("curl -f http://localhost:5000/nix-cache-info")
-      
+
       # Get hello hash and try to fetch narinfo
       hello_hash = "${hashPart pkgs.hello}"
       server.succeed(f"curl -v http://localhost:5000/{hello_hash}.narinfo >&2 || true")
@@ -76,16 +76,16 @@ pkgs.nixosTest {
       # Test that client can fetch from harmonia-cache using nix copy
       client.wait_until_succeeds("timeout 1 curl -f http://server:5000")
       client.succeed("curl -f http://server:5000/nix-cache-info")
-      
+
       # Create a separate store on client
       client.succeed("mkdir -p /tmp/test-store")
-      
+
       # Copy hello package from server's harmonia-cache to the file store
       client.wait_until_succeeds("nix copy --from http://server:5000/ --to file:///tmp/test-store ${pkgs.hello}")
-      
+
       # Verify the package was copied to the file store
       client.succeed("nix path-info --store file:///tmp/test-store ${pkgs.hello}")
-      
+
       # Check logs for any errors
       for service in ["harmonia-daemon", "harmonia-dev"]:
           output = server.succeed(f"journalctl -u {service}.service || true")

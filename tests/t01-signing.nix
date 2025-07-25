@@ -22,7 +22,7 @@
         {
           imports = [ ../module.nix ];
 
-          services.harmonia-dev = {
+          services.harmonia-dev.cache = {
             enable = true;
             signKeyPaths = [
               "${./cache.sk}"

@@ -12,8 +12,8 @@
         {
           imports = [ ../module.nix ];
 
-          services.harmonia-dev.enable = true;
-          services.harmonia-dev.settings.bind = "unix:${sock}";
+          services.harmonia-dev.cache.enable = true;
+          services.harmonia-dev.cache.settings.bind = "unix:${sock}";
 
           services.varnish = {
             enable = true;

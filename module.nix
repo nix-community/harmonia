@@ -6,93 +6,112 @@
 }:
 let
   cfg = config.services.harmonia-dev;
-  daemonCfg = config.services.harmonia-daemon;
+  cacheCfg = cfg.cache;
+  daemonCfg = cfg.daemon;
 
   format = pkgs.formats.toml { };
-  configFile = format.generate "harmonia.toml" cfg.settings;
+  configFile = format.generate "harmonia.toml" cacheCfg.settings;
 
-  signKeyPaths = cfg.signKeyPaths ++ (if cfg.signKeyPath != null then [ cfg.signKeyPath ] else [ ]);
+  signKeyPaths =
+    cacheCfg.signKeyPaths ++ (if cacheCfg.signKeyPath != null then [ cacheCfg.signKeyPath ] else [ ]);
   credentials = lib.imap0 (i: signKeyPath: {
     id = "sign-key-${builtins.toString i}";
     path = signKeyPath;
   }) signKeyPaths;
 in
 {
+  imports = [
+    # Renamed options for flat harmonia-dev -> harmonia-dev.cache
+    (lib.mkRenamedOptionModule
+      [ "services" "harmonia-dev" "enable" ]
+      [ "services" "harmonia-dev" "cache" "enable" ]
+    )
+    (lib.mkRenamedOptionModule
+      [ "services" "harmonia-dev" "signKeyPath" ]
+      [ "services" "harmonia-dev" "cache" "signKeyPath" ]
+    )
+    (lib.mkRenamedOptionModule
+      [ "services" "harmonia-dev" "signKeyPaths" ]
+      [ "services" "harmonia-dev" "cache" "signKeyPaths" ]
+    )
+    (lib.mkRenamedOptionModule
+      [ "services" "harmonia-dev" "settings" ]
+      [ "services" "harmonia-dev" "cache" "settings" ]
+    )
+    # Note: package stays at the top level
+  ];
+
   options = {
     services.harmonia-dev = {
-      enable = lib.mkEnableOption (lib.mdDoc "Harmonia: Nix binary cache written in Rust");
-
-      signKeyPath = lib.mkOption {
-        type = lib.types.nullOr lib.types.path;
-        default = null;
-        description = lib.mdDoc "DEPRECATED: Use `services.harmonia-dev.signKeyPaths` instead. Path to the signing key to use for signing the cache";
-      };
-
-      signKeyPaths = lib.mkOption {
-        type = lib.types.listOf lib.types.path;
-        default = [ ];
-        description = lib.mdDoc "Paths to the signing keys to use for signing the cache";
-      };
-
-      settings = lib.mkOption {
-        type = lib.types.submodule { freeformType = format.type; };
-
-        description = lib.mdDoc "Settings to merge with the default configuration";
-      };
-
       package = lib.mkOption {
         type = lib.types.path;
         default = pkgs.callPackage ./. { };
         description = "The harmonia package";
       };
-    };
 
-    services.harmonia-daemon = {
-      enable = lib.mkEnableOption (lib.mdDoc "Harmonia daemon: Nix daemon protocol implementation");
+      cache = {
+        enable = lib.mkEnableOption (lib.mdDoc "Harmonia: Nix binary cache written in Rust");
 
-      socketPath = lib.mkOption {
-        type = lib.types.str;
-        default = "/run/harmonia-daemon/socket";
-        description = lib.mdDoc "Path where the daemon socket will be created";
+        signKeyPath = lib.mkOption {
+          type = lib.types.nullOr lib.types.path;
+          default = null;
+          description = lib.mdDoc "DEPRECATED: Use `services.harmonia-dev.cache.signKeyPaths` instead. Path to the signing key to use for signing the cache";
+        };
+
+        signKeyPaths = lib.mkOption {
+          type = lib.types.listOf lib.types.path;
+          default = [ ];
+          description = lib.mdDoc "Paths to the signing keys to use for signing the cache";
+        };
+
+        settings = lib.mkOption {
+          type = lib.types.submodule { freeformType = format.type; };
+
+          description = lib.mdDoc "Settings to merge with the default configuration";
+        };
       };
 
-      storeDir = lib.mkOption {
-        type = lib.types.str;
-        default = "/nix/store";
-        description = lib.mdDoc "Path to the Nix store directory";
-      };
+      daemon = {
+        enable = lib.mkEnableOption (lib.mdDoc "Harmonia daemon: Nix daemon protocol implementation");
 
-      dbPath = lib.mkOption {
-        type = lib.types.str;
-        default = "/nix/var/nix/db/db.sqlite";
-        description = lib.mdDoc "Path to the Nix database";
-      };
+        socketPath = lib.mkOption {
+          type = lib.types.str;
+          default = "/run/harmonia-daemon/socket";
+          description = lib.mdDoc "Path where the daemon socket will be created";
+        };
 
-      logLevel = lib.mkOption {
-        type = lib.types.str;
-        default = "info";
-        description = lib.mdDoc "Log level for the daemon";
-      };
+        storeDir = lib.mkOption {
+          type = lib.types.str;
+          default = "/nix/store";
+          description = lib.mdDoc "Path to the Nix store directory";
+        };
 
-      package = lib.mkOption {
-        type = lib.types.path;
-        default = pkgs.callPackage ./. { };
-        description = "The harmonia package containing harmonia-daemon";
+        dbPath = lib.mkOption {
+          type = lib.types.str;
+          default = "/nix/var/nix/db/db.sqlite";
+          description = lib.mdDoc "Path to the Nix database";
+        };
+
+        logLevel = lib.mkOption {
+          type = lib.types.str;
+          default = "info";
+          description = lib.mdDoc "Log level for the daemon";
+        };
       };
     };
   };
 
   config = lib.mkMerge [
-    (lib.mkIf cfg.enable {
+    (lib.mkIf cacheCfg.enable {
       warnings =
-        if cfg.signKeyPath != null then
+        if cacheCfg.signKeyPath != null then
           [
-            ''`services.harmonia-dev.signKeyPath` is deprecated, use `services.harmonia-dev.signKeyPaths` instead''
+            ''`services.harmonia-dev.cache.signKeyPath` is deprecated, use `services.harmonia-dev.cache.signKeyPaths` instead''
           ]
         else
           [ ];
 
-      services.harmonia-dev.settings = builtins.mapAttrs (_: v: lib.mkDefault v) (
+      services.harmonia-dev.cache.settings = builtins.mapAttrs (_: v: lib.mkDefault v) (
         {
           bind = "[::]:5000";
           workers = 4;
@@ -199,7 +218,7 @@ in
 
           serviceConfig = {
             Type = "simple";
-            ExecStart = "${daemonCfg.package}/bin/harmonia-daemon";
+            ExecStart = "${cfg.package}/bin/harmonia-daemon";
             Restart = "on-failure";
             RestartSec = 5;
 
