@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::os::unix::ffi::OsStrExt;
 
 use crate::config::{Config, SigningKey};
-use crate::signing::convert_base16_to_nix32;
 use crate::signing::{fingerprint_path, sign_string};
 use crate::{cache_control_max_age_1d, nixhash, some_or_404};
 
@@ -55,10 +54,7 @@ async fn query_narinfo(
             return Ok(None);
         }
     };
-    let nar_hash =
-        convert_base16_to_nix32(&path_info.hash).map_err(|e| NarInfoError::ParseFailed {
-            reason: format!("failed to convert path info hash: {}", e),
-        })?;
+    let nar_hash = path_info.hash.to_nix_base32();
     let mut res = NarInfo {
         store_path: store_path.as_bytes().to_vec(),
         url: crate::build_bytes!(b"nar/", &nar_hash, b".nar?hash=", hash.as_bytes(),),

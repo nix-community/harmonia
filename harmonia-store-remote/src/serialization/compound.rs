@@ -91,9 +91,9 @@ impl Serialize for ValidPathInfo {
                 .io_context("Failed to write deriver")?,
         }
 
-        // Serialize hash
+        // Serialize hash as hex string bytes (nix-daemon compatibility)
         self.hash
-            .as_slice()
+            .to_hex()
             .serialize(writer, version)
             .await
             .io_context("Failed to write hash")?;
@@ -159,10 +159,18 @@ impl Deserialize for ValidPathInfo {
             Some(StorePath::new(deriver_bytes))
         };
 
-        // Deserialize hash
-        let hash = Vec::<u8>::deserialize(reader, version)
+        // Deserialize hash (comes as hex string bytes from nix-daemon)
+        let hash_bytes = Vec::<u8>::deserialize(reader, version)
             .await
             .io_context("Failed to read hash")?;
+        // Assume SHA256 for nix-daemon compatibility
+        let hash = harmonia_store_core::Hash::from_hex_bytes(
+            harmonia_store_core::HashAlgo::Sha256,
+            &hash_bytes,
+        )
+        .map_err(|e| ProtocolError::DaemonError {
+            message: format!("Failed to parse hash: {e}"),
+        })?;
 
         // Deserialize references
         let references = Vec::<StorePath>::deserialize(reader, version)

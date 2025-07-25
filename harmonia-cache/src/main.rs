@@ -42,14 +42,6 @@ mod store;
 mod version;
 
 async fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
-    if hash.len() != 32 {
-        return Err(StoreError::HashConversion {
-            hash: String::from_utf8_lossy(hash).to_string(),
-            reason: format!("expected 32 bytes, got {}", hash.len()),
-        }
-        .into());
-    }
-
     let mut daemon_guard =
         settings
             .store

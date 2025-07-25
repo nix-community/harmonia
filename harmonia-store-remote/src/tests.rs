@@ -3,6 +3,7 @@ use crate::error::ProtocolError;
 use crate::protocol::{StorePath, ValidPathInfo, CURRENT_PROTOCOL_VERSION};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::{DaemonServer, RequestHandler};
+use harmonia_store_core::Hash;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
@@ -105,7 +106,10 @@ async fn test_serialization_roundtrip() {
 async fn test_valid_path_info_serialization() {
     let info = ValidPathInfo {
         deriver: Some(StorePath::from(b"/nix/store/abc-test.drv".to_vec())),
-        hash: b"sha256:abcdef".to_vec(),
+        hash: Hash::parse(
+            b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        )
+        .unwrap(),
         references: vec![
             StorePath::from(b"/nix/store/ref1".to_vec()),
             StorePath::from(b"/nix/store/ref2".to_vec()),
@@ -162,7 +166,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     assert!(path_info.is_some());
     let path_info = path_info.unwrap();
     assert!(path_info.nar_size > 0);
-    assert!(!path_info.hash.is_empty());
+    assert!(!path_info.hash.digest.is_empty());
 
     // Test query_path_from_hash_part
     let hash_part = store_path
@@ -245,7 +249,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
                 StorePath::from("/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1");
             let test_info = ValidPathInfo {
                 deriver: Some(StorePath::from("/nix/store/xyz789abc123def456ghi789jkl012m-hello-2.12.1.drv")),
-                hash: b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_vec(),
+                hash: Hash::parse(b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap(),
                 references: vec![
                     StorePath::from(b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec()),
                     StorePath::from(b"/nix/store/222222222222222222222222222222222-gcc-13.2.0-lib".to_vec()),
@@ -278,8 +282,10 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
                 deriver: Some(StorePath::from(
                     b"/nix/store/mno345pqr678stu901vwx234yz567ab-bash-5.2-p21.drv".to_vec(),
                 )),
-                hash: b"sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
-                    .to_vec(),
+                hash: Hash::parse(
+                    b"sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
+                )
+                .unwrap(),
                 references: vec![
                     StorePath::from(
                         b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec(),
@@ -408,8 +414,10 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
             );
             let test_info = ValidPathInfo {
                 deriver: None,
-                hash: b"sha256:1111111111111111111111111111111111111111111111111111111111111111"
-                    .to_vec(),
+                hash: Hash::parse(
+                    b"sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                )
+                .unwrap(),
                 references: vec![],
                 registration_time: 1700000000,
                 nar_size: 42,

@@ -1,84 +1,9 @@
 use crate::config::SigningKey;
-use crate::error::{CacheError, IoErrorContext, Result, SigningError};
+use crate::error::{IoErrorContext, Result, SigningError};
 use base64::{engine::general_purpose, Engine};
 use ed25519_dalek::{Signer, SigningKey as DalekSigningKey};
 use harmonia_store_remote::protocol::StorePath;
 use std::path::Path;
-
-// this is from the nix32 crate
-
-// omitted: E O U T
-const BASE32_CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
-
-/// Converts the given byte slice to a nix-compatible base32 encoded Vec<u8>.
-fn to_nix_base32(bytes: &[u8]) -> Vec<u8> {
-    let len = (bytes.len() * 8 - 1) / 5 + 1;
-
-    (0..len)
-        .rev()
-        .map(|n| {
-            let b: usize = n * 5;
-            let i: usize = b / 8;
-            let j: usize = b % 8;
-            // bits from the lower byte
-            let v1 = bytes[i].checked_shr(j as u32).unwrap_or(0);
-            // bits from the upper byte
-            let v2 = if i >= bytes.len() - 1 {
-                0
-            } else {
-                bytes[i + 1].checked_shl(8 - j as u32).unwrap_or(0)
-            };
-            let v: usize = (v1 | v2) as usize;
-            BASE32_CHARS[v % BASE32_CHARS.len()]
-        })
-        .collect()
-}
-
-fn val(c: u8, idx: usize) -> Result<u8> {
-    match c {
-        b'A'..=b'F' => Ok(c - b'A' + 10),
-        b'a'..=b'f' => Ok(c - b'a' + 10),
-        b'0'..=b'9' => Ok(c - b'0'),
-        _ => Err(SigningError::Operation {
-            reason: format!("invalid hex character: c: {}, index: {}", c as char, idx),
-        }
-        .into()),
-    }
-}
-
-fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Vec<u8>> {
-    let hex = hex.as_ref();
-    if hex.len() % 2 != 0 {
-        return Err(SigningError::Operation {
-            reason: "Odd length hex string".to_string(),
-        }
-        .into());
-    }
-
-    hex.chunks(2)
-        .enumerate()
-        .map(|(i, pair)| Ok(val(pair[0], 2 * i)? << 4 | val(pair[1], 2 * i + 1)?))
-        .collect()
-}
-
-pub(crate) fn convert_base16_to_nix32(hash_bytes: &[u8]) -> Result<Vec<u8>> {
-    let bytes = from_hex(hash_bytes).map_err(|e| {
-        // Extract just the error message to avoid nested "Signing error: Signing operation failed:" prefixes
-        let error_msg = if let CacheError::Signing(SigningError::Operation { reason }) = &e {
-            reason.clone()
-        } else {
-            e.to_string()
-        };
-        SigningError::Operation {
-            reason: format!(
-                "Failed to convert hash '{}': {}",
-                String::from_utf8_lossy(hash_bytes),
-                error_msg
-            ),
-        }
-    })?;
-    Ok(to_nix_base32(&bytes))
-}
 
 pub(crate) fn parse_secret_key(path: &Path) -> Result<SigningKey> {
     let sign_key = std::fs::read_to_string(path)

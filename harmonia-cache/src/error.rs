@@ -67,9 +67,6 @@ pub enum StoreError {
     #[error("Failed to query path for hash {hash}: {reason}")]
     PathQuery { hash: String, reason: String },
 
-    #[error("Hash conversion failed for {hash}: {reason}")]
-    HashConversion { hash: String, reason: String },
-
     #[error("Store operation failed: {reason}")]
     Operation { reason: String },
 
@@ -110,18 +107,12 @@ pub enum SigningError {
 
     #[error("Invalid signature: {reason}")]
     InvalidSignature { reason: String },
-
-    #[error("Signing operation failed: {reason}")]
-    Operation { reason: String },
 }
 
 #[derive(Error, Debug)]
 pub enum NarInfoError {
     #[error("Failed to query path info: {reason}")]
     QueryFailed { reason: String },
-
-    #[error("Failed to parse NAR info: {reason}")]
-    ParseFailed { reason: String },
 }
 
 #[derive(Error, Debug)]

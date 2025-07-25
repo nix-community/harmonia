@@ -14,7 +14,6 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
 use crate::config::Config;
-use crate::signing::convert_base16_to_nix32;
 use crate::{cache_control_max_age_1y, some_or_404};
 use std::ffi::{OsStr, OsString};
 use tokio::{sync, task};
@@ -422,15 +421,7 @@ pub(crate) async fn get(
         }
     }; // daemon_guard is dropped here
 
-    let info_hash_nix32 = match convert_base16_to_nix32(&info.hash) {
-        Ok(info_hash_nix32) => info_hash_nix32,
-        Err(_) => {
-            return Ok(HttpResponse::InternalServerError()
-                .insert_header(crate::cache_control_no_store())
-                .body("failed to convert hash to nix32"));
-        }
-    };
-    if narhash.as_bytes() != info_hash_nix32 {
+    if narhash.as_bytes() != info.hash.to_nix_base32() {
         return Ok(HttpResponse::NotFound()
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));

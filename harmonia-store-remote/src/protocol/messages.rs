@@ -42,7 +42,7 @@ impl From<Vec<u8>> for StorePath {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidPathInfo {
     pub deriver: Option<StorePath>,
-    pub hash: Vec<u8>,
+    pub hash: harmonia_store_core::Hash,
     pub references: Vec<StorePath>,
     pub registration_time: u64,
     pub nar_size: u64,

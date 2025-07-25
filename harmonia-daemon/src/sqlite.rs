@@ -1,3 +1,4 @@
+use harmonia_store_core::Hash;
 use harmonia_store_remote::{
     error::ProtocolError,
     protocol::{StorePath, ValidPathInfo},
@@ -116,12 +117,15 @@ impl StoreDb {
                 format!("Failed to collect references for path '{path_str}'")
             })?;
 
+        // Parse the hash from database format
+        let parsed_hash = Hash::parse(hash.as_bytes()).map_err(|e| ProtocolError::DaemonError {
+            message: format!("Failed to parse hash from database '{hash}': {e}"),
+        })?;
+
         // Build ValidPathInfo
         let info = ValidPathInfo {
             deriver: deriver.map(StorePath::from),
-            // Extract hex part of hash for protocol (Nix daemon protocol expects plain hex without prefix)
-            // Nix always stores hashes with "sha256:" prefix in the database
-            hash: hash.as_bytes()[7..].to_vec(),
+            hash: parsed_hash,
             references,
             registration_time: registration_time as u64,
             nar_size: nar_size as u64,

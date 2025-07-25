@@ -804,6 +804,7 @@ dependencies = [
  "base64",
  "ed25519-dalek",
  "env_logger",
+ "harmonia-store-core",
  "harmonia-store-remote",
  "http-range",
  "log",
@@ -831,6 +832,7 @@ name = "harmonia-daemon"
 version = "2.1.0"
 dependencies = [
  "env_logger",
+ "harmonia-store-core",
  "harmonia-store-remote",
  "log",
  "rusqlite",
@@ -842,10 +844,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "harmonia-store-core"
+version = "2.1.0"
+dependencies = [
+ "base64",
+ "hex",
+ "thiserror",
+]
+
+[[package]]
 name = "harmonia-store-remote"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "harmonia-store-core",
  "tempfile",
  "thiserror",
  "tokio",
@@ -880,6 +892,12 @@ name = "hermit-abi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "http"
