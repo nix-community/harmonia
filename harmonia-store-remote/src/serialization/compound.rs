@@ -3,6 +3,7 @@ use crate::protocol::{
     ProtocolVersion, StorePath, ValidPathInfo, MAX_STRING_LIST_SIZE, MAX_STRING_SIZE,
 };
 use crate::serialization::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 impl Serialize for StorePath {
@@ -173,7 +174,7 @@ impl Deserialize for ValidPathInfo {
         })?;
 
         // Deserialize references
-        let references = Vec::<StorePath>::deserialize(reader, version)
+        let references = BTreeSet::<StorePath>::deserialize(reader, version)
             .await
             .io_context("Failed to read references")?;
 

@@ -3,6 +3,7 @@ use crate::error::{IoErrorContext, Result, SigningError};
 use base64::{engine::general_purpose, Engine};
 use ed25519_dalek::{Signer, SigningKey as DalekSigningKey};
 use harmonia_store_remote::protocol::StorePath;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 pub(crate) fn parse_secret_key(path: &Path) -> Result<SigningKey> {
@@ -88,7 +89,7 @@ pub(crate) fn fingerprint_path(
     store_path: &StorePath,
     nar_hash: &[u8],
     nar_size: u64,
-    refs: &[StorePath],
+    refs: &BTreeSet<StorePath>,
 ) -> Result<Option<Vec<u8>>> {
     let store_path_bytes = store_path.as_bytes();
     if store_path_bytes.len() < virtual_nix_store.len() {
@@ -190,10 +191,13 @@ mod test {
 
         let store_path =
             StorePath::new(b"/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_vec());
-        let references = vec![
-            StorePath::new(b"/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_vec()),
-            StorePath::new(b"/nix/store/sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36".to_vec()),
-        ];
+        let mut references = BTreeSet::new();
+        references.insert(StorePath::new(
+            b"/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1".to_vec(),
+        ));
+        references.insert(StorePath::new(
+            b"/nix/store/sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36".to_vec(),
+        ));
         let key = parse_secret_key(&sign_key)?;
         let finger_print = fingerprint_path(
             b"/nix/store",

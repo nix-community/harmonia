@@ -1,6 +1,7 @@
+use std::collections::BTreeSet;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StorePath {
     path: Vec<u8>,
 }
@@ -43,7 +44,7 @@ impl From<Vec<u8>> for StorePath {
 pub struct ValidPathInfo {
     pub deriver: Option<StorePath>,
     pub hash: harmonia_store_core::Hash,
-    pub references: Vec<StorePath>,
+    pub references: BTreeSet<StorePath>,
     pub registration_time: u64,
     pub nar_size: u64,
     pub ultimate: bool,

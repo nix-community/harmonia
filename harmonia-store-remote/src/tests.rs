@@ -4,7 +4,7 @@ use crate::protocol::{StorePath, ValidPathInfo, CURRENT_PROTOCOL_VERSION};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::{DaemonServer, RequestHandler};
 use harmonia_store_core::Hash;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
 use std::path::Path;
 use std::process::Command;
@@ -110,10 +110,12 @@ async fn test_valid_path_info_serialization() {
             b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
         )
         .unwrap(),
-        references: vec![
-            StorePath::from(b"/nix/store/ref1".to_vec()),
-            StorePath::from(b"/nix/store/ref2".to_vec()),
-        ],
+        references: {
+            let mut refs = BTreeSet::new();
+            refs.insert(StorePath::from(b"/nix/store/ref1".to_vec()));
+            refs.insert(StorePath::from(b"/nix/store/ref2".to_vec()));
+            refs
+        },
         registration_time: 1234567890,
         nar_size: 9876,
         ultimate: true,
@@ -250,10 +252,12 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             let test_info = ValidPathInfo {
                 deriver: Some(StorePath::from("/nix/store/xyz789abc123def456ghi789jkl012m-hello-2.12.1.drv")),
                 hash: Hash::parse(b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap(),
-                references: vec![
-                    StorePath::from(b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec()),
-                    StorePath::from(b"/nix/store/222222222222222222222222222222222-gcc-13.2.0-lib".to_vec()),
-                ],
+                references: {
+                    let mut refs = BTreeSet::new();
+                    refs.insert(StorePath::from(b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec()));
+                    refs.insert(StorePath::from(b"/nix/store/222222222222222222222222222222222-gcc-13.2.0-lib".to_vec()));
+                    refs
+                },
                 registration_time: 1700000000,
                 nar_size: 123456,
                 ultimate: false,
@@ -286,17 +290,19 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
                     b"sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
                 )
                 .unwrap(),
-                references: vec![
-                    StorePath::from(
+                references: {
+                    let mut refs = BTreeSet::new();
+                    refs.insert(StorePath::from(
                         b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec(),
-                    ),
-                    StorePath::from(
+                    ));
+                    refs.insert(StorePath::from(
                         b"/nix/store/333333333333333333333333333333333-readline-8.2p7".to_vec(),
-                    ),
-                    StorePath::from(
+                    ));
+                    refs.insert(StorePath::from(
                         b"/nix/store/444444444444444444444444444444444-ncurses-6.4".to_vec(),
-                    ),
-                ],
+                    ));
+                    refs
+                },
                 registration_time: 1700000100,
                 nar_size: 987654,
                 ultimate: true,
@@ -418,7 +424,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                     b"sha256:1111111111111111111111111111111111111111111111111111111111111111",
                 )
                 .unwrap(),
-                references: vec![],
+                references: BTreeSet::new(),
                 registration_time: 1700000000,
                 nar_size: 42,
                 ultimate: true,

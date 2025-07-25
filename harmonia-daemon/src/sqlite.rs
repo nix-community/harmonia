@@ -4,6 +4,7 @@ use harmonia_store_remote::{
     protocol::{StorePath, ValidPathInfo},
 };
 use rusqlite::{params, Connection, OptionalExtension};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::error::{DaemonError, DbContext};
@@ -106,13 +107,13 @@ impl StoreDb {
                 format!("Failed to prepare references query for path '{path_str}'")
             })?;
 
-        let references: Vec<StorePath> = ref_stmt
+        let references: BTreeSet<StorePath> = ref_stmt
             .query_map(params![id], |row| {
                 let path: String = row.get(0)?;
                 Ok(StorePath::from(path))
             })
-            .db_protocol_context(|| format!("Failed to query references for path '{}'", path_str))?
-            .collect::<Result<Vec<_>, _>>()
+            .db_protocol_context(|| format!("Failed to query references for path '{path_str}'"))?
+            .collect::<Result<BTreeSet<_>, _>>()
             .db_protocol_context(|| {
                 format!("Failed to collect references for path '{path_str}'")
             })?;

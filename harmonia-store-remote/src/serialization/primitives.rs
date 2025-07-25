@@ -1,6 +1,7 @@
 use crate::error::{IoErrorContext, ProtocolError};
 use crate::protocol::{ProtocolVersion, MAX_STRING_LIST_SIZE, MAX_STRING_SIZE};
 use crate::serialization::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 impl Serialize for u64 {
@@ -264,5 +265,52 @@ impl<T: Deserialize> Deserialize for Option<T> {
                     .io_context("Failed to read Option value")?,
             ))
         }
+    }
+}
+
+impl<T: Serialize> Serialize for BTreeSet<T> {
+    async fn serialize<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        version: ProtocolVersion,
+    ) -> Result<(), ProtocolError> {
+        (self.len() as u64)
+            .serialize(writer, version)
+            .await
+            .io_context("Failed to write BTreeSet length")?;
+        for (i, item) in self.iter().enumerate() {
+            item.serialize(writer, version)
+                .await
+                .io_context(format!("Failed to write BTreeSet item {i}"))?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: Deserialize + Ord> Deserialize for BTreeSet<T> {
+    async fn deserialize<R: AsyncRead + Unpin>(
+        reader: &mut R,
+        version: ProtocolVersion,
+    ) -> Result<Self, ProtocolError> {
+        let len = u64::deserialize(reader, version)
+            .await
+            .io_context("Failed to read BTreeSet length")?;
+
+        if len > MAX_STRING_LIST_SIZE {
+            return Err(ProtocolError::StringListTooLong {
+                length: len,
+                max: MAX_STRING_LIST_SIZE,
+            });
+        }
+
+        let mut result = BTreeSet::new();
+        for i in 0..len {
+            let item = T::deserialize(reader, version)
+                .await
+                .io_context(format!("Failed to read BTreeSet item {i}"))?;
+            result.insert(item);
+        }
+
+        Ok(result)
     }
 }
