@@ -23,6 +23,7 @@
           imports = [ ../module.nix ];
 
           services.harmonia-dev.cache.enable = true;
+          services.harmonia-dev.cache.signKeyPaths = [ "${./cache.sk}" ];
 
           networking.firewall.allowedTCPPorts = [ 5000 ];
           system.extraDependencies = [
