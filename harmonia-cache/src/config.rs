@@ -21,8 +21,8 @@ fn default_priority() -> usize {
     30
 }
 
-fn default_virtual_store() -> Vec<u8> {
-    b"/nix/store".to_vec()
+fn default_virtual_store() -> PathBuf {
+    PathBuf::from("/nix/store")
 }
 
 fn default_daemon_socket() -> PathBuf {
@@ -49,10 +49,10 @@ pub(crate) struct Config {
     pub(crate) priority: usize,
 
     #[serde(default = "default_virtual_store")]
-    pub(crate) virtual_nix_store: Vec<u8>,
+    pub(crate) virtual_nix_store: PathBuf,
 
     #[serde(default)]
-    pub(crate) real_nix_store: Option<String>,
+    pub(crate) real_nix_store: Option<PathBuf>,
 
     #[serde(default)]
     pub(crate) sign_key_path: Option<String>,
@@ -133,10 +133,19 @@ pub(crate) fn load() -> Result<Config> {
     }
     let store_dir = std::env::var_os("NIX_STORE_DIR")
         .map(|s| s.into_encoded_bytes())
-        .unwrap_or_else(|| settings.virtual_nix_store.clone());
+        .unwrap_or_else(|| {
+            settings
+                .virtual_nix_store
+                .as_os_str()
+                .as_encoded_bytes()
+                .to_vec()
+        });
     settings.store = Store::new(
         store_dir,
-        settings.real_nix_store.clone().map(|s| s.into_bytes()),
+        settings
+            .real_nix_store
+            .clone()
+            .map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
         settings.daemon_socket.clone(),
     );
     Ok(settings)
