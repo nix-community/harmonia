@@ -1,5 +1,4 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
 use tempfile::NamedTempFile;
@@ -17,7 +16,11 @@ pub struct DaemonConfig {
 /// A running daemon instance
 pub struct DaemonInstance {
     pub socket_path: PathBuf,
+    // actually read by tests
+    #[allow(dead_code)]
     pub store_dir: PathBuf,
+    // actually read by tests
+    #[allow(dead_code)]
     pub state_dir: PathBuf,
     _guard: Box<dyn Send>,
 }
@@ -34,11 +37,6 @@ pub struct NixDaemon;
 
 impl Daemon for NixDaemon {
     async fn start(config: DaemonConfig) -> Result<DaemonInstance> {
-        // Create directories
-        fs::create_dir_all(&config.store_dir)?;
-        fs::create_dir_all(&config.state_dir)?;
-        fs::create_dir_all(config.state_dir.join("db"))?;
-
         // Initialize the store
         let output = Command::new("nix-store")
             .args([
@@ -59,10 +57,6 @@ impl Daemon for NixDaemon {
             )
             .into());
         }
-
-        // Create socket directory
-        let socket_dir = config.socket_path.parent().ok_or("Invalid socket path")?;
-        fs::create_dir_all(socket_dir)?;
 
         // Start nix-daemon
         let mut cmd = Command::new("nix-daemon");
@@ -95,11 +89,6 @@ pub struct HarmoniaDaemon;
 
 impl Daemon for HarmoniaDaemon {
     async fn start(config: DaemonConfig) -> Result<DaemonInstance> {
-        // Create directories
-        fs::create_dir_all(&config.store_dir)?;
-        fs::create_dir_all(&config.state_dir)?;
-        fs::create_dir_all(config.state_dir.join("db"))?;
-
         // Initialize the store
         let output = Command::new("nix-store")
             .args([
@@ -120,10 +109,6 @@ impl Daemon for HarmoniaDaemon {
             )
             .into());
         }
-
-        // Create socket directory
-        let socket_dir = config.socket_path.parent().ok_or("Invalid socket path")?;
-        fs::create_dir_all(socket_dir)?;
 
         // Create harmonia-daemon config
         let daemon_config = format!(
