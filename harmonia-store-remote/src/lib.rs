@@ -1,6 +1,5 @@
 pub mod client;
 pub mod error;
-pub mod operations;
 pub mod protocol;
 pub mod serialization;
 pub mod server;
