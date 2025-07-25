@@ -81,9 +81,6 @@ impl Daemon for NixDaemon {
         let child = cmd.spawn()?;
         let guard = Box::new(ProcessGuard::new(child));
 
-        // Wait for socket to be ready
-        wait_for_socket(&config.socket_path, Duration::from_secs(10)).await?;
-
         Ok(DaemonInstance {
             socket_path: config.socket_path,
             store_dir: config.store_dir,
@@ -156,9 +153,6 @@ log_level = "debug"
             _config_file: config_file,
         });
 
-        // Wait for socket to be ready
-        wait_for_socket(&config.socket_path, Duration::from_secs(10)).await?;
-
         Ok(DaemonInstance {
             socket_path: config.socket_path,
             store_dir: config.store_dir,
@@ -206,22 +200,6 @@ pub async fn start_harmonia_cache(config: &str, port: u16) -> Result<Box<dyn Sen
 }
 
 // Helper functions
-
-async fn wait_for_socket(path: &Path, timeout_duration: Duration) -> Result<()> {
-    timeout(timeout_duration, async {
-        loop {
-            if path.exists() {
-                // Try to connect to verify it's actually ready
-                if (tokio::net::UnixStream::connect(path).await).is_ok() {
-                    return Ok(());
-                }
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .map_err(|_| format!("Timeout waiting for socket: {}", path.display()))?
-}
 
 async fn wait_for_port(host: &str, port: u16, timeout_duration: Duration) -> Result<()> {
     timeout(timeout_duration, async {
