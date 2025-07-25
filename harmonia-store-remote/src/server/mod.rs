@@ -26,9 +26,33 @@ impl<H: RequestHandler + Clone + 'static> DaemonServer<H> {
     }
 
     pub async fn serve(&self) -> Result<(), ProtocolError> {
-        let listener = UnixListener::bind(&self.socket_path).io_context(format!(
-            "Failed to bind to socket path: {:?}",
-            self.socket_path
+        // Create socket in a temporary location first
+        let socket_dir = self
+            .socket_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let temp_socket = socket_dir.join(format!(
+            ".{}.tmp",
+            self.socket_path.file_name().unwrap().to_string_lossy()
+        ));
+
+        // Remove any existing temporary socket
+        let _ = std::fs::remove_file(&temp_socket);
+
+        // Bind to the temporary socket
+        let listener = UnixListener::bind(&temp_socket).io_context(format!(
+            "Failed to bind to temporary socket path: {temp_socket:?}"
+        ))?;
+
+        // Set correct permissions on the temporary socket
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temp_socket, std::fs::Permissions::from_mode(0o666))
+            .io_context(format!("Failed to set socket permissions: {temp_socket:?}"))?;
+
+        // Atomically move the socket to the final location
+        std::fs::rename(&temp_socket, &self.socket_path).io_context(format!(
+            "Failed to move socket from {:?} to {:?}",
+            temp_socket, self.socket_path
         ))?;
 
         loop {
