@@ -36,7 +36,7 @@ pub(crate) struct SigningKey {
 }
 
 // TODO(conni2461): users to restrict access
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     #[serde(default = "default_bind")]
@@ -70,26 +70,6 @@ pub(crate) struct Config {
     pub(crate) secret_keys: Vec<SigningKey>,
     #[serde(skip)]
     pub(crate) store: Store,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            bind: default_bind(),
-            workers: default_workers(),
-            max_connection_rate: default_connection_rate(),
-            priority: default_priority(),
-            virtual_nix_store: default_virtual_store(),
-            real_nix_store: None,
-            sign_key_path: None,
-            sign_key_paths: Vec::new(),
-            tls_cert_path: None,
-            tls_key_path: None,
-            daemon_socket: default_daemon_socket(),
-            secret_keys: Vec::new(),
-            store: Store::new(default_virtual_store(), None, default_daemon_socket()),
-        }
-    }
 }
 
 impl Config {
