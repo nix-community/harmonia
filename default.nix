@@ -2,7 +2,6 @@
   pkgs ?
     (builtins.getFlake (builtins.toString ./.)).inputs.nixpkgs.legacyPackages.${builtins.currentSystem},
   rustPlatform ? pkgs.rustPlatform,
-  nix-gitignore ? pkgs.nix-gitignore,
   lib ? pkgs.lib,
   clippy ? pkgs.clippy,
   pkg-config ? pkgs.pkg-config,
@@ -17,16 +16,22 @@ rustPlatform.buildRustPackage (
   {
     pname = "harmonia";
     version = "2.1.0";
-    src = nix-gitignore.gitignoreSource [ ] (
-      lib.sources.sourceFilesBySuffices (lib.cleanSource ./.) [
-        ".rs"
-        ".toml"
-        ".lock"
-        ".cpp"
-        ".h"
-        ".md"
-      ]
-    );
+    src = lib.fileset.toSource {
+      root = ./.;
+      fileset = lib.fileset.unions [
+        ./Cargo.toml
+        ./Cargo.lock
+        ./harmonia-cache
+        ./harmonia-client
+        ./harmonia-daemon
+        ./harmonia-store-core
+        ./harmonia-store-remote
+        ./tests/cache.pk
+        ./tests/cache.sk
+        ./tests/cache2.pk
+        ./tests/cache2.sk
+      ];
+    };
     cargoLock.lockFile = ./Cargo.lock;
 
     nativeBuildInputs = [
