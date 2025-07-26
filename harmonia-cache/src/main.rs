@@ -35,6 +35,7 @@ mod health;
 mod nar;
 mod narinfo;
 mod narlist;
+mod prometheus;
 mod root;
 mod serve;
 mod signing;
@@ -144,42 +145,49 @@ type ServerResult = std::result::Result<HttpResponse, ServerError>;
 async fn inner_main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let c = web::Data::new(config::load()?);
+    let mut config = config::load()?;
+
+    // Initialize metrics with config
+    let metrics = prometheus::initialize_metrics(&mut config)?;
+
+    let c = web::Data::new(config);
     let config_data = c.clone();
+    let metrics_data = web::Data::new(metrics.clone());
 
     log::info!("listening on {}", c.bind);
-    let mut server = 
-        
-        HttpServer::new(move || {
+    let mut server = HttpServer::new(move || {
         App::new()
-            .wrap(middleware::Compress::default())
-            .app_data(config_data.clone())
-            .route("/", web::get().to(root::get))
-            .route("/{hash}.ls", web::get().to(narlist::get))
-            .route("/{hash}.ls", web::head().to(narlist::get))
-            .route("/{hash}.narinfo", web::get().to(narinfo::get))
-            .route("/{hash}.narinfo", web::head().to(narinfo::get))
-            .route(
-                &format!("/nar/{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar"),
-                web::get().to(nar::get),
-            )
-            .route(
-                // narinfos served by nix-serve have the narhash embedded in the nar URL.
-                // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
-                // will stay in client caches for a while - so support them anyway.
-                &format!(
-                    "/nar/{{outhash:[{NIXBASE32_ALPHABET}]{{32}}}}-{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar"
-                ),
-                web::get().to(nar::get),
-            )
-            .route("/serve/{hash}{path:.*}", web::get().to(serve::get))
-            .route("/log/{drv}", web::get().to(buildlog::get))
-            .route("/version", web::get().to(version::get))
-            .route("/health", web::get().to(health::get))
-            .route("/nix-cache-info", web::get().to(cacheinfo::get))
-    })
-    // default is 5 seconds, which is too small when doing mass requests on slow machines
-    .client_request_timeout(Duration::from_secs(30))
+                .wrap(middleware::Compress::default())
+                .wrap(prometheus::PrometheusMiddleware::new(metrics.clone()))
+                .app_data(config_data.clone())
+                .app_data(metrics_data.clone())
+                .route("/", web::get().to(root::get))
+                .route("/{hash}.ls", web::get().to(narlist::get))
+                .route("/{hash}.ls", web::head().to(narlist::get))
+                .route("/{hash}.narinfo", web::get().to(narinfo::get))
+                .route("/{hash}.narinfo", web::head().to(narinfo::get))
+                .route(
+                    &format!("/nar/{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar"),
+                    web::get().to(nar::get),
+                )
+                .route(
+                    // narinfos served by nix-serve have the narhash embedded in the nar URL.
+                    // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
+                    // will stay in client caches for a while - so support them anyway.
+                    &format!(
+                        "/nar/{{outhash:[{NIXBASE32_ALPHABET}]{{32}}}}-{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar"
+                    ),
+                    web::get().to(nar::get),
+                )
+                .route("/serve/{hash}{path:.*}", web::get().to(serve::get))
+                .route("/log/{drv}", web::get().to(buildlog::get))
+                .route("/version", web::get().to(version::get))
+                .route("/health", web::get().to(health::get))
+                .route("/nix-cache-info", web::get().to(cacheinfo::get))
+                .route("/metrics", web::get().to(prometheus::metrics_handler))
+        })
+        // default is 5 seconds, which is too small when doing mass requests on slow machines
+        .client_request_timeout(Duration::from_secs(30))
     .workers(c.workers)
     .max_connection_rate(c.max_connection_rate);
 

@@ -24,6 +24,7 @@ toml = "0.8"
 thiserror = "2"
 hex = "0.4"
 base64 = "0.22"
+prometheus = { version = "0.14", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

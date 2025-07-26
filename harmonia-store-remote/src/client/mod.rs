@@ -1,4 +1,5 @@
 pub mod connection;
+pub mod metrics;
 pub mod pool;
 
 use crate::error::ProtocolError;
@@ -10,10 +11,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-// Re-export PoolConfig for public use
+// Re-export pool types for public use
+pub use metrics::ClientMetrics;
 pub use pool::PoolConfig;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DaemonClient {
     pool: Arc<ConnectionPool>,
 }
@@ -21,7 +23,7 @@ pub struct DaemonClient {
 impl DaemonClient {
     /// Create a new DaemonClient with default pool configuration
     pub async fn connect(path: &Path) -> Result<Self, ProtocolError> {
-        Self::connect_with_config(path, pool::PoolConfig::default()).await
+        Self::connect_with_config(path, PoolConfig::default()).await
     }
 
     /// Create a new DaemonClient with custom configuration

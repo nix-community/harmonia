@@ -77,7 +77,9 @@ impl Store {
         // Connect to daemon if not already connected
         if daemon_guard.is_none() {
             log::debug!("Connecting to daemon at {:?}", self.daemon_socket);
-            match DaemonClient::connect_with_config(&self.daemon_socket, self.pool_config.clone()).await {
+            match DaemonClient::connect_with_config(&self.daemon_socket, self.pool_config.clone())
+                .await
+            {
                 Ok(client) => {
                     log::debug!("Successfully connected to daemon");
                     *daemon_guard = Some(client);
@@ -103,7 +105,8 @@ impl Default for Store {
             virtual_store: b"/nix/store".to_vec(),
             real_store: None,
             daemon_socket: PathBuf::from("/nix/var/nix/daemon-socket/socket"),
-            daemon: Mutex::new(None),
+            daemon: Arc::new(Mutex::new(None)),
+            pool_config: PoolConfig::default(),
         }
     }
 }

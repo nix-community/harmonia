@@ -36,7 +36,7 @@ pub(crate) struct SigningKey {
 }
 
 // TODO(conni2461): users to restrict access
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     #[serde(default = "default_bind")]
@@ -73,6 +73,13 @@ pub(crate) struct Config {
 }
 
 impl Config {
+    pub fn set_pool_metrics(
+        &mut self,
+        metrics: std::sync::Arc<harmonia_store_remote::client::ClientMetrics>,
+    ) {
+        self.store.pool_config.metrics = Some(metrics);
+    }
+
     pub(crate) fn load(settings_file: &Path) -> Result<Config> {
         let contents = read_to_string(settings_file).map_err(|e| ConfigError::ReadFile {
             path: settings_file.display().to_string(),
@@ -147,6 +154,7 @@ pub(crate) fn load() -> Result<Config> {
             .clone()
             .map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
         settings.daemon_socket.clone(),
+        harmonia_store_remote::client::PoolConfig::default(),
     );
     Ok(settings)
 }

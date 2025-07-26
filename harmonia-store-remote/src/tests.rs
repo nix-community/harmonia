@@ -520,6 +520,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
         max_size: 3,                               // Allow 3 connections in pool
         max_idle_time: Duration::from_millis(100), // Short idle time
         connection_timeout: Duration::from_millis(500),
+        metrics: None,
     };
     dbg!("Connecting client");
     let client = DaemonClient::connect_with_config(&socket_path, pool_config)

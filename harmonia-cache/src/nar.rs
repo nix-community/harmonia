@@ -538,6 +538,7 @@ mod test {
             b"/nix/store".to_vec(),
             None,
             std::path::PathBuf::from("/nix/var/nix/daemon-socket/socket"),
+            harmonia_store_remote::client::PoolConfig::default(),
         );
         let (tx, mut rx) =
             tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
