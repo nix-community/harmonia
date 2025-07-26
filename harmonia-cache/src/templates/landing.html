@@ -1,0 +1,172 @@
+<div class="container mx-auto px-4 py-16">
+  <!-- Main Card -->
+  <div class="max-w-4xl mx-auto">
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+      <!-- Hero Section -->
+      <div class="bg-gradient-to-r from-nix-dark to-nix-blue p-8 text-white">
+        <div class="text-center">
+          <svg class="w-20 h-20 mx-auto mb-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <h1 class="text-4xl font-bold mb-2">
+            <span class="text-white">Harmonia</span>
+          </h1>
+          <p class="text-xl text-blue-100">High-performance Nix binary cache server</p>
+          <p class="text-sm text-blue-200 mt-2">Version [[version]]</p>
+        </div>
+      </div>
+
+      <!-- Cache Info -->
+      <div class="p-8">
+        <h3 class="text-2xl font-bold text-gray-800 mb-6 text-center">Cache Configuration</h3>
+        
+        <div class="grid md:grid-cols-3 gap-6 mb-8">
+          <div class="bg-gray-50 rounded-lg p-6 text-center">
+            <div class="text-nix-blue mb-2">
+              <svg class="w-8 h-8 mx-auto" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9 22V12H15V22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h4 class="font-semibold text-gray-700 mb-1">Store Directory</h4>
+            <p class="text-sm text-gray-600 font-mono break-all">[[store]]</p>
+          </div>
+          
+          <div class="bg-gray-50 rounded-lg p-6 text-center">
+            <div class="text-nix-blue mb-2">
+              <svg class="w-8 h-8 mx-auto" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6.99 11L3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V11Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline points="8 16 12 12 16 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h4 class="font-semibold text-gray-700 mb-1">Priority</h4>
+            <p class="text-2xl font-bold text-nix-dark">[[priority]]</p>
+          </div>
+          
+          <div class="bg-gray-50 rounded-lg p-6 text-center">
+            <div class="text-nix-blue mb-2">
+              <svg class="w-8 h-8 mx-auto" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M20 21V19C20 17.9391 19.5786 16.9217 18.8284 16.1716C18.0783 15.4214 17.0609 15 16 15H8C6.93913 15 5.92172 15.4214 5.17157 16.1716C4.42143 16.9217 4 17.9391 4 19V21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 11C14.2091 11 16 9.20914 16 7C16 4.79086 14.2091 3 12 3C9.79086 3 8 4.79086 8 7C8 9.20914 9.79086 11 12 11Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h4 class="font-semibold text-gray-700 mb-1">Mass Query</h4>
+            <p class="text-sm text-gray-600">Enabled</p>
+          </div>
+        </div>
+
+        <!-- Features -->
+        <div class="border-t pt-8">
+          <h4 class="text-lg font-semibold text-gray-800 mb-4">Features</h4>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="flex items-start">
+              <svg class="w-5 h-5 text-green-500 mt-0.5 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+              </svg>
+              <span class="text-gray-600">HTTP range support for efficient downloads</span>
+            </div>
+            <div class="flex items-start">
+              <svg class="w-5 h-5 text-green-500 mt-0.5 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+              </svg>
+              <span class="text-gray-600">Streaming NAR files from disk</span>
+            </div>
+            <div class="flex items-start">
+              <svg class="w-5 h-5 text-green-500 mt-0.5 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+              </svg>
+              <span class="text-gray-600">Transparent zstd compression</span>
+            </div>
+            <div class="flex items-start">
+              <svg class="w-5 h-5 text-green-500 mt-0.5 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+              </svg>
+              <span class="text-gray-600">Optional package signing</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-gray-50 px-8 py-4 text-center">
+        <p class="text-sm text-gray-600">
+          Powered by <a href="[[homepage]]" class="text-nix-blue hover:text-nix-dark font-semibold">[[name]]</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- API Endpoints -->
+  <div class="max-w-4xl mx-auto mt-8">
+    <div class="bg-white rounded-lg shadow-lg p-6">
+      <h3 class="text-lg font-semibold text-gray-800 mb-4">Available Endpoints</h3>
+      <div class="space-y-3">
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <h4 class="font-semibold text-gray-700 mb-2">Core Cache Endpoints</h4>
+            <div class="space-y-2 text-sm">
+              <div class="flex items-start">
+                <a href="/nix-cache-info" class="font-mono bg-gray-100 px-2 py-1 rounded text-nix-blue hover:bg-gray-200 hover:text-nix-dark mr-2">/nix-cache-info</a>
+                <span class="text-gray-600">Cache metadata and configuration</span>
+              </div>
+              <div class="flex items-start">
+                <span class="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700 mr-2 whitespace-nowrap">/&lt;hash&gt;.narinfo</span>
+                <span class="text-gray-600">Package metadata and signatures</span>
+              </div>
+              <div class="flex items-start">
+                <span class="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700 mr-2">/nar/&lt;hash&gt;.nar</span>
+                <span class="text-gray-600">NAR archives (with compression)</span>
+              </div>
+              <div class="flex items-start">
+                <span class="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700 mr-2 whitespace-nowrap">/nar/&lt;compression&gt;/&lt;hash&gt;.nar</span>
+                <span class="text-gray-600">NAR archives with specific compression</span>
+              </div>
+            </div>
+          </div>
+          
+          <div>
+            <h4 class="font-semibold text-gray-700 mb-2">Additional Features</h4>
+            <div class="space-y-2 text-sm">
+              <div class="flex items-start">
+                <span class="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700 mr-2">/&lt;hash&gt;.ls</span>
+                <span class="text-gray-600">List package contents</span>
+              </div>
+              <div class="flex items-start">
+                <span class="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700 mr-2 whitespace-nowrap">/serve/&lt;hash&gt;/&lt;path&gt;</span>
+                <span class="text-gray-600">Serve individual files from packages</span>
+              </div>
+              <div class="flex items-start">
+                <span class="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700 mr-2">/log/&lt;drv&gt;</span>
+                <span class="text-gray-600">Build logs for derivations</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="pt-4 border-t">
+          <h4 class="font-semibold text-gray-700 mb-2">Service Endpoints</h4>
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div class="flex items-start">
+              <a href="/" class="font-mono bg-gray-100 px-2 py-1 rounded text-nix-blue hover:bg-gray-200 hover:text-nix-dark mr-2">/</a>
+              <span class="text-gray-600">This page</span>
+            </div>
+            <div class="flex items-start">
+              <a href="/version" class="font-mono bg-gray-100 px-2 py-1 rounded text-nix-blue hover:bg-gray-200 hover:text-nix-dark mr-2">/version</a>
+              <span class="text-gray-600">Version information</span>
+            </div>
+            <div class="flex items-start">
+              <a href="/health" class="font-mono bg-gray-100 px-2 py-1 rounded text-nix-blue hover:bg-gray-200 hover:text-nix-dark mr-2">/health</a>
+              <span class="text-gray-600">Health check</span>
+            </div>
+            <div class="flex items-start">
+              <a href="/metrics" class="font-mono bg-gray-100 px-2 py-1 rounded text-nix-blue hover:bg-gray-200 hover:text-nix-dark mr-2">/metrics</a>
+              <span class="text-gray-600">Prometheus metrics</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

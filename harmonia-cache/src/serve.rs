@@ -6,11 +6,10 @@ use actix_web::Responder;
 use actix_web::{HttpRequest, HttpResponse, web};
 use askama_escape::{Html, escape as escape_html_entity};
 use percent_encoding::{CONTROLS, utf8_percent_encode};
-use std::fmt::Write;
 
 use crate::template::{DIRECTORY_ROW_TEMPLATE, DIRECTORY_TEMPLATE, render, render_page};
 use crate::{
-    BOOTSTRAP_SOURCE, CARGO_NAME, CARGO_VERSION, ServerResult, config::Config, nixhash, some_or_404,
+    CARGO_NAME, CARGO_VERSION, ServerResult, TAILWIND_CSS, config::Config, nixhash, some_or_404,
 };
 
 /// Returns percent encoded file URL path.
@@ -73,56 +72,34 @@ pub(crate) fn directory_listing(
 
         // if file is a directory, add '/' to the end of the name
         if let Ok(metadata) = entry.metadata() {
+            let mut row_vars = std::collections::HashMap::new();
+            row_vars.insert("url", encode_file_url!(p).to_string());
+
             if metadata.is_dir() {
-                let _ = writeln!(
-                    rows,
-                    "<tr><td><a href=\"{}\">{}/</a></td><td>-</td></tr>",
-                    encode_file_url!(p),
-                    encode_file_name!(entry),
-                );
+                row_vars.insert("name", format!("{}/", encode_file_name!(entry)));
+                row_vars.insert("size", "-".to_string());
             } else {
-                let size = file_size(metadata.len());
-                let _ = writeln!(
-                    rows,
-                    "<tr><td><a href=\"{}\">{}</a></td><td>{size}</td></tr>",
-                    encode_file_url!(p),
-                    encode_file_name!(entry),
-                );
+                row_vars.insert("name", encode_file_name!(entry).to_string());
+                row_vars.insert("size", file_size(metadata.len()));
             }
+
+            rows.push_str(&render(DIRECTORY_ROW_TEMPLATE, row_vars));
         } else {
             continue;
         }
     }
 
-    let html = format!(
-        r#"
-<!DOCTYPE html>
-<html lang="en">
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("index_of", index_of);
+    vars.insert("rows", rows);
 
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Nix binary cache ({CARGO_NAME} {CARGO_VERSION})</title>
-    {BOOTSTRAP_SOURCE}
-</head>
-<body>
-    <div class="container mt-4">
-        <h1>{index_of}</h1>
-        <hr>
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Size</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows}
-            </tbody>
-        </table>
-    </div>
-</body>"#,
+    let content = render(DIRECTORY_TEMPLATE, vars);
+    let html = render_page(
+        &format!("Nix binary cache ({CARGO_NAME} {CARGO_VERSION})"),
+        TAILWIND_CSS,
+        &content,
     );
+
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(html))

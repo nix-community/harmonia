@@ -3,3 +3,4 @@
 .cache
 .direnv
 compile_commands.json
+harmonia-cache/node_modules
