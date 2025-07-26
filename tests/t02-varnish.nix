@@ -5,12 +5,12 @@
 
     nodes = {
       harmonia =
-        { pkgs, ... }:
+        { pkgs, inputs, ... }:
         let
           sock = "/run/harmonia/socket";
         in
         {
-          imports = [ ../module.nix ];
+          imports = [ inputs.self.nixosModules.harmonia ];
 
           services.harmonia-dev.cache.enable = true;
           services.harmonia-dev.cache.settings.bind = "unix:${sock}";

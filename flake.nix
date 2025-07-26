@@ -8,6 +8,7 @@
   };
   inputs.treefmt-nix.url = "github:numtide/treefmt-nix";
   inputs.treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.crane.url = "github:ipetkov/crane";
 
   outputs =
     inputs@{ flake-parts, ... }:
@@ -28,7 +29,9 @@
           ...
         }:
         {
-          packages.harmonia = pkgs.callPackage ./. { };
+          packages.harmonia = pkgs.callPackage ./package.nix {
+            crane = inputs.crane;
+          };
           packages.default = config.packages.harmonia;
           checks =
             let
@@ -61,6 +64,12 @@
             programs.clang-format.enable = true;
           };
         };
-      flake.nixosModules.harmonia = ./module.nix;
+      flake.nixosModules.harmonia =
+        { lib, ... }:
+        {
+          imports = [
+            (lib.modules.importApply ./module.nix { crane = inputs.crane; })
+          ];
+        };
     };
 }

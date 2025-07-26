@@ -18,9 +18,9 @@
 
     nodes = {
       harmonia =
-        { pkgs, ... }:
+        { pkgs, inputs, ... }:
         {
-          imports = [ ../module.nix ];
+          imports = [ inputs.self.nixosModules.harmonia ];
 
           services.harmonia-dev.cache.enable = true;
           services.harmonia-dev.cache.signKeyPaths = [ "${./cache.sk}" ];
