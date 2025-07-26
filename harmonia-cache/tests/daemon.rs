@@ -1,3 +1,6 @@
+// Rust doesn't see that this is used in test binaries, so we need to allow dead code
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
@@ -15,13 +18,9 @@ pub struct DaemonConfig {
 
 /// A running daemon instance
 pub struct DaemonInstance {
-    // all fields are actually read by tests
-    #[allow(dead_code)]
-    pub(crate) socket_path: PathBuf,
-    #[allow(dead_code)]
-    pub(crate) store_dir: PathBuf,
-    #[allow(dead_code)]
-    pub(crate) state_dir: PathBuf,
+    pub socket_path: PathBuf,
+    pub store_dir: PathBuf,
+    pub state_dir: PathBuf,
     _guard: Box<dyn Send>,
 }
 
