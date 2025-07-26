@@ -106,7 +106,10 @@ impl Default for Store {
             real_store: None,
             daemon_socket: PathBuf::from("/nix/var/nix/daemon-socket/socket"),
             daemon: Arc::new(Mutex::new(None)),
-            pool_config: PoolConfig::default(),
+            pool_config: PoolConfig {
+                max_size: 2, // Small pool for tests
+                ..Default::default()
+            },
         }
     }
 }

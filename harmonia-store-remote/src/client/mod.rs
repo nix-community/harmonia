@@ -3,7 +3,7 @@ pub mod metrics;
 pub mod pool;
 
 use crate::error::ProtocolError;
-use crate::protocol::{OpCode, StorePath, ValidPathInfo};
+use crate::protocol::{OpCode, ValidPathInfo};
 use crate::serialization::{Deserialize, Serialize};
 use harmonia_store_core::StorePath;
 use pool::ConnectionPool;

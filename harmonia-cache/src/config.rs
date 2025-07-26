@@ -148,7 +148,11 @@ pub(crate) fn load() -> Result<Config> {
             .clone()
             .map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
         settings.daemon_socket.clone(),
-        harmonia_store_remote::client::PoolConfig::default(),
+        harmonia_store_remote::client::PoolConfig {
+            // Pool size should be at least workers + 1 for some headroom
+            max_size: settings.workers + 1,
+            ..Default::default()
+        },
     );
     Ok(settings)
 }
