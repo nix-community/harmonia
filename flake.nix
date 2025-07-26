@@ -43,8 +43,8 @@
               devShells = lib.mapAttrs' (n: lib.nameValuePair "devShell-${n}") self'.devShells;
             in
             lib.optionalAttrs pkgs.stdenv.isLinux {
-              t00-simple = import ./tests/t00-simple.nix testArgs;
-              t05-daemon = import ./tests/t05-daemon.nix testArgs;
+              nix-daemon = import ./tests/nix-daemon.nix testArgs;
+              harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
             }
             // {
               clippy = config.packages.harmonia.override { enableClippy = true; };

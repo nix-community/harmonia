@@ -14,7 +14,7 @@
     '';
   in
   {
-    name = "t00-simple";
+    name = "nix-daemon";
 
     nodes = {
       harmonia =
