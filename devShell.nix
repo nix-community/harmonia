@@ -17,7 +17,6 @@
     ];
 
     buildInputs = with pkgs; [
-      libsodium
       openssl
       rust-analyzer
       rustfmt

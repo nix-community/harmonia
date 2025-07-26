@@ -3,7 +3,6 @@
   lib,
   crane,
   makeWrapper,
-  libsodium,
   openssl,
   nix,
   curl,
@@ -46,7 +45,6 @@ let
     ];
 
     buildInputs = [
-      libsodium
       openssl
     ];
   };
