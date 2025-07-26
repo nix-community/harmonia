@@ -15,13 +15,13 @@ pub struct DaemonConfig {
 
 /// A running daemon instance
 pub struct DaemonInstance {
-    pub socket_path: PathBuf,
-    // actually read by tests
+    // all fields are actually read by tests
     #[allow(dead_code)]
-    pub store_dir: PathBuf,
-    // actually read by tests
+    pub(crate) socket_path: PathBuf,
     #[allow(dead_code)]
-    pub state_dir: PathBuf,
+    pub(crate) store_dir: PathBuf,
+    #[allow(dead_code)]
+    pub(crate) state_dir: PathBuf,
     _guard: Box<dyn Send>,
 }
 
