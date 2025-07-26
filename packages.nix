@@ -68,6 +68,9 @@ let
       # Set HARMONIA_BIN to the build directory so tests use the release binary
       preCheck = ''
         export HARMONIA_BIN=$(pwd)/target/release
+      ''
+      + lib.optionalString pkgs.stdenv.isDarwin ''
+        export _NIX_TEST_NO_SANDBOX="1"
       '';
 
       postInstall = ''
