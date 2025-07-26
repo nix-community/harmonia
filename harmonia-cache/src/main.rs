@@ -2,7 +2,7 @@
 
 use actix_web::middleware;
 use config::Config;
-use error::{CacheError, IoErrorContext, Result, ServerError as ServerErrorType, StoreError};
+use error::{CacheError, IoErrorContext, Result, StoreError};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -11,7 +11,6 @@ use url::Url;
 
 use actix_web::{App, HttpResponse, HttpServer, http, web};
 use harmonia_store_remote::protocol::StorePath;
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 /// Macro for building byte vectors efficiently from parts
 #[macro_export]
@@ -40,6 +39,7 @@ mod root;
 mod serve;
 mod signing;
 mod store;
+mod tls;
 mod version;
 
 async fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
@@ -215,23 +215,13 @@ async fn inner_main() -> Result<()> {
             log::error!("TLS is not supported with Unix domain sockets.");
             std::process::exit(1);
         }
-        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).map_err(|e| {
-            ServerErrorType::TlsSetup {
-                reason: e.to_string(),
-            }
-        })?;
-        builder
-            .set_private_key_file(c.tls_key_path.clone().unwrap(), SslFiletype::PEM)
-            .map_err(|e| ServerErrorType::TlsSetup {
-                reason: format!("Failed to set private key: {e}"),
-            })?;
-        builder
-            .set_certificate_chain_file(c.tls_cert_path.clone().unwrap())
-            .map_err(|e| ServerErrorType::TlsSetup {
-                reason: format!("Failed to set certificate chain: {e}"),
-            })?;
+        let config = tls::load_tls_config(
+            Path::new(&c.tls_cert_path.clone().unwrap()),
+            Path::new(&c.tls_key_path.clone().unwrap()),
+        )?;
+
         server = server
-            .bind_openssl(c.bind.clone(), builder)
+            .bind_rustls_0_23(c.bind.clone(), config)
             .io_context("Failed to bind with TLS")?;
     } else if uds {
         if !cfg!(unix) {

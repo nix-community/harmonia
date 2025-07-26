@@ -12,8 +12,9 @@ name = "harmonia-cache"
 path = "src/main.rs"
 
 [dependencies]
-actix-web = { version = "4", default-features = false, features = ["macros", "compress-zstd", "cookies", "openssl"] }
-openssl = { version = "0.10" }
+actix-web = { version = "4", default-features = false, features = ["macros", "compress-zstd", "cookies", "rustls-0_23"] }
+rustls = { version = "0.23" }
+rustls-pemfile = "2"
 actix-files = "0.6.6"
 log = { workspace = true }
 env_logger = "0.11"

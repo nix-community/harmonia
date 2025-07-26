@@ -3,7 +3,6 @@
   lib,
   crane,
   makeWrapper,
-  openssl,
   nix,
   curl,
 }:
@@ -39,14 +38,6 @@ let
     # Use mold linker for faster builds on ELF platforms
     stdenv =
       p: if p.stdenv.hostPlatform.isElf then p.stdenvAdapters.useMoldLinker p.stdenv else p.stdenv;
-
-    nativeBuildInputs = [
-      pkg-config
-    ];
-
-    buildInputs = [
-      openssl
-    ];
   };
 
   # Build *just* the cargo dependencies

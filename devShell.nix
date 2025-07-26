@@ -13,11 +13,9 @@
       rustc
       cargo
       cargo-watch
-      pkg-config
     ];
 
     buildInputs = with pkgs; [
-      openssl
       rust-analyzer
       rustfmt
       clippy
