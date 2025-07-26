@@ -6,7 +6,11 @@ use crate::error::{IoErrorContext, ProtocolError};
 use crate::framed::FramedSink;
 use crate::protocol::{
     OpCode, ValidPathInfo,
-    types::{AddSignaturesRequest, AddTextToStoreRequest, DerivedPath, Missing, BuildMode, BuildResult, BasicDerivation, GCOptions, GCResult, GCRoot, VerifyStoreRequest},
+    types::{
+        AddSignaturesRequest, AddTextToStoreRequest, BasicDerivation, BuildMode, BuildResult,
+        DaemonSettings, DerivedPath, DrvOutputId, GCOptions, GCResult, GCRoot, Missing,
+        Realisation, SubstitutablePathInfo, SubstitutablePathInfos, VerifyStoreRequest,
+    },
 };
 use crate::serialization::{Deserialize, Serialize};
 use harmonia_store_core::{FileIngestionMethod, HashAlgo, NarSignature, StorePath};
@@ -412,6 +416,268 @@ impl DaemonClient {
         tokio::io::copy(conn, sink)
             .await
             .io_context("Failed to stream NAR data")?;
+
+        Ok(())
+    }
+
+    /// Check if substitutes are available for a given path
+    pub async fn has_substitutes(&self, path: &StorePath) -> Result<bool, ProtocolError> {
+        self.execute_operation(OpCode::HasSubstitutes, path).await
+    }
+
+    /// Query failed paths
+    pub async fn query_failed_paths(&self) -> Result<Vec<StorePath>, ProtocolError> {
+        self.execute_operation(OpCode::QueryFailedPaths, &()).await
+    }
+
+    /// Clear failed paths from the failed paths cache
+    pub async fn clear_failed_paths(&self, paths: &[StorePath]) -> Result<(), ProtocolError> {
+        self.execute_operation(OpCode::ClearFailedPaths, &paths)
+            .await
+    }
+
+    /// Query derivation output map
+    pub async fn query_derivation_output_map(
+        &self,
+        drv: &StorePath,
+    ) -> Result<std::collections::BTreeMap<Vec<u8>, Option<StorePath>>, ProtocolError> {
+        self.execute_operation(OpCode::QueryDerivationOutputMap, drv)
+            .await
+    }
+
+    /// Build paths with results
+    pub async fn build_paths_with_results(
+        &self,
+        paths: &[DerivedPath],
+        mode: BuildMode,
+    ) -> Result<Vec<BuildResult>, ProtocolError> {
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::BuildPathsWithResults).await?;
+
+        // Send the paths
+        paths.serialize(conn, version).await?;
+
+        // BuildMode is only sent for protocol >= 1.15
+        if version.minor >= 15 {
+            mode.serialize(conn, version).await?;
+        }
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
+
+        // Read the results
+        Vec::<BuildResult>::deserialize(conn, version).await
+    }
+
+    /// Add a permanent garbage collector root
+    pub async fn add_perm_root(
+        &self,
+        path: &StorePath,
+        gc_root: &Path,
+    ) -> Result<(), ProtocolError> {
+        use std::os::unix::ffi::OsStrExt;
+
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::AddPermRoot).await?;
+
+        // Send the store path
+        path.serialize(conn, version).await?;
+
+        // Send the GC root path as bytes
+        gc_root
+            .as_os_str()
+            .as_bytes()
+            .serialize(conn, version)
+            .await?;
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
+
+        Ok(())
+    }
+
+    /// Set daemon options
+    pub async fn set_options(&self, settings: &DaemonSettings) -> Result<(), ProtocolError> {
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::SetOptions).await?;
+
+        // Send settings
+        settings.keep_going.serialize(conn, version).await?;
+        settings.keep_failed.serialize(conn, version).await?;
+        settings.try_fallback.serialize(conn, version).await?;
+        settings.verbosity.serialize(conn, version).await?;
+        settings.max_build_jobs.serialize(conn, version).await?;
+        settings.max_silent_time.serialize(conn, version).await?;
+        settings.use_build_hook.serialize(conn, version).await?;
+
+        // Handle version-specific fields
+        if version.minor >= 2 {
+            settings.build_cores.serialize(conn, version).await?;
+        }
+        if version.minor >= 3 {
+            settings.use_substitutes.serialize(conn, version).await?;
+        }
+        if version.minor >= 4 {
+            // Empty build users groups for compatibility
+            let empty_users: Vec<Vec<u8>> = vec![];
+            empty_users.as_slice().serialize(conn, version).await?;
+        }
+        if version.minor >= 6 && version.minor < 11 {
+            // Legacy auto-args - just send 0
+            0u64.serialize(conn, version).await?;
+        }
+        if version.minor >= 10 {
+            // Send build hook
+            if let Some(ref hook) = settings.build_hook {
+                1u64.serialize(conn, version).await?;
+                hook.serialize(conn, version).await?;
+            } else {
+                0u64.serialize(conn, version).await?;
+            }
+        }
+        if version.minor >= 12 {
+            // Send substitute URLs
+            settings
+                .substitute_urls
+                .as_slice()
+                .serialize(conn, version)
+                .await?;
+        }
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
+
+        Ok(())
+    }
+
+    /// Query substitutable path info for a single path
+    pub async fn query_substitutable_path_info(
+        &self,
+        path: &StorePath,
+    ) -> Result<Option<SubstitutablePathInfo>, ProtocolError> {
+        self.execute_operation(OpCode::QuerySubstitutablePathInfo, path)
+            .await
+    }
+
+    /// Query substitutable path info for multiple paths
+    pub async fn query_substitutable_path_infos(
+        &self,
+        paths: &[StorePath],
+    ) -> Result<SubstitutablePathInfos, ProtocolError> {
+        self.execute_operation(OpCode::QuerySubstitutablePathInfos, &paths)
+            .await
+    }
+
+    /// Register a derivation output
+    pub async fn register_drv_output(
+        &self,
+        realisation: &Realisation,
+    ) -> Result<(), ProtocolError> {
+        self.execute_operation(OpCode::RegisterDrvOutput, realisation)
+            .await
+    }
+
+    /// Query a realisation
+    pub async fn query_realisation(
+        &self,
+        id: &DrvOutputId,
+    ) -> Result<Option<Realisation>, ProtocolError> {
+        self.execute_operation(OpCode::QueryRealisation, id).await
+    }
+
+    /// Add multiple paths to store
+    pub async fn add_multiple_to_store<R: AsyncRead + Unpin>(
+        &self,
+        mut source: R,
+        repair: bool,
+        check_sigs: bool,
+    ) -> Result<(), ProtocolError> {
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::AddMultipleToStore).await?;
+
+        // Send repair and check_sigs flags
+        repair.serialize(conn, version).await?;
+        check_sigs.serialize(conn, version).await?;
+
+        // Now stream the archive data using framed format
+        let mut framed_sink = FramedSink::new(conn, 8192);
+
+        // Copy from source to framed sink
+        let mut buffer = vec![0u8; 8192];
+        loop {
+            let n = source
+                .read(&mut buffer)
+                .await
+                .map_err(|e| ProtocolError::Io {
+                    context: "Failed to read archive data".to_string(),
+                    source: e,
+                })?;
+
+            if n == 0 {
+                break;
+            }
+
+            framed_sink.write(&buffer[..n]).await?;
+        }
+
+        // Finish the framed stream
+        let conn = framed_sink.finish().await?;
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
+
+        Ok(())
+    }
+
+    /// Add a build log
+    pub async fn add_build_log<R: AsyncRead + Unpin>(
+        &self,
+        drv_path: &StorePath,
+        mut log: R,
+    ) -> Result<(), ProtocolError> {
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::AddBuildLog).await?;
+
+        // Send the derivation path
+        drv_path.serialize(conn, version).await?;
+
+        // Stream log data
+        let mut framed_sink = FramedSink::new(conn, 8192);
+        let mut buffer = vec![0u8; 8192];
+
+        loop {
+            let n = log.read(&mut buffer).await.map_err(|e| ProtocolError::Io {
+                context: "Failed to read log data".to_string(),
+                source: e,
+            })?;
+
+            if n == 0 {
+                break;
+            }
+
+            framed_sink.write(&buffer[..n]).await?;
+        }
+
+        // Finish the framed stream
+        let conn = framed_sink.finish().await?;
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
 
         Ok(())
     }

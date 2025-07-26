@@ -147,6 +147,16 @@ impl Serialize for &[u8] {
     }
 }
 
+impl Serialize for Vec<u8> {
+    async fn serialize<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        version: ProtocolVersion,
+    ) -> Result<(), ProtocolError> {
+        self.as_slice().serialize(writer, version).await
+    }
+}
+
 impl Deserialize for Vec<u8> {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,

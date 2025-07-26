@@ -1,8 +1,10 @@
 pub mod compound;
 pub mod gc;
 pub mod primitives;
+pub mod realisation;
 pub mod store_requests;
 pub mod store_types;
+pub mod substitutable;
 
 use crate::error::ProtocolError;
 use crate::protocol::ProtocolVersion;

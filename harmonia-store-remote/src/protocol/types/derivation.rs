@@ -56,7 +56,7 @@ impl Serialize for DerivationOutput {
 
         // Hash (empty bytes if None)
         match &self.hash {
-            Some(hash) => hash.as_slice().serialize(writer, version).await?,
+            Some(hash) => hash.serialize(writer, version).await?,
             None => (b"" as &[u8]).serialize(writer, version).await?,
         }
 
@@ -77,7 +77,7 @@ impl Serialize for BasicDerivation {
 
         // Each output
         for (name, output) in &self.outputs {
-            name.as_slice().serialize(writer, version).await?;
+            name.serialize(writer, version).await?;
             output.serialize(writer, version).await?;
         }
 
@@ -85,22 +85,22 @@ impl Serialize for BasicDerivation {
         self.input_sources.serialize(writer, version).await?;
 
         // Platform
-        self.platform.as_slice().serialize(writer, version).await?;
-        
+        self.platform.serialize(writer, version).await?;
+
         // Builder
-        self.builder.as_slice().serialize(writer, version).await?;
-        
+        self.builder.serialize(writer, version).await?;
+
         // Args
         (self.args.len() as u64).serialize(writer, version).await?;
         for arg in &self.args {
-            arg.as_slice().serialize(writer, version).await?;
+            arg.serialize(writer, version).await?;
         }
 
         // Environment
         (self.env.len() as u64).serialize(writer, version).await?;
         for (key, value) in &self.env {
-            key.as_slice().serialize(writer, version).await?;
-            value.as_slice().serialize(writer, version).await?;
+            key.serialize(writer, version).await?;
+            value.serialize(writer, version).await?;
         }
 
         Ok(())
