@@ -37,20 +37,18 @@ let
     pname = "harmonia";
     strictDeps = true;
 
+    # Use mold linker for faster builds on ELF platforms
+    stdenv =
+      p: if p.stdenv.hostPlatform.isElf then p.stdenvAdapters.useMoldLinker p.stdenv else p.stdenv;
+
     nativeBuildInputs = [
       pkg-config
-    ] ++ lib.optionals pkgs.stdenv.isLinux [
-      pkgs.clang
-      pkgs.mold
     ];
 
     buildInputs = [
       libsodium
       openssl
     ];
-
-    # Use clang and mold linker for faster builds on Linux
-    RUSTFLAGS = lib.optionalString pkgs.stdenv.isLinux "-C link-arg=-fuse-ld=mold -C linker=clang";
   };
 
   # Build *just* the cargo dependencies

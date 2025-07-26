@@ -52,7 +52,7 @@
             }
             // packages
             // devShells;
-          devShells.default = pkgs.callPackage ./shell.nix { };
+          devShells.default = pkgs.callPackage ./devShell.nix { };
 
           treefmt = {
             # Used to find the project root
