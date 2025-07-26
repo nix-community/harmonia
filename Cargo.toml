@@ -25,6 +25,7 @@ thiserror = "2"
 hex = "0.4"
 base64 = "0.22"
 prometheus = { version = "0.14", default-features = false }
+nix = { version = "0.29", features = ["signal"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

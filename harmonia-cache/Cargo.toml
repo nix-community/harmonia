@@ -40,5 +40,8 @@ prometheus = { workspace = true }
 [build-dependencies]
 pkg-config = "0.3"
 
+[dev-dependencies]
+nix = { workspace = true }
+
 [lints]
 workspace = true

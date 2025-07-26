@@ -171,7 +171,11 @@ pub async fn start_harmonia_cache(config: &str, port: u16) -> Result<Box<dyn Sen
     let cache_process = Command::new("cargo")
         .args(["run", "-p", "harmonia-cache", "--"])
         .env("CONFIG_FILE", &config_path)
+        .env("RUST_LOG", "debug")
         .spawn()?;
+
+    let pid = cache_process.id();
+    println!("Started harmonia-cache process with PID: {pid}");
 
     let guard = Box::new(ProcessAndFileGuard {
         _process: ProcessGuard::new(cache_process),
@@ -179,25 +183,64 @@ pub async fn start_harmonia_cache(config: &str, port: u16) -> Result<Box<dyn Sen
     });
 
     // Wait for HTTP server to be ready
-    wait_for_port("127.0.0.1", port, Duration::from_secs(10)).await?;
+    wait_for_service("127.0.0.1", port, pid, Duration::from_secs(30)).await?;
 
     Ok(guard)
 }
 
 // Helper functions
 
-async fn wait_for_port(host: &str, port: u16, timeout_duration: Duration) -> Result<()> {
+async fn wait_for_service(
+    host: &str,
+    port: u16,
+    pid: u32,
+    timeout_duration: Duration,
+) -> Result<()> {
+    println!("Waiting for service (PID {pid}) to start on {host}:{port}");
+    let start = std::time::Instant::now();
+
     timeout(timeout_duration, async {
+        let mut attempt = 0;
         loop {
+            attempt += 1;
+
+            // First check if the process is still running
+            // Try to send signal 0 to check if process exists
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
+
+            if let Err(_) = kill(Pid::from_raw(pid as i32), Signal::SIGCONT) {
+                return Err(
+                    format!("Process {pid} died while waiting for service to start").into(),
+                );
+            }
+
             match tokio::net::TcpStream::connect((host, port)).await {
-                Ok(_) => return Ok(()),
-                Err(_) => sleep(Duration::from_millis(100)).await,
+                Ok(_) => {
+                    println!(
+                        "Service is ready on {}:{} after {} attempts ({:.2}s)",
+                        host,
+                        port,
+                        attempt,
+                        start.elapsed().as_secs_f32()
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    if attempt % 10 == 0 {
+                        println!("Still waiting for {host}:{port} (attempt {attempt}, error: {e})");
+                    }
+                    sleep(Duration::from_millis(100)).await
+                }
             }
         }
     })
     .await
     .map_err(|_| -> Box<dyn std::error::Error> {
-        format!("Timeout waiting for port {}:{}", host, port).into()
+        format!(
+            "Timeout waiting for service (PID {pid}) on {host}:{port} after {timeout_duration:?}"
+        )
+        .into()
     })?
 }
 
