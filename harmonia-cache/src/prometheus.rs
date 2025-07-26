@@ -114,25 +114,30 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let start = Instant::now();
         let method = req.method().to_string();
-        let path = req.path().to_string();
+        // Only track metrics for paths with a match pattern
+        let path = req.match_pattern().map(|p| p.to_string());
         let metrics = self.metrics.clone();
 
         let fut = self.service.call(req);
 
         Box::pin(async move {
             let res = fut.await?;
-            let duration = start.elapsed().as_secs_f64();
-            let status = res.status().as_str().to_owned();
 
-            metrics
-                .http_requests_total
-                .with_label_values(&[&method, &path, &status])
-                .inc();
+            // Only record metrics if we have a match pattern
+            if let Some(path) = path {
+                let duration = start.elapsed().as_secs_f64();
+                let status = res.status().as_str().to_owned();
 
-            metrics
-                .http_requests_duration
-                .with_label_values(&[&method, &path, &status])
-                .observe(duration);
+                metrics
+                    .http_requests_total
+                    .with_label_values(&[&method, &path, &status])
+                    .inc();
+
+                metrics
+                    .http_requests_duration
+                    .with_label_values(&[&method, &path, &status])
+                    .observe(duration);
+            }
 
             Ok(res)
         })
