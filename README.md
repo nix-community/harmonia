@@ -158,13 +158,38 @@ sign_key_paths = [ "/run/secrets/cache.secret" ]
 Harmonia also reads the `SIGN_KEY_PATHS` environment variable which holds paths to secret keys separated by spaces.
 All paths provided by `sign_key_paths` config option and `SIGN_KEY_PATHS` environment variable will be used for signing.
 
+### TLS Configuration
+
+Harmonia can serve content over HTTPS without requiring a reverse proxy. To enable TLS, specify the paths to your certificate and private key files in the configuration:
+
+```toml
+# Path to TLS certificate (PEM format)
+tls_cert_path = "/path/to/cert.pem"
+# Path to TLS private key (PEM format)
+tls_key_path = "/path/to/key.pem"
+```
+
+Requirements for TLS certificates:
+- Certificate must be in PEM format
+- Certificate must be X.509 v3 (rustls does not support older versions)
+- Private key can be in either PKCS#8 or RSA format
+- Both files must be readable by the harmonia process
+
+Example generating a self-signed certificate for testing:
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes \
+  -subj "/C=US/ST=State/O=Organization/CN=cache.example.com"
+```
+
+Note: When TLS is enabled, harmonia will only accept HTTPS connections on the configured port.
+
+### Logging Configuration
+
 Logging can be configured with
 [env_logger](https://docs.rs/env_logger/latest/env_logger/). The default value
 is `info,actix_web=debug`. To only log errors use the following
 `RUST_LOG=error` and to only disable access logging, use
 `RUST_LOG=info,actix_web::middleware=error`
-
-To enable TLS on the HTTP server, specify `tls_cert_path` and `tls_key_path`.
 
 ## Build
 

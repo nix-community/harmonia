@@ -905,6 +905,7 @@ dependencies = [
  "prometheus",
  "rustls",
  "rustls-pemfile",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "tempfile",
