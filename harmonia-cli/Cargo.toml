@@ -1,5 +1,5 @@
 [package]
-name = "harmonia-client"
+name = "harmonia-cli"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

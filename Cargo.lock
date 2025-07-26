@@ -912,7 +912,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "harmonia-client"
+name = "harmonia-cli"
 version = "2.1.0"
 
 [[package]]
