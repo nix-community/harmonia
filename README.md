@@ -253,6 +253,44 @@ To use this feature, you need to import the harmonia flake in your NixOS configu
 
 When the daemon is enabled, the Harmonia cache service will automatically use it instead of connecting to the system's `nix-daemon`.
 
+## Prometheus Monitoring
+
+Harmonia exposes Prometheus metrics at the `/metrics` endpoint for monitoring and observability. The metrics provide insights into HTTP request performance and Nix daemon connection pool statistics.
+
+### Available Metrics
+
+**HTTP Request Metrics:**
+- `harmonia_http_requests_total` - Total number of HTTP requests (labeled by method, path, and status code)
+- `harmonia_http_request_duration_seconds` - Request latency histogram with buckets ranging from 0.0001s to 1.0s
+
+**Connection Pool Metrics:**
+- `harmonia_daemon_active_connections` - Number of active connections to the Nix daemon
+- `harmonia_daemon_idle_connections` - Number of idle connections in the pool
+- `harmonia_daemon_connections_created_total` - Total connections created over time
+- `harmonia_daemon_connection_acquire_duration_seconds` - Time to acquire a connection from the pool
+- `harmonia_daemon_connection_errors_total` - Total number of connection errors
+
+### Grafana Dashboard
+
+A pre-configured Grafana dashboard is available in the repository at `harmonia-cache/harmonia-grafana-dashboard.json`. This dashboard visualizes:
+- Request rate and latency patterns
+- HTTP status code distribution
+- Connection pool health and utilization
+- Error rates and performance trends
+
+You can import this dashboard into your Grafana instance to monitor your Harmonia deployment.
+
+### Example Prometheus Configuration
+
+To scrape metrics from Harmonia, add the following to your Prometheus configuration:
+
+```yaml
+scrape_configs:
+  - job_name: 'harmonia'
+    static_configs:
+      - targets: ['your-harmonia-host:5000']
+```
+
 ## Inspiration
 
 - [eris](https://github.com/thoughtpolice/eris)
