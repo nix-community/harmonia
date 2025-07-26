@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-pub use harmonia_store_core::StorePath;
+pub use harmonia_store_core::{ContentAddress, NarSignature, StorePath};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidPathInfo {
@@ -10,8 +10,8 @@ pub struct ValidPathInfo {
     pub registration_time: u64,
     pub nar_size: u64,
     pub ultimate: bool,
-    pub signatures: Vec<Vec<u8>>,
-    pub content_address: Option<Vec<u8>>,
+    pub signatures: BTreeSet<NarSignature>,
+    pub content_address: Option<ContentAddress>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

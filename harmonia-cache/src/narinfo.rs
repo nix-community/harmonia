@@ -68,7 +68,10 @@ async fn query_narinfo(
             .as_ref()
             .and_then(|d| extract_filename(d.as_bytes())),
         sigs: vec![],
-        ca: path_info.content_address.clone(),
+        ca: path_info
+            .content_address
+            .as_ref()
+            .map(|ca| ca.to_string().into_bytes()),
     };
 
     if !path_info.references.is_empty() {
@@ -95,7 +98,11 @@ async fn query_narinfo(
     }
 
     if res.sigs.is_empty() {
-        res.sigs = path_info.signatures.clone();
+        res.sigs = path_info
+            .signatures
+            .iter()
+            .map(|sig| sig.to_text().into_bytes())
+            .collect();
     }
 
     Ok(Some(res))

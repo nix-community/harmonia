@@ -1,4 +1,4 @@
-use harmonia_store_core::Hash;
+use harmonia_store_core::{ContentAddress, Hash, NarSignature};
 use harmonia_store_remote::{
     error::ProtocolError,
     protocol::{StorePath, ValidPathInfo},
@@ -134,11 +134,11 @@ impl StoreDb {
             signatures: sigs
                 .map(|s| {
                     s.split_whitespace()
-                        .map(|sig| sig.as_bytes().to_vec())
+                        .filter_map(|sig| NarSignature::parse(sig.as_bytes()).ok())
                         .collect()
                 })
                 .unwrap_or_default(),
-            content_address: ca.map(|s| s.into_bytes()),
+            content_address: ca.and_then(|s| ContentAddress::parse(s.as_bytes()).ok()),
         };
 
         Ok(Some(info))

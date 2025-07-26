@@ -3,7 +3,7 @@ use crate::error::ProtocolError;
 use crate::protocol::{CURRENT_PROTOCOL_VERSION, StorePath, ValidPathInfo};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::{DaemonServer, RequestHandler};
-use harmonia_store_core::Hash;
+use harmonia_store_core::{ContentAddress, Hash, NarSignature};
 use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
 use std::path::Path;
@@ -119,8 +119,18 @@ async fn test_valid_path_info_serialization() {
         registration_time: 1234567890,
         nar_size: 9876,
         ultimate: true,
-        signatures: vec![b"sig1".to_vec(), b"sig2".to_vec()],
-        content_address: Some(b"fixed:sha256:xyz".to_vec()),
+        signatures: {
+            let mut sigs = BTreeSet::new();
+            sigs.insert(NarSignature::parse(b"cache.example.com-1:6wzr1QlOPHG+knFuJIaw+85Z5ivwbdI512JikexG+nQ7JDSZM2hw8zzlcLrguzoLEpCA9VzaEEQflZEHVwy9AA==").unwrap());
+            sigs.insert(NarSignature::parse(b"test-key:xWtdz8SBQgWtYaCAAl9pwg0THwKgakyUgMMZdMTwpmM2T1flrAb/wMDveooNiJUWrbytRjIIkGpCe5q9Gek/+g==").unwrap());
+            sigs
+        },
+        content_address: Some(
+            ContentAddress::parse(
+                b"fixed:sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            )
+            .unwrap(),
+        ),
     };
 
     let mut buf = Vec::new();
@@ -263,13 +273,13 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
                 registration_time: 1700000000,
                 nar_size: 123456,
                 ultimate: false,
-                signatures: vec![
-                    b"cache.nixos.org-1:signature123abc".to_vec(),
-                    b"test-cache-1:testsignature456def".to_vec(),
-                ],
-                content_address: Some(
-                    b"fixed:sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890".to_vec(),
-                ),
+                signatures: {
+                    let mut sigs = BTreeSet::new();
+                    sigs.insert(NarSignature::parse(b"cache.nixos.org-1:vbsxDl+QO/fSXo6y98LJsXYzFcxIXxDJllosGjU8V7SksvE7rZW/XnFVUrCwzmUUv0Whnd9Z9JBPzt2H7g70AQ==").unwrap());
+                    sigs.insert(NarSignature::parse(b"test-cache-1:OXO5Z6H6pl6dU9cD5ycfvQufLMOxlpnY72Yc7R/pdfuwbm/2Uexgo8Ay7aWgCWPl/3PQpjckpiOfDXOFyG/UiQ==").unwrap());
+                    sigs
+                },
+                content_address: Some(ContentAddress::parse(b"fixed:sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890").unwrap()),
             };
 
             handler
@@ -308,7 +318,11 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
                 registration_time: 1700000100,
                 nar_size: 987654,
                 ultimate: true,
-                signatures: vec![b"cache.nixos.org-1:bashsignature789xyz".to_vec()],
+                signatures: {
+                    let mut sigs = BTreeSet::new();
+                    sigs.insert(NarSignature::parse(b"cache.nixos.org-1:bBGFaX0PmoJwEbI3ksMvoo+AYxaYr3BJw5f/0FsJdEKte92S/QssvXwQixuAYXJvf7t9QIsCZsQN8sccyiMAFQ==").unwrap());
+                    sigs
+                },
                 content_address: None,
             };
 
@@ -430,7 +444,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                 registration_time: 1700000000,
                 nar_size: 42,
                 ultimate: true,
-                signatures: vec![],
+                signatures: BTreeSet::new(),
                 content_address: None,
             };
 

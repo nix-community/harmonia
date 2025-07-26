@@ -3,10 +3,14 @@ pub mod metrics;
 pub mod pool;
 
 use crate::error::ProtocolError;
-use crate::protocol::{OpCode, ValidPathInfo};
+use crate::protocol::{
+    OpCode, ValidPathInfo,
+    types::{DerivedPath, Missing},
+};
 use crate::serialization::{Deserialize, Serialize};
 use harmonia_store_core::StorePath;
 use pool::ConnectionPool;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -62,7 +66,60 @@ impl DaemonClient {
         self.execute_operation(OpCode::IsValidPath, path).await
     }
 
-    async fn execute_operation<Req: Serialize, Resp: Deserialize>(
+    pub async fn query_all_valid_paths(&self) -> Result<Vec<StorePath>, ProtocolError> {
+        self.execute_operation(OpCode::QueryAllValidPaths, &())
+            .await
+    }
+
+    pub async fn query_valid_paths(&self, paths: &[StorePath]) -> Result<Vec<bool>, ProtocolError> {
+        self.execute_operation(OpCode::QueryValidPaths, &paths)
+            .await
+    }
+
+    pub async fn query_missing(&self, paths: &[DerivedPath]) -> Result<Missing, ProtocolError> {
+        self.execute_operation(OpCode::QueryMissing, &paths).await
+    }
+
+    pub async fn query_referrers(
+        &self,
+        path: &StorePath,
+    ) -> Result<BTreeSet<StorePath>, ProtocolError> {
+        self.execute_operation(OpCode::QueryReferrers, path).await
+    }
+
+    pub async fn query_valid_derivers(
+        &self,
+        path: &StorePath,
+    ) -> Result<Vec<StorePath>, ProtocolError> {
+        self.execute_operation(OpCode::QueryValidDerivers, path)
+            .await
+    }
+
+    pub async fn query_substitutable_paths(
+        &self,
+        paths: &[StorePath],
+    ) -> Result<BTreeSet<StorePath>, ProtocolError> {
+        self.execute_operation(OpCode::QuerySubstitutablePaths, &paths)
+            .await
+    }
+
+    pub async fn query_derivation_outputs(
+        &self,
+        drv: &StorePath,
+    ) -> Result<Vec<StorePath>, ProtocolError> {
+        self.execute_operation(OpCode::QueryDerivationOutputs, drv)
+            .await
+    }
+
+    pub async fn query_derivation_output_names(
+        &self,
+        drv: &StorePath,
+    ) -> Result<Vec<Vec<u8>>, ProtocolError> {
+        self.execute_operation(OpCode::QueryDerivationOutputNames, drv)
+            .await
+    }
+
+    async fn execute_operation<Req: Serialize + ?Sized, Resp: Deserialize>(
         &self,
         opcode: OpCode,
         request: &Req,

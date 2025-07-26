@@ -1,11 +1,16 @@
 pub mod messages;
 pub mod opcodes;
+pub mod types;
 pub mod version;
 
 pub use messages::{
     LoggerField, Msg, StderrError, StderrStartActivity, StorePath, Trace, ValidPathInfo,
 };
 pub use opcodes::OpCode;
+pub use types::{
+    DerivedPath, GCAction, GCOptions, GCResult, GCRoot, Missing, OutputName, OutputNameError,
+    OutputsSpec,
+};
 pub use version::{CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, ProtocolVersion};
 
 pub const WORKER_MAGIC_1: u64 = 0x6e697863;

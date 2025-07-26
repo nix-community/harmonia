@@ -4,6 +4,18 @@ use crate::serialization::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+// Implement Serialize for empty tuple (for operations with no arguments)
+impl Serialize for () {
+    async fn serialize<W: AsyncWrite + Unpin>(
+        &self,
+        _writer: &mut W,
+        _version: ProtocolVersion,
+    ) -> Result<(), ProtocolError> {
+        // Empty tuple serializes to nothing
+        Ok(())
+    }
+}
+
 impl Serialize for u64 {
     async fn serialize<W: AsyncWrite + Unpin>(
         &self,
@@ -82,31 +94,18 @@ impl Serialize for String {
     }
 }
 
+// Minimal String deserializer for error messages only
 impl Deserialize for String {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version)
+        let bytes = Vec::<u8>::deserialize(reader, version)
             .await
-            .io_context("Failed to read string length")?;
-
-        if len > MAX_STRING_SIZE {
-            return Err(ProtocolError::StringTooLong {
-                length: len,
-                max: MAX_STRING_SIZE,
-            });
-        }
-
-        // Align to the next multiple of 8
-        let aligned_len = (len + 7) & !7;
-        let mut buf = vec![0; aligned_len as usize];
-        reader
-            .read_exact(&mut buf)
-            .await
-            .io_context("Failed to read string data")?;
-
-        Ok(std::str::from_utf8(&buf[..len as usize])?.to_owned())
+            .io_context("Failed to read String")?;
+        String::from_utf8(bytes).map_err(|e| ProtocolError::DaemonError {
+            message: format!("Invalid UTF-8 in daemon response: {e}"),
+        })
     }
 }
 
@@ -183,27 +182,37 @@ impl<T: Serialize> Serialize for Vec<T> {
         writer: &mut W,
         version: ProtocolVersion,
     ) -> Result<(), ProtocolError> {
+        self.as_slice().serialize(writer, version).await
+    }
+}
+
+impl<T: Serialize> Serialize for &[T] {
+    async fn serialize<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        version: ProtocolVersion,
+    ) -> Result<(), ProtocolError> {
         (self.len() as u64)
             .serialize(writer, version)
             .await
-            .io_context("Failed to write Vec length")?;
+            .io_context("Failed to write slice length")?;
         for (i, item) in self.iter().enumerate() {
             item.serialize(writer, version)
                 .await
-                .io_context(format!("Failed to write Vec item {i}"))?;
+                .io_context(format!("Failed to write slice item {i}"))?;
         }
         Ok(())
     }
 }
 
-impl Deserialize for Vec<Vec<u8>> {
+impl<T: Deserialize> Deserialize for Vec<T> {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
     ) -> Result<Self, ProtocolError> {
         let len = u64::deserialize(reader, version)
             .await
-            .io_context("Failed to read Vec<Vec<u8>> length")?;
+            .io_context("Failed to read Vec length")?;
 
         if len > MAX_STRING_LIST_SIZE {
             return Err(ProtocolError::StringListTooLong {
@@ -215,9 +224,9 @@ impl Deserialize for Vec<Vec<u8>> {
         let mut result = Vec::with_capacity(len as usize);
         for i in 0..len {
             result.push(
-                Vec::<u8>::deserialize(reader, version)
+                T::deserialize(reader, version)
                     .await
-                    .io_context(format!("Failed to read Vec<Vec<u8>> item {i}"))?,
+                    .io_context(format!("Failed to read Vec item {i}"))?,
             );
         }
         Ok(result)
