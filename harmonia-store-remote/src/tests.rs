@@ -157,7 +157,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     }
 
     let store_path = String::from_utf8(output.stdout)?.trim().to_string();
-    let store_path = StorePath::from(store_path);
+    let store_path = StorePath::from(store_path.into_bytes());
 
     // Test is_valid_path
     let is_valid = client.is_valid_path(&store_path).await?;
@@ -191,7 +191,8 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     assert_eq!(not_found, None);
 
     // Test is_valid_path with non-existent path
-    let invalid_path = StorePath::from("/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake");
+    let invalid_path =
+        StorePath::from(b"/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake" as &[u8]);
     let is_valid = client.is_valid_path(&invalid_path).await?;
     assert!(!is_valid);
 
@@ -247,10 +248,11 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             // Add some test data
-            let test_path =
-                StorePath::from("/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1");
+            let test_path = StorePath::from(
+                b"/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1" as &[u8],
+            );
             let test_info = ValidPathInfo {
-                deriver: Some(StorePath::from("/nix/store/xyz789abc123def456ghi789jkl012m-hello-2.12.1.drv")),
+                deriver: Some(StorePath::from(b"/nix/store/xyz789abc123def456ghi789jkl012m-hello-2.12.1.drv" as &[u8])),
                 hash: Hash::parse(b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap(),
                 references: {
                     let mut refs = BTreeSet::new();

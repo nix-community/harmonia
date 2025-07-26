@@ -1,44 +1,6 @@
 use std::collections::BTreeSet;
-use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StorePath {
-    path: Vec<u8>,
-}
-
-impl StorePath {
-    pub fn new(path: Vec<u8>) -> Self {
-        Self { path }
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.path
-    }
-}
-
-impl fmt::Display for StorePath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", String::from_utf8_lossy(&self.path))
-    }
-}
-
-impl From<String> for StorePath {
-    fn from(path: String) -> Self {
-        Self::new(path.into_bytes())
-    }
-}
-
-impl From<&str> for StorePath {
-    fn from(path: &str) -> Self {
-        Self::new(path.as_bytes().to_vec())
-    }
-}
-
-impl From<Vec<u8>> for StorePath {
-    fn from(path: Vec<u8>) -> Self {
-        Self::new(path)
-    }
-}
+pub use harmonia_store_core::StorePath;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidPathInfo {

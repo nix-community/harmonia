@@ -158,10 +158,13 @@ async fn test_handler_with_nix_store() {
         .expect("Failed to create handler");
 
     // Test with a non-existent path
-    let fake_path = StorePath::from(format!(
-        "{}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test",
-        store_dir.display()
-    ));
+    let fake_path = StorePath::from(
+        format!(
+            "{}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test",
+            store_dir.display()
+        )
+        .into_bytes(),
+    );
     let is_valid = handler.handle_is_valid_path(&fake_path).await.unwrap();
     assert!(!is_valid, "Non-existent path should not be valid");
 

@@ -22,7 +22,10 @@ pub enum CacheError {
     Nar(#[from] NarError),
 
     #[error("Signing error: {0}")]
-    Signing(#[from] SigningError),
+    Signing(#[from] harmonia_store_core::SigningError),
+
+    #[error("Fingerprint error: {0}")]
+    Fingerprint(#[from] harmonia_store_core::FingerprintError),
 
     #[error("NARInfo error: {0}")]
     NarInfo(#[from] NarInfoError),
@@ -95,18 +98,6 @@ pub enum NarError {
 
     #[error("Channel send failed: {reason}")]
     ChannelSend { reason: String },
-}
-
-#[derive(Error, Debug)]
-pub enum SigningError {
-    #[error("Failed to parse signing key: {reason}")]
-    ParseKey { reason: String },
-
-    #[error("Base64 decode error: {0}")]
-    Base64Decode(#[from] base64::DecodeError),
-
-    #[error("Invalid signature: {reason}")]
-    InvalidSignature { reason: String },
 }
 
 #[derive(Error, Debug)]

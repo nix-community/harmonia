@@ -539,7 +539,7 @@ mod test {
         let (tx, mut rx) =
             tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
-            let store_path = StorePath::from(path);
+            let store_path = StorePath::from(path.into_bytes());
             let e = dump_path(store.get_real_path(&store_path), &tx).await;
             if let Err(e) = e {
                 eprintln!("Error dumping path: {e}");

@@ -110,7 +110,7 @@ impl StoreDb {
         let references: BTreeSet<StorePath> = ref_stmt
             .query_map(params![id], |row| {
                 let path: String = row.get(0)?;
-                Ok(StorePath::from(path))
+                Ok(StorePath::from(path.into_bytes()))
             })
             .db_protocol_context(|| format!("Failed to query references for path '{path_str}'"))?
             .collect::<Result<BTreeSet<_>, _>>()
@@ -125,7 +125,7 @@ impl StoreDb {
 
         // Build ValidPathInfo
         let info = ValidPathInfo {
-            deriver: deriver.map(StorePath::from),
+            deriver: deriver.map(|s| StorePath::from(s.into_bytes())),
             hash: parsed_hash,
             references,
             registration_time: registration_time as u64,
@@ -174,7 +174,7 @@ impl StoreDb {
         if let Some(path) = result {
             // Check if it actually starts with our prefix
             if path.starts_with(&prefix) {
-                Ok(Some(StorePath::from(path)))
+                Ok(Some(StorePath::from(path.into_bytes())))
             } else {
                 Ok(None)
             }

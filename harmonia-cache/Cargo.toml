@@ -34,7 +34,6 @@ tempfile = "3.20"
 url = "2.5.4"
 async-compression = { version = "0.4.27", features = ["tokio", "bzip2"] }
 tokio-util = "0.7.15"
-ed25519-dalek = "2.2.0"
 harmonia-store-core = { path = "../harmonia-store-core" }
 harmonia-store-remote = { path = "../harmonia-store-remote" }
 prometheus = { workspace = true }

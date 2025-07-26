@@ -37,7 +37,6 @@ mod narlist;
 mod prometheus;
 mod root;
 mod serve;
-mod signing;
 mod store;
 mod tls;
 mod version;

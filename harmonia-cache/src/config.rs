@@ -1,6 +1,6 @@
 use crate::error::{CacheError, ConfigError, Result};
-use crate::signing::parse_secret_key;
 use crate::store::Store;
+use harmonia_store_core::SigningKey;
 use serde::Deserialize;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
@@ -27,12 +27,6 @@ fn default_virtual_store() -> PathBuf {
 
 fn default_daemon_socket() -> PathBuf {
     PathBuf::from("/nix/var/nix/daemon-socket/socket")
-}
-
-#[derive(Debug)]
-pub(crate) struct SigningKey {
-    pub(crate) name: String,
-    pub(crate) key: Vec<u8>,
 }
 
 // TODO(conni2461): users to restrict access
@@ -128,15 +122,15 @@ pub(crate) fn load() -> Result<Config> {
     for sign_key_path in &settings.sign_key_paths {
         settings
             .secret_keys
-            .push(
-                parse_secret_key(sign_key_path).map_err(|e| ConfigError::InvalidSigningKey {
+            .push(SigningKey::from_file(sign_key_path).map_err(|e| {
+                ConfigError::InvalidSigningKey {
                     reason: format!(
                         "Couldn't parse secret key from '{}': {}",
                         sign_key_path.display(),
                         e
                     ),
-                })?,
-            );
+                }
+            })?);
     }
     let store_dir = std::env::var_os("NIX_STORE_DIR")
         .map(|s| s.into_encoded_bytes())

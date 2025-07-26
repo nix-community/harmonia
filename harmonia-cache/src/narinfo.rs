@@ -6,9 +6,10 @@ use harmonia_store_remote::protocol::StorePath;
 use serde::{Deserialize, Serialize};
 use std::os::unix::ffi::OsStrExt;
 
-use crate::config::{Config, SigningKey};
-use crate::signing::{fingerprint_path, sign_string};
+use crate::config::Config;
 use crate::{cache_control_max_age_1d, nixhash, some_or_404};
+use harmonia_store_core::SigningKey;
+use harmonia_store_core::fingerprint_path;
 
 #[derive(Debug, Deserialize)]
 pub struct Param {
@@ -85,9 +86,11 @@ async fn query_narinfo(
         res.nar_size,
         &path_info.references,
     )?;
+    let fingerprint = Some(fingerprint);
     for sk in sign_keys {
         if let Some(ref fp) = fingerprint {
-            res.sigs.push(sign_string(sk, fp));
+            let signature = sk.sign_string(fp);
+            res.sigs.push(signature.into_bytes());
         }
     }
 

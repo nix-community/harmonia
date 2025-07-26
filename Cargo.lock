@@ -892,7 +892,6 @@ dependencies = [
  "askama_escape",
  "async-compression",
  "base64",
- "ed25519-dalek",
  "env_logger",
  "harmonia-store-core",
  "harmonia-store-remote",
@@ -942,6 +941,7 @@ name = "harmonia-store-core"
 version = "2.1.0"
 dependencies = [
  "base64",
+ "ed25519-dalek",
  "hex",
  "thiserror",
 ]
