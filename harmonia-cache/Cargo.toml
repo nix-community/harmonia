@@ -1,0 +1,48 @@
+[package]
+name = "harmonia-cache"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "harmonia-cache"
+path = "src/main.rs"
+
+[dependencies]
+actix-web = { version = "4", default-features = false, features = ["macros", "compress-zstd", "cookies", "rustls-0_23"] }
+rustls = { version = "0.23" }
+rustls-pemfile = "2"
+rustls-pki-types = "1"
+actix-files = "0.6.6"
+log = { workspace = true }
+env_logger = "0.11"
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.9"
+mime = "0.3"
+base64 = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { version = "0.1" }
+http-range = "0.1"
+askama_escape = "0.13.0"
+percent-encoding = "2.3.1"
+thiserror = { workspace = true }
+tempfile = "3.20"
+url = "2.5.4"
+async-compression = { version = "0.4.27", features = ["tokio", "bzip2"] }
+tokio-util = "0.7.15"
+harmonia-store-core = { path = "../harmonia-store-core" }
+harmonia-store-remote = { path = "../harmonia-store-remote" }
+prometheus = { workspace = true }
+
+[build-dependencies]
+pkg-config = "0.3"
+
+[dev-dependencies]
+nix = { workspace = true }
+
+[lints]
+workspace = true

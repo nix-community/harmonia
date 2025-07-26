@@ -8,6 +8,7 @@
   };
   inputs.treefmt-nix.url = "github:numtide/treefmt-nix";
   inputs.treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.crane.url = "github:ipetkov/crane";
 
   outputs =
     inputs@{ flake-parts, ... }:
@@ -22,14 +23,20 @@
       perSystem =
         {
           lib,
-          config,
           pkgs,
           self',
           ...
         }:
         {
-          packages.harmonia = pkgs.callPackage ./. { };
-          packages.default = config.packages.harmonia;
+          packages =
+            let
+              packageSet = pkgs.callPackages ./packages.nix {
+                crane = inputs.crane;
+              };
+            in
+            {
+              inherit (packageSet) clippy default harmonia;
+            };
           checks =
             let
               testArgs = {
@@ -40,29 +47,32 @@
               devShells = lib.mapAttrs' (n: lib.nameValuePair "devShell-${n}") self'.devShells;
             in
             lib.optionalAttrs pkgs.stdenv.isLinux {
-              t00-simple = import ./tests/t00-simple.nix testArgs;
-              t01-signing = import ./tests/t01-signing.nix testArgs;
-              t02-varnish = import ./tests/t02-varnish.nix testArgs;
-              t03-chroot = import ./tests/t03-chroot.nix testArgs;
-              t04-tls = import ./tests/t04-tls.nix testArgs;
-            }
-            // {
-              clippy = config.packages.harmonia.override { enableClippy = true; };
+              nix-daemon = import ./tests/nix-daemon.nix testArgs;
+              harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
             }
             // packages
             // devShells;
-          devShells.default = pkgs.callPackage ./shell.nix { };
+          devShells.default = pkgs.callPackage ./devShell.nix { };
 
           treefmt = {
             # Used to find the project root
             projectRootFile = "flake.lock";
 
-            programs.rustfmt.enable = true;
+            programs.rustfmt = {
+              enable = true;
+              edition = "2024";
+            };
             programs.nixfmt.enable = true;
             programs.deadnix.enable = true;
             programs.clang-format.enable = true;
           };
         };
-      flake.nixosModules.harmonia = ./module.nix;
+      flake.nixosModules.harmonia =
+        { lib, ... }:
+        {
+          imports = [
+            (lib.modules.importApply ./module.nix { crane = inputs.crane; })
+          ];
+        };
     };
 }

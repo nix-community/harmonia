@@ -1,0 +1,17 @@
+[package]
+name = "harmonia-client"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "harmonia"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

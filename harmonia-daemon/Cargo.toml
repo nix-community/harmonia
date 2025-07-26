@@ -1,0 +1,25 @@
+[package]
+name = "harmonia-daemon"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+harmonia-store-core = { path = "../harmonia-store-core" }
+harmonia-store-remote = { path = "../harmonia-store-remote" }
+tokio = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+serde = { workspace = true }
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
