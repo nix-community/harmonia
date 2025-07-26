@@ -14,4 +14,5 @@ pub use missing::Missing;
 pub use output::{OutputName, OutputNameError};
 pub use store_requests::{
     AddSignaturesRequest, AddTextToStoreRequest, AddToStoreNarRequest, AddToStoreRequest,
+    VerifyStoreRequest,
 };

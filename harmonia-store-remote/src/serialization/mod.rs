@@ -1,4 +1,5 @@
 pub mod compound;
+pub mod gc;
 pub mod primitives;
 pub mod store_requests;
 pub mod store_types;

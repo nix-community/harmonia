@@ -37,3 +37,10 @@ pub struct AddToStoreNarRequest<'a> {
     pub repair: bool,
     pub check_sigs: bool,
 }
+
+/// Request for VerifyStore operation (OpCode 35)
+#[derive(Debug)]
+pub struct VerifyStoreRequest {
+    pub check_contents: bool,
+    pub repair: bool,
+}

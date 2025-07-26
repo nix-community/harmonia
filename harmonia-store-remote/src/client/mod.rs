@@ -2,11 +2,11 @@ pub mod connection;
 pub mod metrics;
 pub mod pool;
 
-use crate::error::ProtocolError;
+use crate::error::{IoErrorContext, ProtocolError};
 use crate::framed::FramedSink;
 use crate::protocol::{
     OpCode, ValidPathInfo,
-    types::{AddSignaturesRequest, AddTextToStoreRequest, DerivedPath, Missing, BuildMode, BuildResult, BasicDerivation},
+    types::{AddSignaturesRequest, AddTextToStoreRequest, DerivedPath, Missing, BuildMode, BuildResult, BasicDerivation, GCOptions, GCResult, GCRoot, VerifyStoreRequest},
 };
 use crate::serialization::{Deserialize, Serialize};
 use harmonia_store_core::{FileIngestionMethod, HashAlgo, NarSignature, StorePath};
@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 // Re-export pool types for public use
 pub use metrics::ClientMetrics;
@@ -356,6 +356,64 @@ impl DaemonClient {
 
     pub async fn ensure_path(&self, path: &StorePath) -> Result<(), ProtocolError> {
         self.execute_operation(OpCode::EnsurePath, path).await
+    }
+
+    /// Perform garbage collection
+    pub async fn collect_garbage(&self, options: &GCOptions) -> Result<GCResult, ProtocolError> {
+        self.execute_operation(OpCode::CollectGarbage, options)
+            .await
+    }
+
+    /// Find garbage collector roots
+    pub async fn find_roots(
+        &self,
+    ) -> Result<std::collections::BTreeMap<StorePath, GCRoot>, ProtocolError> {
+        self.execute_operation(OpCode::FindRoots, &()).await
+    }
+
+    /// Optimise the Nix store by hard-linking identical files
+    pub async fn optimise_store(&self) -> Result<(), ProtocolError> {
+        self.execute_operation(OpCode::OptimiseStore, &()).await
+    }
+
+    /// Synchronize with the garbage collector
+    pub async fn sync_with_gc(&self) -> Result<(), ProtocolError> {
+        self.execute_operation(OpCode::SyncWithGC, &()).await
+    }
+
+    /// Verify store integrity
+    pub async fn verify_store(
+        &self,
+        check_contents: bool,
+        repair: bool,
+    ) -> Result<bool, ProtocolError> {
+        let request = VerifyStoreRequest {
+            check_contents,
+            repair,
+        };
+        self.execute_operation(OpCode::VerifyStore, &request).await
+    }
+
+    /// Export NAR from a store path
+    pub async fn nar_from_path<W: AsyncWrite + Unpin>(
+        &self,
+        path: &StorePath,
+        sink: &mut W,
+    ) -> Result<(), ProtocolError> {
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation
+        conn.send_opcode(OpCode::NarFromPath).await?;
+        path.serialize(conn, version).await?;
+        conn.process_stderr().await?;
+
+        // Stream NAR data to sink
+        tokio::io::copy(conn, sink)
+            .await
+            .io_context("Failed to stream NAR data")?;
+
+        Ok(())
     }
 
     async fn execute_operation<Req: Serialize + ?Sized, Resp: Deserialize>(
