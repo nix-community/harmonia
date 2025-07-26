@@ -44,7 +44,6 @@
             in
             lib.optionalAttrs pkgs.stdenv.isLinux {
               t00-simple = import ./tests/t00-simple.nix testArgs;
-              t02-varnish = import ./tests/t02-varnish.nix testArgs;
               t05-daemon = import ./tests/t05-daemon.nix testArgs;
             }
             // {

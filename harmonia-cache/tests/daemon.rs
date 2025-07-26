@@ -199,7 +199,10 @@ pub async fn start_harmonia_cache(config: &str, port: u16) -> Result<Box<dyn Sen
     });
 
     // Wait for HTTP server to be ready
-    wait_for_service("127.0.0.1", port, pid, Duration::from_secs(30)).await?;
+    // For Unix sockets, we don't need to wait for a TCP port
+    if port > 0 {
+        wait_for_service("127.0.0.1", port, pid, Duration::from_secs(30)).await?;
+    }
 
     Ok(guard)
 }
@@ -225,7 +228,7 @@ async fn wait_for_service(
             use nix::sys::signal::{kill, Signal};
             use nix::unistd::Pid;
 
-            if let Err(_) = kill(Pid::from_raw(pid as i32), Signal::SIGCONT) {
+            if kill(Pid::from_raw(pid as i32), Signal::SIGCONT).is_err() {
                 return Err(
                     format!("Process {pid} died while waiting for service to start").into(),
                 );
