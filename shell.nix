@@ -15,6 +15,9 @@ pkgs.mkShell {
     cargo
     cargo-watch
     pkg-config
+  ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+    clang
+    mold
   ];
   buildInputs = [
     libsodium
@@ -28,4 +31,7 @@ pkgs.mkShell {
   CONFIG_FILE = pkgs.writeText "config.toml" "";
 
   RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+
+  # Use clang and mold linker for faster builds on Linux
+  RUSTFLAGS = pkgs.lib.optionalString pkgs.stdenv.isLinux "-C link-arg=-fuse-ld=mold -C linker=clang";
 }
