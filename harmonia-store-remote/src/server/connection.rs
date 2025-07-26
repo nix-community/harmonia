@@ -108,17 +108,14 @@ async fn handshake(stream: &mut UnixStream) -> Result<ProtocolVersion, ProtocolE
             minor: 38,
         })
     {
-        // Send server features
-        Vec::<Vec<u8>>::new()
-            .serialize(stream, client_version)
-            .await?;
+        // Send empty server features list
+        0u64.serialize(stream, client_version).await?;
         // Read client features
         let _client_features = Vec::<Vec<u8>>::deserialize(stream, client_version).await?;
     }
 
     // Send daemon version string
-    b"harmonia-store-remote 0.1.0"
-        .to_vec()
+    (b"harmonia-store-remote 0.1.0" as &[u8])
         .serialize(stream, client_version)
         .await?;
 

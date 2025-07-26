@@ -6,7 +6,7 @@ use crate::error::ProtocolError;
 use crate::framed::FramedSink;
 use crate::protocol::{
     OpCode, ValidPathInfo,
-    types::{AddSignaturesRequest, AddTextToStoreRequest, DerivedPath, Missing},
+    types::{AddSignaturesRequest, AddTextToStoreRequest, DerivedPath, Missing, BuildMode, BuildResult, BasicDerivation},
 };
 use crate::serialization::{Deserialize, Serialize};
 use harmonia_store_core::{FileIngestionMethod, HashAlgo, NarSignature, StorePath};
@@ -296,6 +296,66 @@ impl DaemonClient {
         // Get raw bytes from Path
         self.execute_operation(OpCode::AddIndirectRoot, &path.as_os_str().as_bytes())
             .await
+    }
+
+    // Build Operations
+
+    pub async fn build_paths(
+        &self,
+        paths: &[DerivedPath],
+        mode: BuildMode,
+    ) -> Result<(), ProtocolError> {
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::BuildPaths).await?;
+
+        // Send the paths
+        paths.serialize(conn, version).await?;
+
+        // BuildMode is only sent for protocol >= 1.15
+        if version.minor >= 15 {
+            mode.serialize(conn, version).await?;
+        }
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
+
+        // This operation returns unit
+        Ok(())
+    }
+
+    pub async fn build_derivation(
+        &self,
+        drv_path: &StorePath,
+        drv: &BasicDerivation,
+        mode: BuildMode,
+    ) -> Result<BuildResult, ProtocolError> {
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::BuildDerivation).await?;
+
+        // Send the derivation path
+        drv_path.serialize(conn, version).await?;
+
+        // Send the basic derivation
+        drv.serialize(conn, version).await?;
+
+        // Send the build mode
+        mode.serialize(conn, version).await?;
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
+
+        // Read the build result
+        BuildResult::deserialize(conn, version).await
+    }
+
+    pub async fn ensure_path(&self, path: &StorePath) -> Result<(), ProtocolError> {
+        self.execute_operation(OpCode::EnsurePath, path).await
     }
 
     async fn execute_operation<Req: Serialize + ?Sized, Resp: Deserialize>(

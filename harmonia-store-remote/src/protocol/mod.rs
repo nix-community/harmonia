@@ -8,8 +8,9 @@ pub use messages::{
 };
 pub use opcodes::OpCode;
 pub use types::{
-    DerivedPath, GCAction, GCOptions, GCResult, GCRoot, Missing, OutputName, OutputNameError,
-    OutputsSpec,
+    BasicDerivation, BuildMode, BuildResult, BuildStatus, DerivationOutput, DerivedPath,
+    DrvOutputResult, DrvOutputStatus, GCAction, GCOptions, GCResult, GCRoot, Missing, OutputName,
+    OutputNameError, OutputsSpec,
 };
 pub use version::{CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, ProtocolVersion};
 

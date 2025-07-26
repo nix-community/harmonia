@@ -66,6 +66,7 @@ impl Serialize for ValidPathInfo {
         // Serialize hash as hex string bytes (nix-daemon compatibility)
         self.hash
             .to_hex()
+            .as_slice()
             .serialize(writer, version)
             .await
             .io_context("Failed to write hash")?;
@@ -130,6 +131,7 @@ impl Serialize for ValidPathInfo {
             }
         };
         ca_bytes
+            .as_slice()
             .serialize(writer, version)
             .await
             .io_context("Failed to write content_address")?;

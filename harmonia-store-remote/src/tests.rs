@@ -88,10 +88,11 @@ async fn test_serialization_roundtrip() {
         .unwrap();
     assert_eq!(opt, deserialized);
 
-    // Test Vec<Vec<u8>>
-    let vec = vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()];
+    // Test Vec<&[u8]> - serialize as slice
+    let vec = vec![b"one" as &[u8], b"two" as &[u8], b"three" as &[u8]];
     let mut buf = Vec::new();
-    vec.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+    vec.as_slice()
+        .serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
@@ -99,7 +100,11 @@ async fn test_serialization_roundtrip() {
         <Vec<Vec<u8>> as Deserialize>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
             .await
             .unwrap();
-    assert_eq!(vec, deserialized);
+    // Compare the deserialized Vec<Vec<u8>> with our original data
+    assert_eq!(deserialized.len(), vec.len());
+    assert_eq!(deserialized[0], b"one");
+    assert_eq!(deserialized[1], b"two");
+    assert_eq!(deserialized[2], b"three");
 }
 
 #[tokio::test]
