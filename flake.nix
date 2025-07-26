@@ -23,16 +23,20 @@
       perSystem =
         {
           lib,
-          config,
           pkgs,
           self',
           ...
         }:
         {
-          packages.harmonia = pkgs.callPackage ./package.nix {
-            crane = inputs.crane;
-          };
-          packages.default = config.packages.harmonia;
+          packages =
+            let
+              packageSet = pkgs.callPackages ./packages.nix {
+                crane = inputs.crane;
+              };
+            in
+            {
+              inherit (packageSet) clippy default harmonia;
+            };
           checks =
             let
               testArgs = {
@@ -45,9 +49,6 @@
             lib.optionalAttrs pkgs.stdenv.isLinux {
               nix-daemon = import ./tests/nix-daemon.nix testArgs;
               harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
-            }
-            // {
-              clippy = config.packages.harmonia.override { enableClippy = true; };
             }
             // packages
             // devShells;

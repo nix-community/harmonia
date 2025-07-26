@@ -2,7 +2,11 @@
   pkgs,
   lib,
   crane,
-  enableClippy ? false,
+  makeWrapper,
+  libsodium,
+  openssl,
+  nix,
+  curl,
 }:
 let
   craneLib = crane.mkLib pkgs;
@@ -33,11 +37,11 @@ let
     pname = "harmonia";
     strictDeps = true;
 
-    nativeBuildInputs = with pkgs; [
+    nativeBuildInputs = [
       pkg-config
     ];
 
-    buildInputs = with pkgs; [
+    buildInputs = [
       libsodium
       openssl
     ];
@@ -53,10 +57,10 @@ let
       inherit cargoArtifacts;
 
       # Add runtime dependencies
-      nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.makeWrapper ];
+      nativeBuildInputs = [ makeWrapper ];
 
       doCheck = true;
-      nativeCheckInputs = with pkgs; [
+      nativeCheckInputs = [
         nix
         curl
       ];
@@ -68,7 +72,7 @@ let
 
       postInstall = ''
         wrapProgram $out/bin/harmonia \
-          --prefix PATH : ${lib.makeBinPath [ pkgs.nix ]}
+          --prefix PATH : ${lib.makeBinPath [ nix ]}
       '';
 
       meta = with lib; {
@@ -82,7 +86,7 @@ let
   );
 
   # Clippy check derivation
-  harmoniaClippy = craneLib.cargoClippy (
+  clippy = craneLib.cargoClippy (
     commonArgs
     // {
       inherit cargoArtifacts;
@@ -90,4 +94,7 @@ let
     }
   );
 in
-if enableClippy then harmoniaClippy else harmonia
+{
+  inherit harmonia clippy;
+  default = harmonia;
+}

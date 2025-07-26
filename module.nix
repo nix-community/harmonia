@@ -46,7 +46,7 @@ in
     services.harmonia-dev = {
       package = lib.mkOption {
         type = lib.types.package;
-        default = pkgs.callPackage ./package.nix { inherit crane; };
+        default = (pkgs.callPackage ./packages.nix { inherit crane; }).harmonia;
         defaultText = lib.literalExpression "pkgs.harmonia";
         description = "The harmonia package";
       };
