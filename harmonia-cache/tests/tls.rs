@@ -4,7 +4,7 @@ use tempfile::TempDir;
 
 mod daemon;
 
-use daemon::{pick_unused_port, start_harmonia_cache, Daemon, DaemonConfig, HarmoniaDaemon};
+use daemon::{Daemon, DaemonConfig, HarmoniaDaemon, pick_unused_port, start_harmonia_cache};
 
 // Compile in the test TLS certificates from the repo
 const TLS_CERT: &str = include_str!("../../tests/tls-cert.pem");

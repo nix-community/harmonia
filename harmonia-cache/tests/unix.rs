@@ -3,7 +3,7 @@ use tempfile::TempDir;
 
 mod daemon;
 
-use daemon::{start_harmonia_cache, Daemon, DaemonConfig, HarmoniaDaemon};
+use daemon::{Daemon, DaemonConfig, HarmoniaDaemon, start_harmonia_cache};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

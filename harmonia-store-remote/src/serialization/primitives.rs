@@ -1,5 +1,5 @@
 use crate::error::{IoErrorContext, ProtocolError};
-use crate::protocol::{ProtocolVersion, MAX_STRING_LIST_SIZE, MAX_STRING_SIZE};
+use crate::protocol::{MAX_STRING_LIST_SIZE, MAX_STRING_SIZE, ProtocolVersion};
 use crate::serialization::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};

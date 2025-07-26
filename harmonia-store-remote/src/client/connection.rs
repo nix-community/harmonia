@@ -1,9 +1,9 @@
 use crate::error::{IoErrorContext, ProtocolError};
 use crate::protocol::{
-    LoggerField, Msg, OpCode, ProtocolVersion, StderrError, StderrStartActivity, Trace,
+    CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, WORKER_MAGIC_1, WORKER_MAGIC_2,
 };
 use crate::protocol::{
-    CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, WORKER_MAGIC_1, WORKER_MAGIC_2,
+    LoggerField, Msg, OpCode, ProtocolVersion, StderrError, StderrStartActivity, Trace,
 };
 use crate::serialization::{Deserialize, Serialize};
 use std::path::Path;

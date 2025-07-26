@@ -3,7 +3,7 @@ use harmonia_store_remote::{
     error::ProtocolError,
     protocol::{StorePath, ValidPathInfo},
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::BTreeSet;
 use std::path::Path;
 

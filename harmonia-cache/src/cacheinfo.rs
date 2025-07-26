@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use crate::config;
-use actix_web::{http, web, HttpResponse};
+use actix_web::{HttpResponse, http, web};
 
 pub(crate) async fn get(config: web::Data<config::Config>) -> Result<HttpResponse, Box<dyn Error>> {
     let priority_str = config.priority.to_string();

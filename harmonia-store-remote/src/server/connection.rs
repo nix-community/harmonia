@@ -1,8 +1,8 @@
 use crate::error::{IoErrorContext, ProtocolError};
-use crate::protocol::{OpCode, ProtocolVersion, StorePath};
 use crate::protocol::{
     CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, WORKER_MAGIC_1, WORKER_MAGIC_2,
 };
+use crate::protocol::{OpCode, ProtocolVersion, StorePath};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::RequestHandler;
 use tokio::net::UnixStream;

@@ -4,7 +4,7 @@ use tempfile::TempDir;
 
 mod daemon;
 
-use daemon::{pick_unused_port, start_harmonia_cache, Daemon, DaemonConfig, NixDaemon};
+use daemon::{Daemon, DaemonConfig, NixDaemon, pick_unused_port, start_harmonia_cache};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

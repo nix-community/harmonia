@@ -1,5 +1,5 @@
 use std::env;
-use std::process::{exit, Command, ExitStatus};
+use std::process::{Command, ExitStatus, exit};
 
 fn run_nix_with_args(args: &[String]) -> Result<ExitStatus, std::io::Error> {
     let mut cmd = Command::new("nix");

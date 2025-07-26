@@ -3,7 +3,7 @@ use std::mem::size_of;
 
 use crate::error::{CacheError, IoErrorContext, NarError, Result, StoreError};
 use actix_web::web::Bytes;
-use actix_web::{http, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, http, web};
 use serde::Deserialize;
 use std::fs::{self, Metadata};
 use std::os::unix::ffi::OsStrExt;
@@ -74,11 +74,7 @@ impl std::fmt::Display for ThreadSafeError {
 
 fn alignment(size: u64) -> usize {
     let align = 8 - (size % 8);
-    if align == 8 {
-        0
-    } else {
-        align as usize
-    }
+    if align == 8 { 0 } else { align as usize }
 }
 
 async fn write_byte_slices(
@@ -386,7 +382,7 @@ pub(crate) async fn get(
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(crate::cache_control_no_store())
-                .body("missing outhash"))
+                .body("missing outhash"));
         }
     };
     let store_path = match store_path {
@@ -394,7 +390,7 @@ pub(crate) async fn get(
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(crate::cache_control_no_store())
-                .body("store path not found"))
+                .body("store path not found"));
         }
     };
 
@@ -416,7 +412,7 @@ pub(crate) async fn get(
             None => {
                 return Ok(HttpResponse::NotFound()
                     .insert_header(crate::cache_control_no_store())
-                    .body("path info not found"))
+                    .body("path info not found"));
             }
         }
     }; // daemon_guard is dropped here

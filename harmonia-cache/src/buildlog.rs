@@ -1,8 +1,8 @@
 use crate::error::{BuildLogError, CacheError, IoErrorContext, Result, StoreError};
 use actix_files::NamedFile;
-use actix_web::http::header::HeaderValue;
 use actix_web::Responder;
-use actix_web::{http, web, HttpRequest, HttpResponse};
+use actix_web::http::header::HeaderValue;
+use actix_web::{HttpRequest, HttpResponse, http, web};
 use async_compression::tokio::bufread::BzDecoder;
 use harmonia_store_remote::protocol::StorePath;
 use std::ffi::OsStr;
@@ -47,11 +47,13 @@ pub(crate) async fn get(
     req: HttpRequest,
     settings: web::Data<Config>,
 ) -> crate::ServerResult {
-    let drv_path = some_or_404!(query_drv_path(&settings, drv.as_bytes())
-        .await
-        .map_err(|e| CacheError::from(BuildLogError::QueryFailed {
-            reason: format!("Could not query nar hash in database for {drv}: {e}"),
-        }))?);
+    let drv_path = some_or_404!(
+        query_drv_path(&settings, drv.as_bytes())
+            .await
+            .map_err(|e| CacheError::from(BuildLogError::QueryFailed {
+                reason: format!("Could not query nar hash in database for {drv}: {e}"),
+            }))?
+    );
     let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
         CacheError::from(StoreError::Operation {
             reason: format!("Failed to get daemon connection: {e}"),
@@ -64,12 +66,12 @@ pub(crate) async fn get(
         Ok(false) => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(cache_control_no_store())
-                .finish())
+                .finish());
         }
         Err(e) => {
             return Ok(HttpResponse::InternalServerError()
                 .insert_header(cache_control_no_store())
-                .body(format!("Failed to query path info: {e}")))
+                .body(format!("Failed to query path info: {e}")));
         }
     }
     let build_log = some_or_404!(get_build_log(settings.store.real_store(), &drv_path));
@@ -78,7 +80,7 @@ pub(crate) async fn get(
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(cache_control_no_store())
-                .finish())
+                .finish());
         }
     };
     let accept_encoding = req

@@ -58,7 +58,10 @@
             # Used to find the project root
             projectRootFile = "flake.lock";
 
-            programs.rustfmt.enable = true;
+            programs.rustfmt = {
+              enable = true;
+              edition = "2024";
+            };
             programs.nixfmt.enable = true;
             programs.deadnix.enable = true;
             programs.clang-format.enable = true;

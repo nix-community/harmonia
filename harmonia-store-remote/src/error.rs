@@ -12,7 +12,9 @@ pub enum ProtocolError {
     #[error("Invalid magic number: expected {expected:#x}, got {actual:#x}")]
     InvalidMagic { expected: u64, actual: u64 },
 
-    #[error("Protocol version mismatch: server version {server} is incompatible with client range {min}-{max}")]
+    #[error(
+        "Protocol version mismatch: server version {server} is incompatible with client range {min}-{max}"
+    )]
     IncompatibleVersion {
         server: crate::protocol::ProtocolVersion,
         min: crate::protocol::ProtocolVersion,

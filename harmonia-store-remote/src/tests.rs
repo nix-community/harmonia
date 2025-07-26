@@ -1,6 +1,6 @@
 use crate::client::{DaemonClient, PoolConfig};
 use crate::error::ProtocolError;
-use crate::protocol::{StorePath, ValidPathInfo, CURRENT_PROTOCOL_VERSION};
+use crate::protocol::{CURRENT_PROTOCOL_VERSION, StorePath, ValidPathInfo};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::{DaemonServer, RequestHandler};
 use harmonia_store_core::Hash;
@@ -11,7 +11,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
@@ -548,9 +548,10 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
     );
 
     assert!(r1.map_err(|e| format!("First is_valid_path failed: {e:?}"))?);
-    assert!(r2
-        .map_err(|e| format!("query_path_info failed: {e:?}"))?
-        .is_some());
+    assert!(
+        r2.map_err(|e| format!("query_path_info failed: {e:?}"))?
+            .is_some()
+    );
     assert!(r3.map_err(|e| format!("Second is_valid_path failed: {e:?}"))?);
 
     let initial_request_count = *request_count_ref.lock().unwrap();

@@ -1,5 +1,5 @@
 use crate::base32;
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use std::fmt;
 use thiserror::Error;
 
@@ -171,9 +171,7 @@ pub enum ParseHashError {
     #[error("Invalid digest size: expected {expected}, got {actual}")]
     InvalidDigestSize { expected: usize, actual: usize },
 
-    #[error(
-        "Invalid digest length for {algo}: expected one of {expected_lengths:?}, got {actual}"
-    )]
+    #[error("Invalid digest length for {algo}: expected one of {expected_lengths:?}, got {actual}")]
     InvalidDigestLength {
         algo: String,
         expected_lengths: Vec<usize>,

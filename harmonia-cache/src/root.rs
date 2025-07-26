@@ -1,9 +1,9 @@
 use std::error::Error;
 
-use actix_web::{http, web, HttpResponse};
+use actix_web::{HttpResponse, http, web};
 
 use crate::BOOTSTRAP_SOURCE;
-use crate::{config, CARGO_HOME_PAGE, CARGO_NAME, CARGO_VERSION};
+use crate::{CARGO_HOME_PAGE, CARGO_NAME, CARGO_VERSION, config};
 
 pub(crate) async fn get(config: web::Data<config::Config>) -> Result<HttpResponse, Box<dyn Error>> {
     Ok(HttpResponse::Ok()

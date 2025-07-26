@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::error::{CacheError, NarInfoError, Result, StoreError};
-use actix_web::{http, web, HttpResponse};
+use actix_web::{HttpResponse, http, web};
 use harmonia_store_remote::protocol::StorePath;
 use serde::{Deserialize, Serialize};
 use std::os::unix::ffi::OsStrExt;
@@ -188,11 +188,13 @@ pub(crate) async fn get(
 ) -> crate::ServerResult {
     let hash = hash.into_inner();
     let real_store_path =
-        some_or_404!(nixhash(&settings, hash.as_bytes())
-            .await
-            .map_err(|e| CacheError::from(NarInfoError::QueryFailed {
-                reason: format!("Could not query nar hash in database: {e}"),
-            }))?);
+        some_or_404!(
+            nixhash(&settings, hash.as_bytes())
+                .await
+                .map_err(|e| CacheError::from(NarInfoError::QueryFailed {
+                    reason: format!("Could not query nar hash in database: {e}"),
+                }))?
+        );
 
     // Convert real store path to virtual store path
     let store_path = settings.store.to_virtual_path(&real_store_path);
@@ -210,7 +212,7 @@ pub(crate) async fn get(
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(cache_control_max_age_1d())
-                .body("missed hash"))
+                .body("missed hash"));
         }
     };
 

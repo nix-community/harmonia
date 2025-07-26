@@ -1,6 +1,6 @@
-use crate::error::{CacheError, IoErrorContext, NarInfoError, Result, ServeError};
 use crate::ServerResult;
-use actix_web::{http, web, HttpResponse};
+use crate::error::{CacheError, IoErrorContext, NarInfoError, Result, ServeError};
+use actix_web::{HttpResponse, http, web};
 use serde::{Deserialize, Serialize};
 use std::fs::Metadata;
 use std::os::unix::fs::PermissionsExt;
@@ -133,7 +133,7 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
                             return Err(ServeError::AccessDenied {
                                 path: entry.path.display().to_string(),
                             }
-                            .into())
+                            .into());
                         }
                     };
                     let entries = match &mut frame.nar_entry {
@@ -163,11 +163,13 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
 
 pub(crate) async fn get(hash: web::Path<String>, settings: web::Data<Config>) -> ServerResult {
     let store_path =
-        some_or_404!(nixhash(&settings, hash.as_bytes())
-            .await
-            .map_err(|e| CacheError::from(NarInfoError::QueryFailed {
-                reason: format!("Could not query nar hash in database: {e}"),
-            }))?);
+        some_or_404!(
+            nixhash(&settings, hash.as_bytes())
+                .await
+                .map_err(|e| CacheError::from(NarInfoError::QueryFailed {
+                    reason: format!("Could not query nar hash in database: {e}"),
+                }))?
+        );
 
     let nar_list = get_nar_list(settings.store.get_real_path(&store_path)).await?;
     Ok(HttpResponse::Ok()

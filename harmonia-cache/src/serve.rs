@@ -3,14 +3,14 @@ use std::path::{Path, PathBuf};
 use crate::error::IoErrorContext;
 use actix_files::NamedFile;
 use actix_web::Responder;
-use actix_web::{web, HttpRequest, HttpResponse};
-use askama_escape::{escape as escape_html_entity, Html};
-use percent_encoding::{utf8_percent_encode, CONTROLS};
+use actix_web::{HttpRequest, HttpResponse, web};
+use askama_escape::{Html, escape as escape_html_entity};
+use percent_encoding::{CONTROLS, utf8_percent_encode};
 use std::fmt::Write;
 
 use crate::template::{DIRECTORY_ROW_TEMPLATE, DIRECTORY_TEMPLATE, render, render_page};
 use crate::{
-    config::Config, nixhash, some_or_404, ServerResult, BOOTSTRAP_SOURCE, CARGO_NAME, CARGO_VERSION,
+    BOOTSTRAP_SOURCE, CARGO_NAME, CARGO_VERSION, ServerResult, config::Config, nixhash, some_or_404,
 };
 
 /// Returns percent encoded file URL path.

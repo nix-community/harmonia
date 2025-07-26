@@ -225,7 +225,7 @@ async fn wait_for_service(
 
             // First check if the process is still running
             // Try to send signal 0 to check if process exists
-            use nix::sys::signal::{kill, Signal};
+            use nix::sys::signal::{Signal, kill};
             use nix::unistd::Pid;
 
             if kill(Pid::from_raw(pid as i32), Signal::SIGCONT).is_err() {

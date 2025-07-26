@@ -1,14 +1,15 @@
 use crate::config::Config;
 use crate::error;
 use actix_web::{
-    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    web, Error, HttpResponse,
+    Error, HttpResponse,
+    dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready},
+    web,
 };
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
 };
 use std::{
-    future::{ready, Future, Ready},
+    future::{Future, Ready, ready},
     pin::Pin,
     sync::Arc,
     time::Instant,

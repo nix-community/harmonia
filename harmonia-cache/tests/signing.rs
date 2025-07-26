@@ -6,8 +6,8 @@ use tempfile::{NamedTempFile, TempDir};
 mod daemon;
 
 use daemon::{
-    pick_unused_port, start_harmonia_cache, Daemon, DaemonConfig, DaemonInstance, HarmoniaDaemon,
-    NixDaemon,
+    Daemon, DaemonConfig, DaemonInstance, HarmoniaDaemon, NixDaemon, pick_unused_port,
+    start_harmonia_cache,
 };
 
 // Compile in the test keys from the repo

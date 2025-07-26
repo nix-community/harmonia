@@ -6,7 +6,7 @@ pub use messages::{
     LoggerField, Msg, StderrError, StderrStartActivity, StorePath, Trace, ValidPathInfo,
 };
 pub use opcodes::OpCode;
-pub use version::{ProtocolVersion, CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION};
+pub use version::{CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, ProtocolVersion};
 
 pub const WORKER_MAGIC_1: u64 = 0x6e697863;
 pub const WORKER_MAGIC_2: u64 = 0x6478696f;

@@ -1,6 +1,6 @@
 use crate::error::{IoErrorContext, ProtocolError};
 use crate::protocol::{
-    ProtocolVersion, StorePath, ValidPathInfo, MAX_STRING_LIST_SIZE, MAX_STRING_SIZE,
+    MAX_STRING_LIST_SIZE, MAX_STRING_SIZE, ProtocolVersion, StorePath, ValidPathInfo,
 };
 use crate::serialization::{Deserialize, Serialize};
 use std::collections::BTreeSet;

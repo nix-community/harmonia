@@ -7,7 +7,7 @@ pub mod server;
 #[cfg(test)]
 mod tests;
 
-pub use client::{pool::PoolConfig, DaemonClient};
+pub use client::{DaemonClient, pool::PoolConfig};
 pub use error::ProtocolError;
-pub use protocol::{ProtocolVersion, CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION};
+pub use protocol::{CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, ProtocolVersion};
 pub use server::{DaemonServer, RequestHandler};

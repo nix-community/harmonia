@@ -1,6 +1,6 @@
 use crate::config::SigningKey;
 use crate::error::{IoErrorContext, Result, SigningError};
-use base64::{engine::general_purpose, Engine};
+use base64::{Engine, engine::general_purpose};
 use ed25519_dalek::{Signer, SigningKey as DalekSigningKey};
 use harmonia_store_remote::protocol::StorePath;
 use std::collections::BTreeSet;
