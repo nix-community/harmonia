@@ -106,6 +106,9 @@ real_nix_store = "{}"
             "--option",
             "builders",
             "", // Disable remote builders
+            "--option",
+            "sandbox",
+            "false", // Disable sandbox for tests
             "--substituters",
             "",
             expr_file.path().to_str().unwrap(),

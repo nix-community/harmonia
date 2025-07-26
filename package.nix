@@ -61,6 +61,11 @@ let
         curl
       ];
 
+      # Set HARMONIA_BIN to the build directory so tests use the release binary
+      preCheck = ''
+        export HARMONIA_BIN=$(pwd)/target/release
+      '';
+
       postInstall = ''
         wrapProgram $out/bin/harmonia \
           --prefix PATH : ${lib.makeBinPath [ pkgs.nix ]}
