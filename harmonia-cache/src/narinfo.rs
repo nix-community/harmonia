@@ -187,12 +187,16 @@ pub(crate) async fn get(
     settings: web::Data<Config>,
 ) -> crate::ServerResult {
     let hash = hash.into_inner();
-    let store_path =
+    let real_store_path =
         some_or_404!(nixhash(&settings, hash.as_bytes())
             .await
             .map_err(|e| CacheError::from(NarInfoError::QueryFailed {
                 reason: format!("Could not query nar hash in database: {e}"),
             }))?);
+
+    // Convert real store path to virtual store path
+    let store_path = settings.store.to_virtual_path(&real_store_path);
+
     let narinfo = match query_narinfo(
         settings.store.virtual_store(),
         &store_path,
