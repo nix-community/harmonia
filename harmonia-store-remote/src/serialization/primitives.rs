@@ -16,6 +16,16 @@ impl Serialize for () {
     }
 }
 
+impl Deserialize for () {
+    async fn deserialize<R: AsyncRead + Unpin>(
+        _reader: &mut R,
+        _version: ProtocolVersion,
+    ) -> Result<Self, ProtocolError> {
+        // Empty tuple reads nothing
+        Ok(())
+    }
+}
+
 impl Serialize for u64 {
     async fn serialize<W: AsyncWrite + Unpin>(
         &self,

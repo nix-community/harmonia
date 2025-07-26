@@ -1,5 +1,6 @@
 pub mod compound;
 pub mod primitives;
+pub mod store_requests;
 pub mod store_types;
 
 use crate::error::ProtocolError;

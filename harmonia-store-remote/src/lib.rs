@@ -1,5 +1,6 @@
 pub mod client;
 pub mod error;
+pub mod framed;
 pub mod protocol;
 pub mod serialization;
 pub mod server;

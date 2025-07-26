@@ -3,17 +3,19 @@ pub mod metrics;
 pub mod pool;
 
 use crate::error::ProtocolError;
+use crate::framed::FramedSink;
 use crate::protocol::{
     OpCode, ValidPathInfo,
-    types::{DerivedPath, Missing},
+    types::{AddSignaturesRequest, AddTextToStoreRequest, DerivedPath, Missing},
 };
 use crate::serialization::{Deserialize, Serialize};
-use harmonia_store_core::StorePath;
+use harmonia_store_core::{FileIngestionMethod, HashAlgo, NarSignature, StorePath};
 use pool::ConnectionPool;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 // Re-export pool types for public use
 pub use metrics::ClientMetrics;
@@ -116,6 +118,183 @@ impl DaemonClient {
         drv: &StorePath,
     ) -> Result<Vec<Vec<u8>>, ProtocolError> {
         self.execute_operation(OpCode::QueryDerivationOutputNames, drv)
+            .await
+    }
+
+    // Store Modification Operations
+
+    pub async fn add_to_store<R: AsyncRead + Unpin>(
+        &self,
+        name: &[u8],
+        mut source: R,
+        method: FileIngestionMethod,
+        hash_algo: HashAlgo,
+        references: &BTreeSet<StorePath>,
+        repair: bool,
+    ) -> Result<StorePath, ProtocolError> {
+        // For protocol >= 25, we send content address method string
+        // For older protocols, we send fixed/recursive flags
+
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::AddToStore).await?;
+
+        if version.minor >= 25 {
+            // Modern protocol: send name, content address method, references, repair
+            name.serialize(conn, version).await?;
+
+            // Build content address method string
+            let cam_str = match method {
+                FileIngestionMethod::Flat => format!("fixed:{}", hash_algo.name()),
+                FileIngestionMethod::Recursive => format!("fixed:r:{}", hash_algo.name()),
+            };
+            cam_str.as_bytes().serialize(conn, version).await?;
+
+            references.serialize(conn, version).await?;
+            repair.serialize(conn, version).await?;
+        } else {
+            // Legacy protocol: send name, fixed, recursive, hash algo string
+            name.serialize(conn, version).await?;
+
+            // "fixed" flag is inverted logic: true unless SHA256 + Recursive
+            let fixed = !(matches!(hash_algo, HashAlgo::Sha256)
+                && matches!(method, FileIngestionMethod::Recursive));
+            fixed.serialize(conn, version).await?;
+
+            // Recursive flag
+            matches!(method, FileIngestionMethod::Recursive)
+                .serialize(conn, version)
+                .await?;
+
+            // Hash algorithm as string
+            hash_algo.name().as_bytes().serialize(conn, version).await?;
+        }
+
+        // Now stream the data using framed format
+        let mut framed_sink = FramedSink::new(conn, 8192);
+
+        // Copy from source to framed sink
+        let mut buffer = vec![0u8; 8192];
+        loop {
+            let n = source
+                .read(&mut buffer)
+                .await
+                .map_err(|e| ProtocolError::Io {
+                    context: "Failed to read from source".to_string(),
+                    source: e,
+                })?;
+
+            if n == 0 {
+                break;
+            }
+
+            framed_sink.write(&buffer[..n]).await?;
+        }
+
+        // Finish the framed stream (sends terminating zero chunk)
+        let conn = framed_sink.finish().await?;
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
+
+        // Read the response (StorePath)
+        StorePath::deserialize(conn, version).await
+    }
+
+    pub async fn add_to_store_nar<R: AsyncRead + Unpin>(
+        &self,
+        path: &StorePath,
+        info: &ValidPathInfo,
+        mut source: R,
+        repair: bool,
+        check_sigs: bool,
+    ) -> Result<(), ProtocolError> {
+        let mut guard = self.pool.acquire().await?;
+        let (conn, version) = guard.connection_and_version();
+
+        // Send operation code
+        conn.send_opcode(OpCode::AddToStoreNar).await?;
+
+        // Send the store path
+        path.serialize(conn, version).await?;
+
+        // Send the metadata (ValidPathInfo)
+        info.serialize(conn, version).await?;
+
+        // Send repair and check_sigs flags
+        repair.serialize(conn, version).await?;
+        check_sigs.serialize(conn, version).await?;
+
+        // Now stream the NAR data using framed format
+        let mut framed_sink = FramedSink::new(conn, 8192);
+
+        // Copy from source to framed sink
+        let mut buffer = vec![0u8; 8192];
+        loop {
+            let n = source
+                .read(&mut buffer)
+                .await
+                .map_err(|e| ProtocolError::Io {
+                    context: "Failed to read NAR data".to_string(),
+                    source: e,
+                })?;
+
+            if n == 0 {
+                break;
+            }
+
+            framed_sink.write(&buffer[..n]).await?;
+        }
+
+        // Finish the framed stream
+        let conn = framed_sink.finish().await?;
+
+        // Process any stderr messages
+        conn.process_stderr().await?;
+
+        // This operation returns unit
+        Ok(())
+    }
+
+    pub async fn add_text_to_store(
+        &self,
+        name: &[u8],
+        content: &[u8],
+        references: &BTreeSet<StorePath>,
+        repair: bool,
+    ) -> Result<StorePath, ProtocolError> {
+        // Note: This is obsolete since protocol 1.25, use add_to_store instead
+        // But we implement it for compatibility
+        let request = AddTextToStoreRequest {
+            name,
+            content,
+            references,
+            repair,
+        };
+        self.execute_operation(OpCode::AddTextToStore, &request)
+            .await
+    }
+
+    pub async fn add_signatures(
+        &self,
+        path: &StorePath,
+        signatures: &[NarSignature],
+    ) -> Result<(), ProtocolError> {
+        let request = AddSignaturesRequest { path, signatures };
+        self.execute_operation(OpCode::AddSignatures, &request)
+            .await
+    }
+
+    pub async fn add_temp_root(&self, path: &StorePath) -> Result<(), ProtocolError> {
+        self.execute_operation(OpCode::AddTempRoot, path).await
+    }
+
+    pub async fn add_indirect_root(&self, path: &Path) -> Result<(), ProtocolError> {
+        use std::os::unix::ffi::OsStrExt;
+        // Get raw bytes from Path
+        self.execute_operation(OpCode::AddIndirectRoot, &path.as_os_str().as_bytes())
             .await
     }
 
