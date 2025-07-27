@@ -93,11 +93,11 @@ fn test_sqlite_with_nix_initialized_store() {
                     let store_path = std::path::Path::new(path);
 
                     // Test is_valid_path
-                    let is_valid = db.is_valid_path(store_path).unwrap();
+                    let is_valid = db.is_valid_path(path).unwrap();
                     assert!(is_valid, "Path {path} should be valid");
 
                     // Test query_path_info
-                    let info = db.query_path_info(store_path).unwrap();
+                    let info = db.query_path_info(path).unwrap();
                     assert!(info.is_some(), "Should get path info for {path}");
 
                     // Extract hash part (first 32 chars of the base name)
@@ -121,7 +121,7 @@ fn test_sqlite_with_nix_initialized_store() {
 
     // Even if we couldn't copy anything, at least verify the empty database works
     let is_valid = db
-        .is_valid_path(&store_dir.join("non-existent-path"))
+        .is_valid_path(&format!("{}/non-existent-path", store_dir.display()))
         .unwrap();
     assert!(!is_valid, "Non-existent path should not be valid");
 }
@@ -165,11 +165,14 @@ async fn test_handler_with_nix_store() {
         )
         .into_bytes(),
     );
-    let is_valid = handler.handle_is_valid_path(&fake_path).await.unwrap();
+    let is_valid = handler
+        .handle_is_valid_path(fake_path.clone())
+        .await
+        .unwrap();
     assert!(!is_valid, "Non-existent path should not be valid");
 
     // Test query_path_info on non-existent path
-    let info = handler.handle_query_path_info(&fake_path).await.unwrap();
+    let info = handler.handle_query_path_info(fake_path).await.unwrap();
     assert!(info.is_none(), "Should return None for non-existent path");
 
     // Test query_path_from_hash_part with non-existent hash

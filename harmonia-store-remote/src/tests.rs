@@ -345,7 +345,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     impl RequestHandler for TestHandler {
         async fn handle_query_path_info(
             &self,
-            path: &StorePath,
+            path: StorePath,
         ) -> Result<Option<ValidPathInfo>, ProtocolError> {
             Ok(self.store_paths.get(path.as_bytes()).cloned())
         }
@@ -363,7 +363,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             Ok(None)
         }
 
-        async fn handle_is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
+        async fn handle_is_valid_path(&self, path: StorePath) -> Result<bool, ProtocolError> {
             Ok(self.store_paths.contains_key(path.as_bytes()))
         }
     }
@@ -464,7 +464,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
     impl RequestHandler for TestHandler {
         async fn handle_query_path_info(
             &self,
-            path: &StorePath,
+            path: StorePath,
         ) -> Result<Option<ValidPathInfo>, ProtocolError> {
             let count = {
                 let mut count = self.request_count.lock().unwrap();
@@ -494,7 +494,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
             Ok(None)
         }
 
-        async fn handle_is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
+        async fn handle_is_valid_path(&self, path: StorePath) -> Result<bool, ProtocolError> {
             let count = {
                 let mut count = self.request_count.lock().unwrap();
                 *count += 1;
