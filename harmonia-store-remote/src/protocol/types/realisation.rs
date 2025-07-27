@@ -1,5 +1,5 @@
-use harmonia_store_core::{StorePath, NarSignature};
-use std::collections::BTreeSet;
+use harmonia_store_core::{NarSignature, StorePath};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Represents a derivation output identifier
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -19,6 +19,8 @@ pub struct Realisation {
     pub out_path: StorePath,
     /// Signatures on this realisation
     pub signatures: BTreeSet<NarSignature>,
+    /// Dependent realisations (for protocol version >= 31)
+    pub dependent_realisations: BTreeMap<DrvOutputId, StorePath>,
 }
 
 /// Settings for the daemon

@@ -1,10 +1,11 @@
 use harmonia_store_core::{ContentAddress, Hash, NarSignature};
 use harmonia_store_remote::{
     error::ProtocolError,
+    protocol::types::{DrvOutputId, Realisation},
     protocol::{StorePath, ValidPathInfo},
 };
 use rusqlite::{Connection, OptionalExtension, params};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::error::{DaemonError, DbContext};
@@ -45,16 +46,44 @@ impl StoreDb {
         Ok(Self { conn })
     }
 
-    pub fn query_path_info(
-        &self,
-        store_path: &Path,
-    ) -> Result<Option<ValidPathInfo>, ProtocolError> {
-        let path_str = store_path
-            .to_str()
-            .ok_or_else(|| ProtocolError::DaemonError {
-                message: "Invalid UTF-8 in store path".to_string(),
-            })?;
+    /// Get the ID of a valid path from the database
+    fn get_valid_path_id(&self, path_str: &str) -> Result<Option<i64>, ProtocolError> {
+        self.conn
+            .query_row(
+                "SELECT id FROM ValidPaths WHERE path = ?1",
+                params![path_str],
+                |row| row.get(0),
+            )
+            .optional()
+            .db_protocol_context(|| format!("Failed to get path ID for '{path_str}'"))
+    }
 
+    /// Query paths and collect them into a BTreeSet
+    fn query_paths<P, F>(
+        &self,
+        sql: &str,
+        params: P,
+        error_context: F,
+    ) -> Result<BTreeSet<StorePath>, ProtocolError>
+    where
+        P: rusqlite::Params,
+        F: Fn() -> String + Clone,
+    {
+        let mut stmt = self
+            .conn
+            .prepare_cached(sql)
+            .db_protocol_context(|| format!("Failed to prepare {}", error_context()))?;
+
+        stmt.query_map(params, |row| {
+            let path: String = row.get(0)?;
+            Ok(StorePath::from(path.into_bytes()))
+        })
+        .db_protocol_context(|| format!("Failed to query {}", error_context()))?
+        .collect::<Result<BTreeSet<_>, _>>()
+        .db_protocol_context(|| format!("Failed to collect {}", error_context()))
+    }
+
+    pub fn query_path_info(&self, path_str: &str) -> Result<Option<ValidPathInfo>, ProtocolError> {
         // First query the main path info
         let mut stmt = self
             .conn
@@ -183,13 +212,7 @@ impl StoreDb {
         }
     }
 
-    pub fn is_valid_path(&self, store_path: &Path) -> Result<bool, ProtocolError> {
-        let path_str = store_path
-            .to_str()
-            .ok_or_else(|| ProtocolError::DaemonError {
-                message: "Invalid UTF-8 in store path".to_string(),
-            })?;
-
+    pub fn is_valid_path(&self, path_str: &str) -> Result<bool, ProtocolError> {
         let mut stmt = self
             .conn
             .prepare_cached("SELECT 1 FROM ValidPaths WHERE path = ?1 LIMIT 1")
@@ -202,5 +225,228 @@ impl StoreDb {
             .db_protocol_context(|| format!("Failed to check validity of path '{path_str}'"))?;
 
         Ok(exists)
+    }
+
+    pub fn query_all_valid_paths(&self) -> Result<BTreeSet<StorePath>, ProtocolError> {
+        self.query_paths("SELECT path FROM ValidPaths", [], || {
+            "all valid paths".to_string()
+        })
+    }
+
+    pub fn query_referrers(&self, path_str: &str) -> Result<BTreeSet<StorePath>, ProtocolError> {
+        self.query_paths(
+            "SELECT path FROM Refs 
+             JOIN ValidPaths ON referrer = id 
+             WHERE reference = (SELECT id FROM ValidPaths WHERE path = ?1)",
+            params![path_str],
+            || format!("referrers for '{path_str}'"),
+        )
+    }
+
+    pub fn query_valid_derivers(
+        &self,
+        path_str: &str,
+    ) -> Result<BTreeSet<StorePath>, ProtocolError> {
+        self.query_paths(
+            "SELECT v.path FROM DerivationOutputs d 
+             JOIN ValidPaths v ON d.drv = v.id 
+             WHERE d.path = ?1",
+            params![path_str],
+            || format!("valid derivers for '{path_str}'"),
+        )
+    }
+
+    pub fn query_derivation_outputs(
+        &self,
+        path_str: &str,
+    ) -> Result<BTreeSet<StorePath>, ProtocolError> {
+        let drv_id =
+            self.get_valid_path_id(path_str)?
+                .ok_or_else(|| ProtocolError::DaemonError {
+                    message: format!("Derivation not found: {path_str}"),
+                })?;
+
+        self.query_paths(
+            "SELECT path FROM DerivationOutputs WHERE drv = ?1",
+            params![drv_id],
+            || format!("derivation outputs for '{path_str}'"),
+        )
+    }
+
+    pub fn query_derivation_output_names(
+        &self,
+        path_str: &str,
+    ) -> Result<Vec<Vec<u8>>, ProtocolError> {
+        let drv_id =
+            self.get_valid_path_id(path_str)?
+                .ok_or_else(|| ProtocolError::DaemonError {
+                    message: format!("Derivation not found: {path_str}"),
+                })?;
+
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT id FROM DerivationOutputs WHERE drv = ?1")
+            .db_protocol_context(|| {
+                format!("Failed to prepare output names query for '{path_str}'")
+            })?;
+
+        let names = stmt
+            .query_map(params![drv_id], |row| {
+                let name: String = row.get(0)?;
+                Ok(name.into_bytes())
+            })
+            .db_protocol_context(|| format!("Failed to query output names for '{path_str}'"))?
+            .collect::<Result<Vec<_>, _>>()
+            .db_protocol_context(|| format!("Failed to collect output names for '{path_str}'"))?;
+
+        Ok(names)
+    }
+
+    pub fn query_derivation_output_map(
+        &self,
+        path_str: &str,
+    ) -> Result<BTreeMap<String, Option<StorePath>>, ProtocolError> {
+        // First get the derivation ID
+        let drv_id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM ValidPaths WHERE path = ?1",
+                params![path_str],
+                |row| row.get(0),
+            )
+            .optional()
+            .db_protocol_context(|| format!("Failed to get derivation ID for '{path_str}'"))?;
+
+        let drv_id = drv_id.ok_or_else(|| ProtocolError::DaemonError {
+            message: format!("Derivation not found: {path_str}"),
+        })?;
+
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT id, path FROM DerivationOutputs WHERE drv = ?1")
+            .db_protocol_context(|| {
+                format!("Failed to prepare output map query for '{path_str}'")
+            })?;
+
+        let outputs = stmt
+            .query_map(params![drv_id], |row| {
+                let name: String = row.get(0)?;
+                let path: String = row.get(1)?;
+                Ok((name, Some(StorePath::from(path.into_bytes()))))
+            })
+            .db_protocol_context(|| format!("Failed to query output map for '{path_str}'"))?
+            .collect::<Result<BTreeMap<_, _>, _>>()
+            .db_protocol_context(|| format!("Failed to collect output map for '{path_str}'"))?;
+
+        Ok(outputs)
+    }
+
+    pub fn query_realisation(
+        &self,
+        drv_hash: &[u8],
+        output_name: &str,
+    ) -> Result<Option<Realisation>, ProtocolError> {
+        // Convert drv_hash to string for the query (Nix stores it as text)
+        let drv_path = std::str::from_utf8(drv_hash).map_err(|_| ProtocolError::DaemonError {
+            message: "Invalid UTF-8 in derivation hash".to_string(),
+        })?;
+
+        let mut stmt = self
+            .conn
+            .prepare_cached(
+                "SELECT Realisations.id, Output.path, Realisations.signatures FROM Realisations
+                 INNER JOIN ValidPaths AS Output ON Output.id = Realisations.outputPath
+                 WHERE drvPath = ?1 AND outputName = ?2",
+            )
+            .db_protocol_context(|| {
+                format!("Failed to prepare realisation query for '{drv_path}:{output_name}'")
+            })?;
+
+        let result = stmt
+            .query_row(params![&drv_path, output_name], |row| {
+                let _id: i64 = row.get(0)?;
+                let out_path: String = row.get(1)?;
+                let signatures: Option<String> = row.get(2)?;
+
+                Ok((out_path, signatures))
+            })
+            .optional()
+            .db_protocol_context(|| {
+                format!("Failed to query realisation for '{drv_path}:{output_name}'")
+            })?;
+
+        if let Some((out_path, signatures)) = result {
+            // Parse signatures if present
+            let sigs: BTreeSet<NarSignature> = if let Some(sig_str) = signatures {
+                sig_str
+                    .split(' ')
+                    .filter(|s| !s.is_empty())
+                    .filter_map(|s| NarSignature::parse(s.as_bytes()).ok())
+                    .collect()
+            } else {
+                BTreeSet::new()
+            };
+
+            // Query dependent realisations from RealisationsRefs
+            let realisation_id: i64 = self
+                .conn
+                .query_row(
+                    "SELECT id FROM Realisations WHERE drvPath = ?1 AND outputName = ?2",
+                    params![&drv_path, output_name],
+                    |row| row.get(0),
+                )
+                .db_protocol_context(|| {
+                    format!("Failed to get realisation ID for '{drv_path}:{output_name}'")
+                })?;
+
+            let mut deps_stmt = self
+                .conn
+                .prepare_cached(
+                    "SELECT r.drvPath, r.outputName, v.path 
+                     FROM RealisationsRefs rr
+                     JOIN Realisations r ON r.id = rr.realisationReference
+                     JOIN ValidPaths v ON v.id = r.outputPath
+                     WHERE rr.referrer = ?1",
+                )
+                .db_protocol_context(|| {
+                    format!("Failed to prepare dependent realisations query for '{drv_path}:{output_name}'")
+                })?;
+
+            let dependent_realisations = deps_stmt
+                .query_map(params![realisation_id], |row| {
+                    let dep_drv_path: String = row.get(0)?;
+                    let dep_output_name: String = row.get(1)?;
+                    let dep_out_path: String = row.get(2)?;
+
+                    Ok((
+                        DrvOutputId {
+                            drv_hash: dep_drv_path.into_bytes(),
+                            output_name: dep_output_name.into_bytes(),
+                        },
+                        StorePath::from(dep_out_path.into_bytes()),
+                    ))
+                })
+                .db_protocol_context(|| {
+                    format!("Failed to query dependent realisations for '{drv_path}:{output_name}'")
+                })?
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .db_protocol_context(|| {
+                    format!(
+                        "Failed to collect dependent realisations for '{drv_path}:{output_name}'"
+                    )
+                })?;
+
+            Ok(Some(Realisation {
+                id: DrvOutputId {
+                    drv_hash: drv_hash.to_vec(),
+                    output_name: output_name.as_bytes().to_vec(),
+                },
+                out_path: StorePath::from(out_path.into_bytes()),
+                signatures: sigs,
+                dependent_realisations,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }

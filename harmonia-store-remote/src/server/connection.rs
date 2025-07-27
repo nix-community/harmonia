@@ -1,10 +1,12 @@
 use crate::error::{IoErrorContext, ProtocolError};
+use crate::protocol::types::DrvOutputId;
 use crate::protocol::{
     CURRENT_PROTOCOL_VERSION, MIN_PROTOCOL_VERSION, WORKER_MAGIC_1, WORKER_MAGIC_2,
 };
 use crate::protocol::{OpCode, ProtocolVersion, StorePath};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::RequestHandler;
+use std::collections::BTreeSet;
 use tokio::net::UnixStream;
 
 pub async fn handle_connection<H: RequestHandler>(
@@ -30,7 +32,7 @@ pub async fn handle_connection<H: RequestHandler>(
                 let path = StorePath::deserialize(&mut stream, version).await?;
                 send_stderr_last(&mut stream, version).await?;
 
-                let result = handler.handle_query_path_info(&path).await?;
+                let result = handler.handle_query_path_info(path).await?;
                 result.serialize(&mut stream, version).await?;
             }
 
@@ -50,8 +52,130 @@ pub async fn handle_connection<H: RequestHandler>(
                 let path = StorePath::deserialize(&mut stream, version).await?;
                 send_stderr_last(&mut stream, version).await?;
 
-                let result = handler.handle_is_valid_path(&path).await?;
+                let result = handler.handle_is_valid_path(path).await?;
                 result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryAllValidPaths => {
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_all_valid_paths().await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryValidPaths => {
+                let paths = BTreeSet::<StorePath>::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_valid_paths(paths).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QuerySubstitutablePaths => {
+                let paths = BTreeSet::<StorePath>::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_substitutable_paths(paths).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::HasSubstitutes => {
+                let path = StorePath::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_has_substitutes(path).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QuerySubstitutablePathInfo => {
+                let path = StorePath::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_substitutable_path_info(path).await?;
+                // Use same serialization as ValidPathInfo for Option
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QuerySubstitutablePathInfos => {
+                let paths = BTreeSet::<StorePath>::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_substitutable_path_infos(paths).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryReferrers => {
+                let path = StorePath::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_referrers(path).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryValidDerivers => {
+                let path = StorePath::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_valid_derivers(path).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryDerivationOutputs => {
+                let drv_path = StorePath::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_derivation_outputs(drv_path).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryDerivationOutputNames => {
+                let drv_path = StorePath::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler
+                    .handle_query_derivation_output_names(drv_path)
+                    .await?;
+                result.as_slice().serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryDerivationOutputMap => {
+                let drv_path = StorePath::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_derivation_output_map(drv_path).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryMissing => {
+                use crate::protocol::types::DerivedPath;
+                let targets = Vec::<DerivedPath>::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_missing(targets).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryRealisation => {
+                let id = DrvOutputId::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_realisation(id).await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::QueryFailedPaths => {
+                send_stderr_last(&mut stream, version).await?;
+
+                let result = handler.handle_query_failed_paths().await?;
+                result.serialize(&mut stream, version).await?;
+            }
+
+            OpCode::ClearFailedPaths => {
+                let paths = BTreeSet::<StorePath>::deserialize(&mut stream, version).await?;
+                send_stderr_last(&mut stream, version).await?;
+
+                handler.handle_clear_failed_paths(paths).await?;
+                // No response needed
             }
 
             _ => {
