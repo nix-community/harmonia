@@ -16,7 +16,7 @@ env_logger = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"
