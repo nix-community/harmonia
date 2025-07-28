@@ -2,7 +2,6 @@ use base64::{Engine, engine::general_purpose};
 use ed25519_dalek::Signature as Ed25519Signature;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -24,6 +23,18 @@ pub enum SignatureError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Signature(Ed25519Signature);
 
+impl PartialOrd for Signature {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Signature {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.to_bytes().cmp(&other.to_bytes())
+    }
+}
+
 impl Signature {
     /// Create a new signature from raw bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, SignatureError> {
@@ -44,8 +55,8 @@ impl Signature {
         general_purpose::STANDARD.encode(self.to_bytes())
     }
 
-    /// Parse a signature from base64-encoded text
-    pub fn from_base64(s: &str) -> Result<Self, SignatureError> {
+    /// Parse a signature from base64-encoded bytes
+    pub fn from_base64(s: &[u8]) -> Result<Self, SignatureError> {
         let bytes = general_purpose::STANDARD.decode(s)?;
         Self::from_bytes(&bytes)
     }
@@ -62,14 +73,6 @@ impl fmt::Display for Signature {
     }
 }
 
-impl FromStr for Signature {
-    type Err = SignatureError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_base64(s)
-    }
-}
-
 impl Hash for Signature {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.to_bytes().hash(state);
@@ -77,51 +80,52 @@ impl Hash for Signature {
 }
 
 /// A composite type containing a named signature
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NarSignature {
     /// The name/identifier of the public key used (e.g., "cache.nixos.org-1")
-    pub key_name: String,
+    pub key_name: Vec<u8>,
     /// The actual signature
     pub sig: Signature,
 }
 
 impl NarSignature {
     /// Create a new NAR signature
-    pub fn new(key_name: String, sig: Signature) -> Self {
+    pub fn new(key_name: Vec<u8>, sig: Signature) -> Self {
         Self { key_name, sig }
     }
 
     /// Convert to the Nix text format: "key-name:base64-signature"
     pub fn to_text(&self) -> String {
-        format!("{}:{}", self.key_name, self.sig.to_base64())
+        format!(
+            "{}:{}",
+            String::from_utf8_lossy(&self.key_name),
+            self.sig.to_base64()
+        )
     }
 
-    /// Parse from the Nix text format: "key-name:base64-signature"
-    pub fn parse(s: &str) -> Result<Self, SignatureError> {
-        let (key_name, sig_str) = s
-            .split_once(':')
+    /// Parse from bytes format: b"key-name:base64-signature"
+    pub fn parse(bytes: &[u8]) -> Result<Self, SignatureError> {
+        let colon_pos = bytes
+            .iter()
+            .position(|&b| b == b':')
             .ok_or_else(|| SignatureError::InvalidFormat("Missing ':' separator".to_string()))?;
+
+        let key_name = &bytes[..colon_pos];
+        let sig_bytes = &bytes[colon_pos + 1..];
 
         if key_name.is_empty() {
             return Err(SignatureError::InvalidFormat("Empty key name".to_string()));
         }
 
-        let sig = Signature::from_base64(sig_str)?;
-        Ok(Self::new(key_name.to_string(), sig))
+        let sig = Signature::from_base64(sig_bytes)?;
+
+        Ok(Self::new(key_name.to_vec(), sig))
     }
 }
 
 impl fmt::Display for NarSignature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_text())
-    }
-}
-
-impl FromStr for NarSignature {
-    type Err = SignatureError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s)
     }
 }
 
@@ -134,15 +138,15 @@ mod tests {
         let bytes = [42u8; 64];
         let sig = Signature::from_bytes(&bytes).unwrap();
         let base64 = sig.to_base64();
-        let sig2 = Signature::from_base64(&base64).unwrap();
+        let sig2 = Signature::from_base64(base64.as_bytes()).unwrap();
         assert_eq!(sig, sig2);
     }
 
     #[test]
     fn test_nar_signature_parse() {
         let text = "cache.example.com-1:6wzr1QlOPHG+knFuJIaw+85Z5ivwbdI512JikexG+nQ7JDSZM2hw8zzlcLrguzoLEpCA9VzaEEQflZEHVwy9AA==";
-        let nar_sig = NarSignature::parse(text).unwrap();
-        assert_eq!(nar_sig.key_name, "cache.example.com-1");
+        let nar_sig = NarSignature::parse(text.as_bytes()).unwrap();
+        assert_eq!(nar_sig.key_name, b"cache.example.com-1");
         assert_eq!(nar_sig.to_text(), text);
     }
 

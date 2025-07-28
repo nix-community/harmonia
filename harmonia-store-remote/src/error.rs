@@ -44,6 +44,9 @@ pub enum ProtocolError {
 
     #[error("Invalid UTF-8 in string data: {0}")]
     InvalidUtf8(#[from] std::str::Utf8Error),
+
+    #[error("Operation not supported: {0}")]
+    Unsupported(&'static str),
 }
 
 impl ProtocolError {

@@ -23,14 +23,14 @@ pub enum SigningError {
 #[derive(Clone, Debug)]
 pub struct SigningKey {
     /// The name of the key (e.g., "cache.example.com-1")
-    pub name: String,
+    pub name: Vec<u8>,
     /// The raw key bytes (32 or 64 bytes)
     pub key: Vec<u8>,
 }
 
 impl SigningKey {
     /// Create a new signing key
-    pub fn new(name: String, key: Vec<u8>) -> Result<Self, SigningError> {
+    pub fn new(name: Vec<u8>, key: Vec<u8>) -> Result<Self, SigningError> {
         if key.len() != 32 && key.len() != 64 {
             return Err(SigningError::InvalidKeyLength(key.len()));
         }
@@ -42,23 +42,37 @@ impl SigningKey {
     /// The file should contain a key in the format: "name:base64-key"
     /// The key can be either 32 bytes (secret key only) or 64 bytes (keypair)
     pub fn from_file(path: &Path) -> Result<Self, SigningError> {
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read(path)?;
         Self::parse(&content)
     }
 
-    /// Parse a secret key from a string
+    /// Parse a secret key from bytes
     ///
-    /// The string should be in the format: "name:base64-key"
-    pub fn parse(s: &str) -> Result<Self, SigningError> {
-        let (name, key_base64) = s
-            .split_once(':')
+    /// The bytes should be in the format: b"name:base64-key"
+    pub fn parse(s: &[u8]) -> Result<Self, SigningError> {
+        let colon_pos = s
+            .iter()
+            .position(|&b| b == b':')
             .ok_or_else(|| SigningError::ParseKey("Sign key does not contain a ':'".to_string()))?;
+
+        let name = &s[..colon_pos];
+        let key_base64 = &s[colon_pos + 1..];
 
         if name.is_empty() {
             return Err(SigningError::ParseKey("Empty key name".to_string()));
         }
 
-        let key = general_purpose::STANDARD.decode(key_base64.trim())?;
+        // Trim whitespace from base64 part
+        let key_base64 = match key_base64.iter().rposition(|&b| !b.is_ascii_whitespace()) {
+            Some(end) => &key_base64[..=end],
+            None => key_base64,
+        };
+        let key_base64 = match key_base64.iter().position(|&b| !b.is_ascii_whitespace()) {
+            Some(start) => &key_base64[start..],
+            None => key_base64,
+        };
+
+        let key = general_purpose::STANDARD.decode(key_base64)?;
 
         // Validate the key by trying to create a DalekSigningKey
         if key.len() == 32 {
@@ -77,7 +91,7 @@ impl SigningKey {
         }
 
         Ok(Self {
-            name: name.to_string(),
+            name: name.to_vec(),
             key,
         })
     }
@@ -128,8 +142,8 @@ mod tests {
     fn test_parse_signing_key() {
         // Use a 32-byte key for simpler testing
         let key_str = "test-key:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-        let key = SigningKey::parse(key_str).unwrap();
-        assert_eq!(key.name, "test-key");
+        let key = SigningKey::parse(key_str.as_bytes()).unwrap();
+        assert_eq!(key.name, b"test-key");
         assert_eq!(key.key.len(), 32);
     }
 
@@ -137,7 +151,7 @@ mod tests {
     fn test_sign_message() {
         // Use a simple 32-byte key
         let key_str = "test-key:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-        let key = SigningKey::parse(key_str).unwrap();
+        let key = SigningKey::parse(key_str.as_bytes()).unwrap();
 
         let msg = b"Hello, world!";
         let signature = key.sign_string(msg);
@@ -147,15 +161,15 @@ mod tests {
         assert!(signature.contains(':'));
 
         // Verify it's a valid base64 signature
-        let nar_sig = NarSignature::parse(&signature).unwrap();
-        assert_eq!(nar_sig.key_name, "test-key");
+        let nar_sig = NarSignature::parse(signature.as_bytes()).unwrap();
+        assert_eq!(nar_sig.key_name, b"test-key");
     }
 
     #[test]
     fn test_sign_fingerprint() {
         // Use a simple 32-byte key
         let key_str = "cache.example.com-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-        let key = SigningKey::parse(key_str).unwrap();
+        let key = SigningKey::parse(key_str.as_bytes()).unwrap();
 
         let mut references = std::collections::BTreeSet::new();
         references.insert(crate::StorePath::from(
@@ -183,22 +197,22 @@ mod tests {
         assert!(signature.starts_with("cache.example.com-1:"));
 
         // Verify it's a valid signature
-        let nar_sig = NarSignature::parse(&signature).unwrap();
-        assert_eq!(nar_sig.key_name, "cache.example.com-1");
+        let nar_sig = NarSignature::parse(signature.as_bytes()).unwrap();
+        assert_eq!(nar_sig.key_name, b"cache.example.com-1");
     }
 
     #[test]
     fn test_invalid_key_format() {
-        assert!(SigningKey::parse("no-colon").is_err());
-        assert!(SigningKey::parse(":no-name").is_err());
-        assert!(SigningKey::parse("name:invalid-base64!!!").is_err());
+        assert!(SigningKey::parse(b"no-colon").is_err());
+        assert!(SigningKey::parse(b":no-name").is_err());
+        assert!(SigningKey::parse(b"name:invalid-base64!!!").is_err());
     }
 
     #[test]
     fn test_32_byte_key() {
         // 32-byte key (secret key only)
         let key_str = "test-key:zFD7RJEU40VJzJvgT7h5xQwFm8FufXKH2CJPaKvh/xo=";
-        let key = SigningKey::parse(key_str).unwrap();
+        let key = SigningKey::parse(key_str.as_bytes()).unwrap();
         assert_eq!(key.key.len(), 32);
 
         // Should still be able to sign

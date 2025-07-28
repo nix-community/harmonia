@@ -67,9 +67,8 @@ impl Connection {
                 minor: 38,
             }) {
             let server_features = Vec::<Vec<u8>>::deserialize(&mut stream, server_version).await?;
-            Vec::<Vec<u8>>::new()
-                .serialize(&mut stream, server_version)
-                .await?;
+            // Send empty client features list
+            0u64.serialize(&mut stream, server_version).await?;
             server_features
         } else {
             Vec::new()

@@ -912,7 +912,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "harmonia-client"
+name = "harmonia-cli"
 version = "2.1.0"
 
 [[package]]
@@ -922,6 +922,7 @@ dependencies = [
  "env_logger",
  "harmonia-store-core",
  "harmonia-store-remote",
+ "hex",
  "log",
  "rusqlite",
  "serde",
@@ -948,6 +949,8 @@ dependencies = [
  "bytes",
  "harmonia-store-core",
  "prometheus",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
