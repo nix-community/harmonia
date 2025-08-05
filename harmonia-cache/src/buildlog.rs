@@ -109,7 +109,7 @@ pub(crate) async fn get(
     let encoding = if ext == "bz2" {
         HeaderValue::from_static("bzip2")
     } else {
-        HeaderValue::from_static("identity")
+        HeaderValue::from_static("none")
     };
 
     let log = NamedFile::open_async(&build_log)

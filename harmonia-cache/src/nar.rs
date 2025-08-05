@@ -440,7 +440,7 @@ pub(crate) async fn get(
                 // don't allow compression middleware to modify partial content
                 res.insert_header((
                     http::header::CONTENT_ENCODING,
-                    http::header::HeaderValue::from_static("identity"),
+                    http::header::HeaderValue::from_static("none"),
                 ));
 
                 res.insert_header((
