@@ -28,7 +28,7 @@ tokio = { workspace = true }
 tokio-stream = { version = "0.1" }
 http-range = "0.1"
 askama_escape = "0.13.0"
-percent-encoding = "2.3.1"
+percent-encoding = "2.3.2"
 thiserror = { workspace = true }
 tempfile = "3.20"
 url = "2.5.4"
