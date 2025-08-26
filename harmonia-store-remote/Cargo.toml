@@ -11,5 +11,5 @@ bytes = "1.0"
 prometheus = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.0"
+tempfile = "3.21"
 tokio = { workspace = true }
