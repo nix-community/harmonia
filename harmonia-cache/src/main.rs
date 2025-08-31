@@ -149,7 +149,7 @@ async fn inner_main() -> Result<()> {
     log::info!("listening on {}", c.bind);
     let mut server = HttpServer::new(move || {
         App::new()
-                .wrap(middleware::Compress::default())
+                .wrap(middleware::Condition::new(config_data.enable_compression, middleware::Compress::default()))
                 .wrap(prometheus::PrometheusMiddleware::new(metrics.clone()))
                 .app_data(config_data.clone())
                 .app_data(metrics_data.clone())
