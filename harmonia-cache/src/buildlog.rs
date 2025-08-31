@@ -106,18 +106,20 @@ pub(crate) async fn get(
     }
 
     // Serve the file as-is with the appropriate Content-Encoding header
-    let encoding = if ext == "bz2" {
-        HeaderValue::from_static("bzip2")
-    } else {
-        HeaderValue::from_static("none")
-    };
-
     let log = NamedFile::open_async(&build_log)
         .await
         .io_context(format!("Failed to open build log: {}", build_log.display()))?
         .customize()
-        .insert_header(cache_control_max_age_1y())
-        .insert_header(("Content-Encoding", encoding));
+        .insert_header(cache_control_max_age_1y());
+
+    let log = if ext == "bz2" {
+        log.insert_header(("Content-Encoding", HeaderValue::from_static("bzip2")))
+    } else if settings.enable_compression {
+        // don't allow compression middleware to modify partial content
+        log.insert_header(("Content-Encoding", HeaderValue::from_static("none")))
+    } else {
+        log
+    };
 
     Ok(log.respond_to(&req).map_into_boxed_body())
 }

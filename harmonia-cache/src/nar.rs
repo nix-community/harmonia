@@ -437,11 +437,13 @@ pub(crate) async fn get(
                 rlength = ranges[0].length;
                 offset = ranges[0].start;
 
-                // don't allow compression middleware to modify partial content
-                res.insert_header((
-                    http::header::CONTENT_ENCODING,
-                    http::header::HeaderValue::from_static("none"),
-                ));
+                if settings.enable_compression {
+                    // don't allow compression middleware to modify partial content
+                    res.insert_header((
+                        http::header::CONTENT_ENCODING,
+                        http::header::HeaderValue::from_static("none"),
+                    ));
+                }
 
                 res.insert_header((
                     http::header::CONTENT_RANGE,
