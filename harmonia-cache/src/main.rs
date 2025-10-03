@@ -184,22 +184,19 @@ async fn inner_main() -> Result<()> {
     .max_connection_rate(c.max_connection_rate);
 
     let try_url = Url::parse(&c.bind);
-    let (bind, uds) = {
-        if try_url.is_ok() {
-            let url = try_url.as_ref().unwrap();
-            if url.scheme() != "unix" {
-                (c.bind.as_str(), false)
-            } else if url.host().is_none() {
-                (url.path(), true)
-            } else {
-                return Err(error::ServerError::Startup {
-                    reason: "Can only bind to file URLs without host portion.".to_string(),
-                }
-                .into());
-            }
-        } else {
+    let (bind, uds) = if let Ok(url) = try_url.as_ref() {
+        if url.scheme() != "unix" {
             (c.bind.as_str(), false)
+        } else if url.host().is_none() {
+            (url.path(), true)
+        } else {
+            return Err(error::ServerError::Startup {
+                reason: "Can only bind to file URLs without host portion.".to_string(),
+            }
+            .into());
         }
+    } else {
+        (c.bind.as_str(), false)
     };
 
     if c.tls_cert_path.is_some() || c.tls_key_path.is_some() {
