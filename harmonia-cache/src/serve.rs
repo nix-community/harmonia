@@ -131,13 +131,11 @@ pub(crate) async fn get(
 
     if full_path.is_dir() {
         let index_file = full_path.join("index.html");
-        if let Ok(stat) = index_file.metadata() {
-            if stat.is_file() {
-                return Ok(NamedFile::open_async(&index_file)
-                    .await
-                    .io_context(format!("cannot open {}", index_file.display()))?
-                    .respond_to(&req));
-            }
+        if index_file.metadata().is_ok_and(|stat| stat.is_file()) {
+            return Ok(NamedFile::open_async(&index_file)
+                .await
+                .io_context(format!("cannot open {}", index_file.display()))?
+                .respond_to(&req));
         }
 
         let url_prefix = PathBuf::from("/serve").join(&hash);

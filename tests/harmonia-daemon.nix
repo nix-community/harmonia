@@ -1,7 +1,4 @@
 { pkgs, self }:
-let
-  inherit (pkgs) system;
-in
 pkgs.nixosTest {
   name = "harmonia-daemon";
   nodes = {

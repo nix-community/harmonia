@@ -87,33 +87,35 @@ fn test_sqlite_with_nix_initialized_store() {
             );
 
             // Get the first path from the output
-            if let Some(first_line) = String::from_utf8_lossy(&list_output.stdout).lines().next() {
-                if let Some(path) = first_line.split_whitespace().next() {
-                    // The path should now be in our test store directory
-                    let store_path = std::path::Path::new(path);
+            if let Some(path) = String::from_utf8_lossy(&list_output.stdout)
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().next())
+            {
+                // The path should now be in our test store directory
+                let store_path = std::path::Path::new(path);
 
-                    // Test is_valid_path
-                    let is_valid = db.is_valid_path(store_path).unwrap();
-                    assert!(is_valid, "Path {path} should be valid");
+                // Test is_valid_path
+                let is_valid = db.is_valid_path(store_path).unwrap();
+                assert!(is_valid, "Path {path} should be valid");
 
-                    // Test query_path_info
-                    let info = db.query_path_info(store_path).unwrap();
-                    assert!(info.is_some(), "Should get path info for {path}");
+                // Test query_path_info
+                let info = db.query_path_info(store_path).unwrap();
+                assert!(info.is_some(), "Should get path info for {path}");
 
-                    // Extract hash part (first 32 chars of the base name)
-                    if let Some(base_name) = store_path.file_name().and_then(|n| n.to_str()) {
-                        if base_name.len() >= 32 {
-                            let hash_part = &base_name[..32];
-
-                            // Test query_path_from_hash_part
-                            let found_path =
-                                db.query_path_from_hash_part(&store_dir, hash_part).unwrap();
-                            assert!(
-                                found_path.is_some(),
-                                "Should find path by hash part {hash_part}"
-                            );
-                        }
-                    }
+                // Extract hash part (first 32 chars of the base name)
+                if let Some(hash_part) = store_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| name.len() >= 32)
+                    .map(|name| &name[..32])
+                {
+                    // Test query_path_from_hash_part
+                    let found_path = db.query_path_from_hash_part(&store_dir, hash_part).unwrap();
+                    assert!(
+                        found_path.is_some(),
+                        "Should find path by hash part {hash_part}"
+                    );
                 }
             }
         }
