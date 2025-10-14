@@ -21,6 +21,10 @@ fn default_priority() -> usize {
     30
 }
 
+fn default_enable_compression() -> bool {
+    false
+}
+
 fn default_virtual_store() -> PathBuf {
     PathBuf::from("/nix/store")
 }
@@ -47,6 +51,9 @@ pub(crate) struct Config {
 
     #[serde(default)]
     pub(crate) real_nix_store: Option<PathBuf>,
+
+    #[serde(default = "default_enable_compression")]
+    pub(crate) enable_compression: bool,
 
     #[serde(default)]
     pub(crate) sign_key_path: Option<String>,
