@@ -9,13 +9,13 @@ pub mod test_data;
 mod writer;
 
 pub use dumper::{DumpOptions, DumpedFile, NarDumper, dump};
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 pub use parser::read_nar;
 pub use parser::{NarParser, parse_nar};
 pub use read_nar::{NarBytesReader, NarReader};
 pub use restorer::{NarRestorer, NarWriteError, RestoreOptions, restore};
 pub use writer::NarWriter;
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 pub use writer::write_nar;
 
 pub const CASE_HACK_SUFFIX: &str = "~nix~case~hack~";
@@ -42,7 +42,7 @@ impl<R> NarEvent<R>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test"))]
     pub async fn read_file(self) -> std::io::Result<test_data::TestNarEvent> {
         use tokio::io::AsyncReadExt as _;
         match self {

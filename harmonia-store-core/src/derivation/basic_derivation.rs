@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
-
-#[cfg(any(test, feature = "test"))]
+#[cfg(test)]
 use proptest::prelude::{Arbitrary, BoxedStrategy};
 
 use crate::ByteString;
@@ -20,7 +19,7 @@ pub struct BasicDerivation {
     pub env: BTreeMap<ByteString, ByteString>,
 }
 
-#[cfg(any(test, feature = "test"))]
+#[cfg(test)]
 pub mod arbitrary {
     use super::*;
     use crate::{

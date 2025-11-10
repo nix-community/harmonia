@@ -100,6 +100,7 @@ pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<(), DecodePartial> 
 }
 
 #[cfg(test)]
+#[allow(unsafe_code)]
 mod unittests {
     use data_encoding::{BitOrder, Specification};
     use hex_literal::hex;

@@ -58,7 +58,7 @@ impl DerivationOutput {
 
 pub type DerivationOutputs = BTreeMap<OutputName, DerivationOutput>;
 
-#[cfg(any(test, feature = "test"))]
+#[cfg(test)]
 pub mod arbitrary {
     use super::*;
     use crate::hash;
@@ -92,9 +92,7 @@ pub mod arbitrary {
         let deferred =
             prop::collection::btree_map(any::<OutputName>(), Just(Deferred), size.clone()).boxed();
 
-        #[cfg_attr(
-            allow(unused_mut)
-        )]
+        #[cfg_attr(test, allow(unused_mut))]
         let mut ret = Union::new([input, fixed, deferred]);
         {
             // CAFloating
@@ -114,7 +112,8 @@ pub mod arbitrary {
                 any::<OutputName>(),
                 arb_derivation_output_impure(),
                 size.clone(),
-            ));
+            )
+            .boxed());
         }
         ret
     }
@@ -147,7 +146,7 @@ pub mod arbitrary {
     }
 
     pub fn arb_derivation_output_impure() -> impl Strategy<Value = DerivationOutput> {
-        any::<ContentAddressMethodAlgorithm>(any::<hash::Algorithm>())
+        any::<ContentAddressMethodAlgorithm>() // This works with derive(Arbitrary)
             .prop_map(|ca| DerivationOutput::Impure(ca))
     }
 
@@ -155,46 +154,25 @@ pub mod arbitrary {
         hash_type: H,
     ) -> impl Strategy<Value = DerivationOutput>
     where
-        H: Strategy<Value = hash::Algorithm>,
+        H: Strategy<Value = hash::Algorithm> + Clone,
     {
-        any::<ContentAddressMethodAlgorithm>(hash_type)
-            .prop_map(|ca| DerivationOutput::CAFloating(ca))
+        prop_oneof![
+            1 => Just(ContentAddressMethodAlgorithm::Text),
+            2 => hash_type.clone().prop_map(ContentAddressMethodAlgorithm::Flat),
+            2 => hash_type.prop_map(ContentAddressMethodAlgorithm::Recursive),
+        ]
+        .prop_map(|ca| DerivationOutput::CAFloating(ca))
     }
 
     pub fn arb_derivation_output() -> impl Strategy<Value = DerivationOutput> {
         use DerivationOutput::*;
-        {
-            prop_oneof![
-                arb_derivation_output_input_addressed(),
-                arb_derivation_output_fixed(),
-                arb_derivation_output_floating(any::<hash::Algorithm>()),
-                Just(Deferred),
-                arb_derivation_output_impure(),
-            ]
-        }
-        {
-            prop_oneof![
-                arb_derivation_output_input_addressed(),
-                arb_derivation_output_fixed(),
-                Just(Deferred),
-                arb_derivation_output_impure(),
-            ]
-        }
-        {
-            prop_oneof![
-                arb_derivation_output_input_addressed(),
-                arb_derivation_output_fixed(),
-                arb_derivation_output_floating(any::<hash::Algorithm>()),
-                Just(Deferred),
-            ]
-        }
-        {
-            prop_oneof![
-                arb_derivation_output_input_addressed(),
-                arb_derivation_output_fixed(),
-                Just(Deferred),
-            ]
-        }
+        prop_oneof![
+            arb_derivation_output_input_addressed(),
+            arb_derivation_output_fixed(),
+            arb_derivation_output_floating(any::<hash::Algorithm>()),
+            Just(Deferred),
+            arb_derivation_output_impure(),
+        ]
     }
 }
 

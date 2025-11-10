@@ -26,8 +26,6 @@ use crate::hash::NarHash;
 use crate::log::Verbosity;
 use crate::realisation::{DrvOutput, Realisation};
 use crate::signature::Signature;
-#[cfg(test)]
-use crate::signature::proptests::arb_signatures;
 use crate::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };

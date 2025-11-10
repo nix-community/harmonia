@@ -217,7 +217,6 @@ mod unittests {
 
     use super::*;
     use crate::{
-        btree_set,
         daemon::{
             de::NixRead,
             ser::{NixWrite, NixWriter},
@@ -225,6 +224,7 @@ mod unittests {
         hash::NarHash,
         io::BytesReader,
     };
+    use harmonia_store_core::btree_set;
 
     #[tokio::test]
     async fn test_read_u64() {

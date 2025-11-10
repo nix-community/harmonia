@@ -12,9 +12,9 @@ mod stderr_read;
 pub mod types;
 pub mod types2;
 
-pub use add_multiple_to_store::{SizedStream, write_add_multiple_to_store_stream};
-#[cfg(feature = "harmonia-nar")]
-pub use add_multiple_to_store::parse_add_multiple_to_store;
+pub use add_multiple_to_store::{
+    SizedStream, parse_add_multiple_to_store, write_add_multiple_to_store_stream,
+};
 pub use framed::reader::FramedReader;
 pub use framed::writer::FramedWriter;
 pub use stderr_read::StderrReader;

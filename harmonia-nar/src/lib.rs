@@ -52,3 +52,10 @@ pub use archive::{
     CASE_HACK_SUFFIX, DumpOptions, DumpedFile, NarDumper, NarEvent, NarParser, NarReader,
     NarRestorer, NarWriteError, NarWriter, RestoreOptions, dump, parse_nar, restore,
 };
+
+#[cfg(test)]
+pub mod test;
+
+// Re-export pretty_prop_assert_eq macro from store-core for test use
+#[cfg(test)]
+pub use harmonia_store_core::pretty_prop_assert_eq;

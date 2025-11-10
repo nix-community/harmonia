@@ -32,9 +32,8 @@ pub use harmonia_store_core::{
     ByteString, derivation, derived_path, hash, io, log, realisation, signature, store_path,
 };
 
-// Re-export archive from nar (optional dependency - TODO T012b)
-#[cfg(feature = "harmonia-nar")]
-pub use harmonia_nar as archive;
+// Re-export archive module from nar
+pub use harmonia_nar::archive;
 
 pub mod de;
 pub mod ser;

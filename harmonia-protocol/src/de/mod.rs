@@ -12,7 +12,7 @@ use super::ProtocolVersion;
 mod bytes;
 mod collections;
 mod int;
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 pub mod mock;
 mod reader;
 

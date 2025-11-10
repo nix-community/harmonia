@@ -25,7 +25,6 @@ use crate::signature::Signature;
 use crate::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
-use harmonia_store_core::realisation::{DrvOutput, Realisation};
 
 use crate::daemon::de::{Error as _, NixRead};
 use crate::daemon::ser::NixWrite;
@@ -729,10 +728,34 @@ impl NixSerializeTrait for Option<Microseconds> {
 pub mod arbitrary {
     use super::*;
     use crate::daemon::ProtocolVersion;
-    use crate::realisation::arbitrary::arb_drv_outputs;
-    use crate::test::arbitrary::arb_byte_string;
-    use crate::test::arbitrary::daemon::field_after;
     use ::proptest::prelude::*;
+    use harmonia_store_core::realisation::arbitrary::arb_drv_outputs;
+    use harmonia_store_core::test::arbitrary::arb_byte_string;
+
+    pub fn version_cut_off<B, A, V>(
+        version: ProtocolVersion,
+        cut_off: u8,
+        before: B,
+        after: A,
+    ) -> BoxedStrategy<V>
+    where
+        B: Strategy<Value = V> + 'static,
+        A: Strategy<Value = V> + 'static,
+    {
+        if version.minor() < cut_off {
+            before.boxed()
+        } else {
+            after.boxed()
+        }
+    }
+
+    pub fn field_after<A, V>(version: ProtocolVersion, cut_off: u8, after: A) -> BoxedStrategy<V>
+    where
+        A: Strategy<Value = V> + 'static,
+        V: Default + Clone + std::fmt::Debug + 'static,
+    {
+        version_cut_off(version, cut_off, Just(V::default()), after)
+    }
 
     impl Arbitrary for BuildMode {
         type Parameters = ();

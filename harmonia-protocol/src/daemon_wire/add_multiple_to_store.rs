@@ -1,14 +1,17 @@
 use std::pin::pin;
 
+use async_stream::try_stream;
 use futures::{Stream, StreamExt};
 use pin_project_lite::pin_project;
-use tokio::io::{AsyncBufRead, AsyncWrite, copy_buf};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, copy_buf};
 use tracing::{Instrument, debug, debug_span, instrument, trace};
 
-#[cfg(feature = "harmonia-nar")]
 use crate::archive::NarBytesReader;
+use crate::daemon::wire::types2::ValidPathInfo;
 use crate::daemon::{DaemonError, DaemonResult};
+use crate::io::{AsyncBufReadCompat, AsyncBytesRead, Lending};
 
+use crate::daemon::de::NixRead;
 use crate::daemon::ser::NixWrite;
 use crate::daemon::types::AddToStoreItem;
 
@@ -85,7 +88,6 @@ impl<S: Stream> Stream for SizedStream<S> {
     }
 }
 
-#[cfg(feature = "harmonia-nar")]
 #[instrument(level = "trace", skip_all)]
 pub async fn parse_add_multiple_to_store<'s, R>(
     mut source: R,
@@ -136,13 +138,15 @@ mod unittests {
     use tokio_test::io::Builder;
 
     use super::*;
-    use crate::archive::{test_data, write_nar};
-    use crate::btree_set;
+    use crate::daemon::DaemonResult;
+    use crate::daemon::UnkeyedValidPathInfo;
     use crate::daemon::de::NixReader;
     use crate::daemon::ser::NixWriter;
-    use crate::daemon::{DaemonResult, UnkeyedValidPathInfo};
+    use crate::daemon_wire::types2::ValidPathInfo;
     use crate::hash::NarHash;
     use crate::io::DEFAULT_BUF_SIZE;
+    use harmonia_nar::archive::{test_data, write_nar};
+    use harmonia_store_core::btree_set;
 
     #[tokio::test]
     async fn write_empty() {
@@ -249,7 +253,8 @@ mod unittests {
         use futures::FutureExt as _;
         use tokio::io::simplex;
 
-        use crate::{archive::read_nar, io::BytesReader};
+        use crate::io::BytesReader;
+        use harmonia_nar::archive::read_nar;
 
         let stream = info_stream(infos.clone());
         let (reader, writer) = simplex(DEFAULT_BUF_SIZE);

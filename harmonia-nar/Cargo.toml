@@ -30,11 +30,17 @@ harmonia-store-core = { path = "../harmonia-store-core" }
 # Note: PaddedReader moved here from protocol to break circular dependency (TODO T012b)
 
 [dev-dependencies]
+harmonia-store-core = { path = "../harmonia-store-core", features = ["test"] }
 proptest = { workspace = true }
 rstest = { workspace = true }
 tempfile = { workspace = true }
 pretty_assertions = { workspace = true }
 test-strategy = { workspace = true }
+tokio-test = "0.4"
+test-log = "0.2"
+
+[features]
+test = []
 
 [lints]
 workspace = true

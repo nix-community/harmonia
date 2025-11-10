@@ -147,8 +147,8 @@ where
     NarParser::new(reader)
 }
 
-#[cfg(test)]
-pub async fn read_nar<R>(source: R) -> io::Result<test_data::TestNarEvents>
+#[cfg(any(test, feature = "test"))]
+pub async fn read_nar<R>(source: R) -> io::Result<crate::archive::test_data::TestNarEvents>
 where
     R: AsyncRead + Unpin,
 {

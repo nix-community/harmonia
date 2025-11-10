@@ -4,15 +4,7 @@ use ::proptest::prelude::*;
 
 use crate::ByteString;
 
-#[cfg(feature = "archive")]
-pub mod archive;
-#[cfg(feature = "daemon")]
-pub mod daemon;
-#[cfg(feature = "internal")]
 pub mod helpers;
-#[cfg(not(feature = "internal"))]
-#[allow(dead_code)]
-pub(crate) mod helpers;
 
 pub fn arb_filename() -> impl Strategy<Value = String> {
     "[a-zA-Z 0-9.?=+]+".prop_filter("Not cur and parent dir", |s| s != "." && s != "..")

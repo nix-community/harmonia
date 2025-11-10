@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::ByteString;
-#[cfg(any(test, feature = "test"))]
+#[cfg(test)]
 use harmonia_protocol::daemon::ProtocolVersion;
 
 #[cfg(any(test, feature = "test"))]
@@ -128,9 +128,7 @@ impl LogMessage {
     }
 }
 
-
-
-#[cfg(any(test, feature = "test"))]
+#[cfg(test)]
 impl Arbitrary for LogMessage {
     type Parameters = ProtocolVersion;
     type Strategy = BoxedStrategy<Self>;

@@ -371,6 +371,7 @@ impl Drop for Mock {
     }
 }
 
+#[cfg(test)]
 mod proptest {
     use std::io;
 

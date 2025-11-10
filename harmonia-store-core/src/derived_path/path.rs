@@ -178,13 +178,28 @@ impl FromStoreDirStr for SingleDerivedPath {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
 pub enum DerivedPath {
     Opaque(StorePath),
     Built {
         drv_path: SingleDerivedPath,
         outputs: OutputSpec,
     },
+}
+
+#[cfg(any(test, feature = "test"))]
+impl Arbitrary for DerivedPath {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<DerivedPath>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        prop_oneof![
+            any::<StorePath>().prop_map(DerivedPath::Opaque),
+            (any::<SingleDerivedPath>(), any::<OutputSpec>())
+                .prop_map(|(drv_path, outputs)| { DerivedPath::Built { drv_path, outputs } })
+        ]
+        .boxed()
+    }
 }
 
 impl DerivedPath {
