@@ -154,11 +154,7 @@ impl Arbitrary for LogMessage {
 pub struct Message {
     pub level: Verbosity,
     #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
-    #[serde(
-        rename = "msg",
-        serialize_with = "crate::serialize_byte_string",
-        deserialize_with = "crate::deserialize_byte_string"
-    )]
+    #[serde(rename = "msg", serialize_with = "crate::serialize_byte_string")]
     pub text: ByteString,
 }
 
@@ -171,10 +167,7 @@ pub struct Activity {
     pub level: Verbosity,
     pub parent: u64,
     #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
-    #[serde(
-        serialize_with = "crate::serialize_byte_string",
-        deserialize_with = "crate::deserialize_byte_string"
-    )]
+    #[serde(serialize_with = "crate::serialize_byte_string")]
     pub text: ByteString, // If logger is JSON, invalid UTF-8 is replaced with U+FFFD
     #[serde(rename = "type")]
     pub activity_type: ActivityType,
@@ -212,10 +205,7 @@ pub enum Field {
     Int(u64),
     String(
         #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
-        #[serde(
-            serialize_with = "crate::serialize_byte_string",
-            deserialize_with = "crate::deserialize_byte_string"
-        )]
+        #[serde(serialize_with = "crate::serialize_byte_string")]
         ByteString,
     ),
 }

@@ -38,17 +38,10 @@ where
     S: serde::Serializer,
 {
     use serde::Serialize;
-    let bytes: &[u8] = value.as_ref();
-    bytes.serialize(serializer)
-}
-
-pub(crate) fn deserialize_byte_string<'de, D>(deserializer: D) -> Result<ByteString, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::Deserialize;
-    let bytes: Vec<u8> = Vec::deserialize(deserializer)?;
-    Ok(ByteString::from(bytes))
+    match std::str::from_utf8(value) {
+        Ok(s) => s.serialize(serializer),
+        Err(_) => value.serialize(serializer),
+    }
 }
 
 // Wire utilities (duplicated from harmonia-protocol to avoid circular deps)

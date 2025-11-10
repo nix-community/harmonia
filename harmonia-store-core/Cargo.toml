@@ -13,7 +13,7 @@ repository.workspace = true
 description = "Core Nix store semantics - pure types and validation logic"
 
 [dependencies]
-bytes = { workspace = true }
+bytes = { workspace = true, features = ["serde"] }
 data-encoding = { workspace = true }
 derive_more = { workspace = true }
 futures = { workspace = true }
