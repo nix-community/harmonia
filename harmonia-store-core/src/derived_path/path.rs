@@ -2,6 +2,7 @@ use std::ops::Deref as _;
 
 #[cfg(any(test, feature = "test"))]
 use proptest::prelude::{Arbitrary, BoxedStrategy};
+use serde::{Deserialize, Serialize};
 #[cfg(any(test, feature = "test"))]
 use test_strategy::Arbitrary;
 
@@ -73,13 +74,36 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum SingleDerivedPath {
-    Opaque(StorePath),
     Built {
+        #[serde(rename = "drvPath")]
         drv_path: Box<SingleDerivedPath>,
         output: OutputName,
     },
+    Opaque(
+        #[serde(
+            serialize_with = "serialize_store_path",
+            deserialize_with = "deserialize_store_path"
+        )]
+        StorePath,
+    ),
+}
+
+fn serialize_store_path<S>(path: &StorePath, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&path.to_base_path())
+}
+
+fn deserialize_store_path<'de, D>(deserializer: D) -> Result<StorePath, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    StorePath::from_base_path(&s).map_err(serde::de::Error::custom)
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -177,13 +201,21 @@ impl FromStoreDirStr for SingleDerivedPath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum DerivedPath {
-    Opaque(StorePath),
     Built {
+        #[serde(rename = "drvPath")]
         drv_path: SingleDerivedPath,
         outputs: OutputSpec,
     },
+    Opaque(
+        #[serde(
+            serialize_with = "serialize_store_path",
+            deserialize_with = "deserialize_store_path"
+        )]
+        StorePath,
+    ),
 }
 
 #[cfg(any(test, feature = "test"))]

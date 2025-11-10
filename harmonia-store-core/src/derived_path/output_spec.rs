@@ -7,10 +7,12 @@ use derive_more::Display;
 use proptest::collection::btree_set;
 #[cfg(any(test, feature = "test"))]
 use proptest::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::store_path::{StorePathNameError, into_name};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct OutputName(String);
 
 impl OutputName {
@@ -55,6 +57,44 @@ impl FromStr for OutputName {
 pub enum OutputSpec {
     All,
     Named(BTreeSet<OutputName>),
+}
+
+impl Serialize for OutputSpec {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        match self {
+            OutputSpec::All => {
+                let mut seq = serializer.serialize_seq(Some(1))?;
+                seq.serialize_element("*")?;
+                seq.end()
+            }
+            OutputSpec::Named(names) => {
+                let mut seq = serializer.serialize_seq(Some(names.len()))?;
+                for name in names {
+                    seq.serialize_element(name)?;
+                }
+                seq.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for OutputSpec {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let names: Vec<String> = Vec::deserialize(deserializer)?;
+        match names.as_slice() {
+            [s] if s == "*" => Ok(OutputSpec::All),
+            _ => Ok(OutputSpec::Named(
+                names.into_iter().map(OutputName).collect(),
+            )),
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test"))]

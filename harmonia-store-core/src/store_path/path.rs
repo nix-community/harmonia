@@ -84,6 +84,16 @@ impl StorePath {
     pub fn hash(&self) -> &StorePathHash {
         &self.hash
     }
+
+    /// Convert to base path (just the hash-name part, without store directory)
+    pub fn to_base_path(&self) -> String {
+        self.to_string()
+    }
+
+    /// Parse from base path (just the hash-name part, without store directory)
+    pub fn from_base_path(s: &str) -> Result<Self, ParseStorePathError> {
+        s.parse()
+    }
 }
 
 impl fmt::Debug for StorePath {
