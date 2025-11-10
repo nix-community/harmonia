@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
+# SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+# SPDX-License-Identifier: MIT
+
 [package]
 name = "harmonia-store-core"
 version.workspace = true
@@ -6,14 +10,40 @@ edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+description = "Core Nix store semantics - pure types and validation logic"
 
 [dependencies]
+bytes = { workspace = true }
+data-encoding = { workspace = true }
+derive_more = { workspace = true }
+futures = { workspace = true }
+md5 = { workspace = true }
+num_enum = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }
+pin-project-lite = { workspace = true }
+proptest = { workspace = true, optional = true }
+ring = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = "3.11"
+test-strategy = { workspace = true, optional = true }
 thiserror = { workspace = true }
-hex = { workspace = true }
-base64 = { workspace = true }
-ed25519-dalek = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "sync"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
+proptest-derive = "0.5"
+rstest = { workspace = true }
+tempfile = { workspace = true }
+test-strategy = { workspace = true }
+pretty_assertions = { workspace = true }
+tokio-test = "0.4"
+hex-literal = "0.4"
+
+[features]
+test = ["proptest", "test-strategy"]
 
 [lints]
 workspace = true

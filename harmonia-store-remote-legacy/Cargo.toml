@@ -1,0 +1,16 @@
+[package]
+name = "harmonia-store-remote"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+harmonia-store-core = { path = "../harmonia-store-core" }
+tokio = { workspace = true }
+thiserror = "2.0"
+bytes = "1.0"
+hex = { workspace = true }
+prometheus = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.23"
+tokio = { workspace = true }

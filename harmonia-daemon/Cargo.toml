@@ -8,8 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-harmonia-store-core = { path = "../harmonia-store-core" }
-harmonia-store-remote = { path = "../harmonia-store-remote" }
+# TODO: Update to use new Nix.rs-based crates in Phase 3
+# harmonia-store-core = { path = "../harmonia-store-core" }  # Legacy - now harmonia-store-core-legacy
+# harmonia-store-remote = { path = "../harmonia-store-remote" }  # Legacy - now harmonia-store-remote-legacy
 tokio = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
