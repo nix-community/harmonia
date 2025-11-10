@@ -32,7 +32,7 @@ percent-encoding = "2.3.2"
 thiserror = { workspace = true }
 tempfile = "3.23"
 url = "2.5.7"
-async-compression = { version = "0.4.32", features = ["tokio", "bzip2"] }
+async-compression = { version = "0.4.33", features = ["tokio", "bzip2"] }
 tokio-util = "0.7.17"
 harmonia-store-core = { path = "../harmonia-store-core" }
 harmonia-store-remote = { path = "../harmonia-store-remote" }
