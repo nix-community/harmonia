@@ -20,7 +20,7 @@ pub struct StoreDirError {
 /// to convert the path to a full store path string.
 ///
 /// ```
-/// # use nixrs::store_path::{StoreDir, StorePath};
+/// # use harmonia_store_core::store_path::{StoreDir, StorePath};
 /// let store = StoreDir::default();
 /// let path : StorePath = store.parse("/nix/store/55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3").unwrap();
 /// assert_eq!("55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3", path.to_string());
@@ -45,7 +45,7 @@ impl StoreDir {
     /// Get [`str`] representation of this StoreDir.
     ///
     /// ```
-    /// # use nixrs::store_path::StoreDir;
+    /// # use harmonia_store_core::store_path::StoreDir;
     /// let store = StoreDir::new("/nix/store").unwrap();
     /// assert_eq!("/nix/store", store.to_str());
     /// ```
@@ -57,7 +57,7 @@ impl StoreDir {
     ///
     /// ```
     /// # use std::path::Path;
-    /// # use nixrs::store_path::StoreDir;
+    /// # use harmonia_store_core::store_path::StoreDir;
     /// let store = StoreDir::new("/nix/store").unwrap();
     /// assert_eq!(Path::new("/nix/store"), store.to_path());
     /// ```

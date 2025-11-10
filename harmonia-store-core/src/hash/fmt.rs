@@ -567,7 +567,7 @@ impl<H: CommonHash + Sized> Base16<H> {
     /// # Examples
     ///
     /// ```rust
-    /// use nixrs::hash;
+    /// use harmonia_store_core::hash;
     ///
     /// let hex = hash::Algorithm::SHA256.digest(b"Hello World!").base16();
     /// assert_eq!(hex.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
@@ -674,7 +674,7 @@ impl<H: CommonHash + Sized> Base32<H> {
     /// # Examples
     ///
     /// ```rust
-    /// use nixrs::hash;
+    /// use harmonia_store_core::hash;
     ///
     /// let base32 = hash::Algorithm::SHA256.digest(b"Hello World!").base32();
     /// assert_eq!(base32.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
@@ -786,7 +786,7 @@ impl<H: CommonHash> Base64<H> {
     /// # Examples
     ///
     /// ```rust
-    /// use nixrs::hash;
+    /// use harmonia_store_core::hash;
     ///
     /// let base64 = hash::Algorithm::SHA256.digest(b"Hello World!").base64();
     /// assert_eq!(base64.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
@@ -1005,7 +1005,7 @@ impl<H: CommonHash + Sized> SRI<H> {
     /// # Examples
     ///
     /// ```rust
-    /// use nixrs::hash;
+    /// use harmonia_store_core::hash;
     ///
     /// let sri = hash::Algorithm::SHA256.digest(b"Hello World!").sri();
     /// assert_eq!(sri.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));

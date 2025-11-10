@@ -84,7 +84,7 @@ impl Algorithm {
     /// Returns the digest of `data` using the given digest algorithm.
     ///
     /// ```
-    /// # use nixrs::hash::Algorithm;
+    /// # use harmonia_store_core::hash::Algorithm;
     /// let hash = Algorithm::SHA256.digest("abc");
     ///
     /// assert_eq!("sha256:1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s", hash.as_base32().to_string());
@@ -258,7 +258,7 @@ impl Sha256 {
     /// Returns the digest of `data` using the sha256
     ///
     /// ```
-    /// # use nixrs::hash::Sha256;
+    /// # use harmonia_store_core::hash::Sha256;
     /// let hash = Sha256::digest("abc");
     ///
     /// assert_eq!("1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s", hash.as_base32().as_bare().to_string());
@@ -310,7 +310,7 @@ enum InnerContext {
 /// # Examples
 ///
 /// ```
-/// use nixrs::hash;
+/// use harmonia_store_core::hash;
 ///
 /// let one_shot = hash::Algorithm::SHA256.digest("hello, world");
 ///
@@ -376,7 +376,7 @@ impl sfmt::Debug for Context {
 ///
 /// ```
 /// use tokio::io;
-/// use nixrs::hash;
+/// use harmonia_store_core::hash;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {

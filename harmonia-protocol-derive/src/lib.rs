@@ -27,15 +27,15 @@
 //!
 //! ### Examples
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! struct Unnamed(u64, String);
 //! ```
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! struct Fields {
@@ -44,8 +44,8 @@
 //! };
 //! ```
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! struct Ignored;
@@ -57,8 +57,8 @@
 //! [attributes](https://doc.rust-lang.org/reference/attributes.html)
 //! to containers, fields and variants.
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! #[nix(crate="nixrs")] // <-- This is a container attribute
@@ -91,8 +91,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! #[nix(from_str)]
@@ -120,8 +120,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! # use nixrs::store_path::StoreDir;
 //! #
 //! #[derive(NixDeserialize)]
@@ -150,8 +150,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! #[nix(from="usize")]
@@ -175,8 +175,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! #[nix(try_from="usize")]
@@ -205,8 +205,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixSerialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixSerialize;
 //! #
 //! #[derive(Clone, NixSerialize)]
 //! #[nix(into="usize")]
@@ -231,8 +231,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixSerialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixSerialize;
 //! #
 //! #[derive(Clone, NixSerialize)]
 //! #[nix(try_into="usize")]
@@ -257,8 +257,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixSerialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixSerialize;
 //! # use std::fmt::{Display, Result, Formatter};
 //! #
 //! #[derive(NixSerialize)]
@@ -282,8 +282,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixSerialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixSerialize;
 //! # use std::fmt::{Display, Result, Formatter};
 //! #
 //! #[derive(NixSerialize)]
@@ -310,10 +310,10 @@
 //!
 //! ###### Example
 //!
-//! ```rust
+//! ```rust,ignore
 //! # use std::fmt::{Display, Result, Formatter};
 //! # use nixrs::store_path::{StoreDir, StoreDirDisplay};
-//! # use nixrs_derive::NixSerialize;
+//! # use harmonia_protocol_derive::NixSerialize;
 //! #
 //! #[derive(NixSerialize)]
 //! #[nix(store_dir_display)]
@@ -342,8 +342,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! enum Testing {
@@ -365,8 +365,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! struct Field {
@@ -386,8 +386,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! struct Field {
@@ -409,8 +409,8 @@
 //!
 //! ###### Example
 //!
-//! ```rust
-//! # use nixrs_derive::NixDeserialize;
+//! ```rust,ignore
+//! # use harmonia_protocol_derive::NixDeserialize;
 //! #
 //! #[derive(NixDeserialize)]
 //! struct Field {
@@ -478,8 +478,8 @@ pub fn derive_nix_serialize(item: TokenStream) -> TokenStream {
 ///
 /// #### Example
 ///
-/// ```rust
-/// # use nixrs_derive::nix_deserialize_remote;
+/// ```rust,ignore
+/// # use harmonia_protocol_derive::nix_deserialize_remote;
 /// #
 /// struct MyU64(u64);
 ///
@@ -510,8 +510,8 @@ pub fn nix_deserialize_remote(item: TokenStream) -> TokenStream {
 ///
 /// #### Example
 ///
-/// ```rust
-/// # use nixrs_derive::nix_serialize_remote;
+/// ```rust,ignore
+/// # use harmonia_protocol_derive::nix_serialize_remote;
 /// #
 /// #[derive(Clone)]
 /// struct MyU64(u64);

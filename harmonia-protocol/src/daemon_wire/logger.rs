@@ -597,7 +597,7 @@ pub trait FutureResultExt: Future {
     /// # use std::future::{ready, Future};
     /// # use std::pin::pin;
     /// # use futures::stream::StreamExt as _;
-    /// use nixrs::daemon::FutureResultExt as _;
+    /// use harmonia_protocol::daemon::FutureResultExt as _;
     /// # tokio_test::block_on(async {
     /// let result = ready(12).empty_logs();
     /// let mut rp = pin!(result);
@@ -621,8 +621,8 @@ pub trait FutureResultExt: Future {
     /// # use std::future::{ready, Future};
     /// # use std::pin::pin;
     /// # use futures::stream::StreamExt as _;
-    /// # use nixrs::daemon::DaemonResult;
-    /// use nixrs::daemon::FutureResultExt as _;
+    /// # use harmonia_protocol::daemon::DaemonResult;
+    /// use harmonia_protocol::daemon::FutureResultExt as _;
     /// # tokio_test::block_on(async {
     /// let result = async {
     ///     Ok(ready(Ok(12) as DaemonResult<i32>).empty_logs())
