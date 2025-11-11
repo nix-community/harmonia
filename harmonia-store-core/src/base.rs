@@ -98,17 +98,32 @@ mod tests {
     fn test_base_serde() {
         // Test serialization
         assert_eq!(serde_json::to_string(&Base::Hex).unwrap(), "\"hex\"");
-        assert_eq!(serde_json::to_string(&Base::NixBase32).unwrap(), "\"nixbase32\"");
+        assert_eq!(
+            serde_json::to_string(&Base::NixBase32).unwrap(),
+            "\"nixbase32\""
+        );
         assert_eq!(serde_json::to_string(&Base::Base64).unwrap(), "\"base64\"");
 
         // Test deserialization with canonical names
         assert_eq!(serde_json::from_str::<Base>("\"hex\"").unwrap(), Base::Hex);
-        assert_eq!(serde_json::from_str::<Base>("\"nixbase32\"").unwrap(), Base::NixBase32);
-        assert_eq!(serde_json::from_str::<Base>("\"base64\"").unwrap(), Base::Base64);
+        assert_eq!(
+            serde_json::from_str::<Base>("\"nixbase32\"").unwrap(),
+            Base::NixBase32
+        );
+        assert_eq!(
+            serde_json::from_str::<Base>("\"base64\"").unwrap(),
+            Base::Base64
+        );
 
         // Test deserialization with aliases
-        assert_eq!(serde_json::from_str::<Base>("\"base16\"").unwrap(), Base::Hex);
-        assert_eq!(serde_json::from_str::<Base>("\"nix32\"").unwrap(), Base::NixBase32);
+        assert_eq!(
+            serde_json::from_str::<Base>("\"base16\"").unwrap(),
+            Base::Hex
+        );
+        assert_eq!(
+            serde_json::from_str::<Base>("\"nix32\"").unwrap(),
+            Base::NixBase32
+        );
 
         // Test invalid format
         assert!(serde_json::from_str::<Base>("\"invalid\"").is_err());

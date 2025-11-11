@@ -12,9 +12,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use crate::base::Base;
-use crate::wire::base64_len;
-
-use super::base32;
 
 pub mod fmt;
 
@@ -210,7 +207,7 @@ impl Serialize for Hash {
     {
         let raw = RawHash {
             algorithm: self.algorithm,
-            format: crate::base::Base::Base64,
+            format: Base::Base64,
             hash: format!("{:#}", self.as_base64()),
         };
         raw.serialize(serializer)
@@ -580,9 +577,21 @@ mod unittests {
         #[case] base64_decoded: usize,
     ) {
         assert_eq!(algorithm.size(), size, "mismatched size");
-        assert_eq!(Base::Hex.input_len(algorithm.size()), base16_len, "mismatched base16_len");
-        assert_eq!(Base::NixBase32.input_len(algorithm.size()), base32_len, "mismatched base32_len");
-        assert_eq!(Base::Base64.input_len(algorithm.size()), base64_len, "mismatched base64_len");
+        assert_eq!(
+            Base::Hex.input_len(algorithm.size()),
+            base16_len,
+            "mismatched base16_len"
+        );
+        assert_eq!(
+            Base::NixBase32.input_len(algorithm.size()),
+            base32_len,
+            "mismatched base32_len"
+        );
+        assert_eq!(
+            Base::Base64.input_len(algorithm.size()),
+            base64_len,
+            "mismatched base64_len"
+        );
         assert_eq!(
             Base::Base64.scratch_len(algorithm.size()),
             base64_decoded,
