@@ -3,6 +3,7 @@ use crate::error::ProtocolError;
 use crate::protocol::{CURRENT_PROTOCOL_VERSION, StorePath, ValidPathInfo};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::{DaemonServer, RequestHandler};
+use harmonia_store_core::store_path::StoreDir;
 use harmonia_store_core_legacy::Hash;
 use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
@@ -16,16 +17,6 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 const SOCKET_PATH: &str = "/nix/var/nix/daemon-socket/socket";
-
-/// Helper to extract just the "hash-name" from a full path like "/nix/store/hash-name"
-fn extract_store_path_name(full_path: &[u8]) -> &[u8] {
-    // Find the last '/' and return everything after it
-    full_path
-        .iter()
-        .rposition(|&b| b == b'/')
-        .map(|pos| &full_path[pos + 1..])
-        .unwrap_or(full_path)
-}
 
 #[tokio::test]
 async fn test_serialization_roundtrip() {
@@ -167,7 +158,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     }
 
     let store_path = String::from_utf8(output.stdout)?.trim().to_string();
-    let store_path = StorePath::from_bytes(extract_store_path_name(store_path.as_bytes())).unwrap();
+    let store_path: StorePath = StoreDir::default().parse(&store_path)?;
 
     // Test is_valid_path
     let is_valid = client.is_valid_path(&store_path).await?;
@@ -181,10 +172,9 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     assert!(!path_info.hash.digest.is_empty());
 
     // Test query_path_from_hash_part
+    // StorePath::to_string() returns just "hash-name", so extract the hash part (first 32 chars)
     let hash_part = store_path
         .to_string()
-        .strip_prefix("/nix/store/")
-        .ok_or("Invalid store path format")?
         .chars()
         .take(32)
         .collect::<String>();
@@ -201,7 +191,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     assert_eq!(not_found, None);
 
     // Test is_valid_path with non-existent path
-    let invalid_path = StorePath::from_bytes(b"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake").unwrap();
+    let invalid_path: StorePath = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake".parse().unwrap();
     let is_valid = client.is_valid_path(&invalid_path).await?;
     assert!(!is_valid);
 
@@ -245,7 +235,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     // Create a test handler with some mock data
     #[derive(Clone)]
     struct TestHandler {
-        store_paths: HashMap<Vec<u8>, ValidPathInfo>,
+        store_paths: HashMap<StorePath, ValidPathInfo>,
         hash_to_path: HashMap<Vec<u8>, StorePath>,
     }
 
@@ -257,13 +247,10 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             // Add some test data
-            let test_path_full = b"/nix/store/abc123def456ghi789jkl012mno345pq-hello-2.12.1";
-            let test_path = StorePath::from_bytes(extract_store_path_name(test_path_full)).unwrap();
+            let test_path: StorePath = "abc123daf456ghi789jkl012mnx345pq-hello-2.12.1".parse().unwrap();
 
             let test_info = ValidPathInfo {
-                deriver: Some(StorePath::from_bytes(extract_store_path_name(
-                    b"/nix/store/xyz789abc123def456ghi789jkl012mn-hello-2.12.1.drv"
-                )).unwrap()),
+                deriver: Some("xyz789abc123daf456ghi789jkl012mn-hello-2.12.1.drv".parse().unwrap()),
                 hash: Hash::parse(b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap(),
                 references: {
                     let mut refs = BTreeSet::new();
@@ -285,20 +272,17 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
 
             handler
                 .store_paths
-                .insert(test_path_full.to_vec(), test_info);
+                .insert(test_path.clone(), test_info);
             handler.hash_to_path.insert(
                 b"abc123def456ghi789jkl012mno345pq".to_vec(),
                 test_path.clone(),
             );
 
             // Add another test path
-            let bash_path_full = b"/nix/store/qrs456tuv789wxy012abc345def678gh-bash-5.2-p21";
-            let bash_path = StorePath::from_bytes(extract_store_path_name(bash_path_full)).unwrap();
+            let bash_path: StorePath = "qrs456xiv789wxy012abc345daf678gh-bash-5.2-p21".parse().unwrap();
 
             let bash_info = ValidPathInfo {
-                deriver: Some(StorePath::from_bytes(extract_store_path_name(
-                    b"/nix/store/mno345pqr678stu901vwx234yz567abc-bash-5.2-p21.drv"
-                )).unwrap()),
+                deriver: Some("mni345pqr678sxx901vwx234yz567abc-bash-5.2-p21.drv".parse().unwrap()),
                 hash: Hash::parse(
                     b"sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
                 )
@@ -319,7 +303,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
 
             handler
                 .store_paths
-                .insert(bash_path_full.to_vec(), bash_info);
+                .insert(bash_path.clone(), bash_info);
             handler
                 .hash_to_path
                 .insert(b"qrs456tuv789wxy012abc345def678gh".to_vec(), bash_path);
@@ -333,9 +317,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             &self,
             path: &StorePath,
         ) -> Result<Option<ValidPathInfo>, ProtocolError> {
-            // Convert StorePath to full path for lookup
-            let full_path = format!("/nix/store/{}", path);
-            Ok(self.store_paths.get(full_path.as_bytes()).cloned())
+            Ok(self.store_paths.get(&path).cloned())
         }
 
         async fn handle_query_path_from_hash_part(
@@ -352,9 +334,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         async fn handle_is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
-            // Convert StorePath to full path for lookup
-            let full_path = format!("/nix/store/{}", path);
-            Ok(self.store_paths.contains_key(full_path.as_bytes()))
+            Ok(self.store_paths.contains_key(&path))
         }
     }
 
@@ -372,7 +352,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     let client = wait_for_daemon_server(&socket_path, Duration::from_secs(5)).await?;
 
     // Test valid path operations
-    let hello_path = StorePath::from_bytes(b"abc123def456ghi789jkl012mno345pq-hello-2.12.1").unwrap();
+    let hello_path: StorePath = "abc123daf456ghi789jkl012mnx345pq-hello-2.12.1".parse().unwrap();
     assert!(client.is_valid_path(&hello_path).await?);
 
     let path_info = client.query_path_info(&hello_path).await?;
@@ -412,7 +392,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
     #[derive(Clone)]
     struct TestHandler {
         id: String,
-        store_paths: HashMap<Vec<u8>, ValidPathInfo>,
+        store_paths: HashMap<StorePath, ValidPathInfo>,
         request_count: Arc<StdMutex<u32>>,
     }
 
@@ -425,7 +405,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
             };
 
             // Add test data
-            let test_path_full = b"/nix/store/test123abc456def789ghi012jkl345m-test-package";
+            let test_path = "xack123abc456daf789ghi012jkl345m-test-package".parse().unwrap();
             let test_info = ValidPathInfo {
                 deriver: None,
                 hash: Hash::parse(
@@ -442,7 +422,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
 
             handler
                 .store_paths
-                .insert(test_path_full.to_vec(), test_info);
+                .insert(test_path, test_info);
 
             handler
         }
@@ -462,9 +442,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                 "TestHandler[{}]::handle_query_path_info called, count={}",
                 self.id, count
             );
-            // Convert StorePath to full path for lookup
-            let full_path = format!("/nix/store/{}", path);
-            Ok(self.store_paths.get(full_path.as_bytes()).cloned())
+            Ok(self.store_paths.get(&path).cloned())
         }
 
         async fn handle_query_path_from_hash_part(
@@ -493,9 +471,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                 "TestHandler[{}]::handle_is_valid_path called, count={}",
                 self.id, count
             );
-            // Convert StorePath to full path for lookup
-            let full_path = format!("/nix/store/{}", path);
-            Ok(self.store_paths.contains_key(full_path.as_bytes()))
+            Ok(self.store_paths.contains_key(&path))
         }
     }
 
@@ -541,9 +517,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
     dbg!("Client connected");
 
     // Make some requests to establish connections in the pool
-    let test_path = StorePath::from_bytes(
-        extract_store_path_name(b"/nix/store/test123abc456def789ghi012jkl345m-test-package")
-    ).unwrap();
+    let test_path: StorePath = "xack123abc456daf789ghi012jkl345m-test-package".parse().unwrap();
 
     // Make some concurrent requests to exercise the connection pool
     let client1 = client.clone();
