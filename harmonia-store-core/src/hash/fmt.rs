@@ -16,15 +16,21 @@ mod private {
 }
 
 #[derive(derive_more::Display, Debug, PartialEq, Clone)]
-pub enum Encoding {
+pub enum Base {
     #[display("hex")]
     Hex,
     #[display("nixbase32")]
     NixBase32,
     #[display("base64")]
     Base64,
+}
+
+#[derive(derive_more::Display, Debug, PartialEq, Clone)]
+pub enum Encoding {
     #[display("sri")]
     Sri,
+    #[display("{_0}")]
+    NoAlgo(Base),
 }
 
 #[derive(derive_more::Display, Debug, PartialEq, Clone)]
@@ -608,7 +614,7 @@ impl<H: CommonHash> Format for Base16<H> {
         HEXLOWER_PERMISSIVE
             .decode_mut(s.as_bytes(), &mut hash[..algorithm.size()])
             .map_err(|err| {
-                ParseHashError::new(s, ParseHashErrorKind::BadEncoding(Encoding::Hex, err.error))
+                ParseHashError::new(s, ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::Hex), err.error))
             })?;
         H::from_slice(algorithm, &hash[..algorithm.size()])
             .map_err(|kind| ParseHashError::new(s, kind))
@@ -715,7 +721,7 @@ impl<H: CommonHash> Format for Base32<H> {
         base32::decode_mut(s.as_bytes(), &mut hash[..algorithm.size()]).map_err(|err| {
             ParseHashError::new(
                 s,
-                ParseHashErrorKind::BadEncoding(Encoding::NixBase32, err.error),
+                ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::NixBase32), err.error),
             )
         })?;
         H::from_slice(algorithm, &hash[..algorithm.size()])
@@ -828,14 +834,14 @@ impl<H: CommonHash> Format for Base64<H> {
             .map_err(|err| {
                 ParseHashError::new(
                     s,
-                    ParseHashErrorKind::BadEncoding(Encoding::Base64, err.error),
+                    ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::Base64), err.error),
                 )
             })?;
         if len != algorithm.size() {
             Err(ParseHashError::new(
                 s,
                 ParseHashErrorKind::BadEncoding(
-                    Encoding::Base64,
+                    Encoding::NoAlgo(Base::Base64),
                     DecodeError {
                         position: 0,
                         kind: DecodeKind::Length,
