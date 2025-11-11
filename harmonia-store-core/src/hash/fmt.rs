@@ -2,7 +2,7 @@
 
 use std::{fmt as sfmt, str::FromStr};
 
-use data_encoding::{BASE64, DecodeError, DecodeKind, HEXLOWER_PERMISSIVE};
+use data_encoding::{BASE64, DecodeError, DecodeKind, DecodePartial, HEXLOWER_PERMISSIVE};
 
 use thiserror::Error;
 
@@ -15,7 +15,7 @@ mod private {
     pub trait Sealed {}
 }
 
-#[derive(derive_more::Display, Debug, PartialEq, Clone)]
+#[derive(derive_more::Display, Debug, PartialEq, Clone, Copy)]
 pub enum Base {
     #[display("hex")]
     Hex,
@@ -25,7 +25,7 @@ pub enum Base {
     Base64,
 }
 
-#[derive(derive_more::Display, Debug, PartialEq, Clone)]
+#[derive(derive_more::Display, Debug, PartialEq, Clone, Copy)]
 pub enum Encoding {
     #[display("sri")]
     Sri,
@@ -549,6 +549,50 @@ impl sfmt::UpperHex for hash::NarHash {
     }
 }
 
+/// Get the decode function for a given base encoding
+fn decode_for_base(
+    base: Base,
+) -> impl Fn(&[u8], &mut [u8]) -> Result<usize, DecodePartial> + 'static {
+    match base {
+        Base::Hex => {
+            move |input: &[u8], output: &mut [u8]| HEXLOWER_PERMISSIVE.decode_mut(input, output)
+        }
+        Base::NixBase32 => move |input: &[u8], output: &mut [u8]| {
+            base32::decode_mut(input, output).map(|()| output.len())
+        },
+        Base::Base64 => move |input: &[u8], output: &mut [u8]| BASE64.decode_mut(input, output),
+    }
+}
+
+/// Helper function for parsing hash strings with a given base encoding
+fn parse_with_base<H>(
+    algorithm: hash::Algorithm,
+    s: &str,
+    expected_len: usize,
+    base: Base,
+) -> Result<H, ParseHashError>
+where
+    H: CommonHash,
+{
+    if s.len() != expected_len {
+        return Err(ParseHashError::new(
+            s,
+            ParseHashErrorKind::WrongHashLength(algorithm),
+        ));
+    }
+
+    let mut hash = [0u8; hash::LARGEST_ALGORITHM.size()];
+    let _decoded_len =
+        decode_for_base(base)(s.as_bytes(), &mut hash[..algorithm.size()]).map_err(|err| {
+            ParseHashError::new(
+                s,
+                ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(base), err.error),
+            )
+        })?;
+
+    H::from_slice(algorithm, &hash[..algorithm.size()]).map_err(|kind| ParseHashError::new(s, kind))
+}
+
 pub trait Format: private::Sealed {
     type Hash;
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError>;
@@ -604,23 +648,7 @@ impl<H: CommonHash> Format for Base16<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        if s.len() != algorithm.base16_len() {
-            return Err(ParseHashError::new(
-                s,
-                ParseHashErrorKind::WrongHashLength(algorithm),
-            ));
-        }
-        let mut hash = [0u8; hash::LARGEST_ALGORITHM.size()];
-        HEXLOWER_PERMISSIVE
-            .decode_mut(s.as_bytes(), &mut hash[..algorithm.size()])
-            .map_err(|err| {
-                ParseHashError::new(
-                    s,
-                    ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::Hex), err.error),
-                )
-            })?;
-        H::from_slice(algorithm, &hash[..algorithm.size()])
-            .map_err(|kind| ParseHashError::new(s, kind))
+        parse_with_base(algorithm, s, algorithm.base16_len(), Base::Hex)
     }
 
     fn into_inner(self) -> Self::Hash {
@@ -714,21 +742,7 @@ impl<H: CommonHash> Format for Base32<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        if s.len() != algorithm.base32_len() {
-            return Err(ParseHashError::new(
-                s,
-                ParseHashErrorKind::WrongHashLength(algorithm),
-            ));
-        }
-        let mut hash = [0u8; hash::LARGEST_ALGORITHM.size()];
-        base32::decode_mut(s.as_bytes(), &mut hash[..algorithm.size()]).map_err(|err| {
-            ParseHashError::new(
-                s,
-                ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::NixBase32), err.error),
-            )
-        })?;
-        H::from_slice(algorithm, &hash[..algorithm.size()])
-            .map_err(|kind| ParseHashError::new(s, kind))
+        parse_with_base(algorithm, s, algorithm.base32_len(), Base::NixBase32)
     }
 
     fn into_inner(self) -> Self::Hash {
@@ -831,17 +845,19 @@ impl<H: CommonHash> Format for Base64<H> {
                 ParseHashErrorKind::WrongHashLength(algorithm),
             ));
         }
+
         let mut hash = [0u8; hash::LARGEST_ALGORITHM.base64_decoded()];
-        let len = BASE64
-            .decode_mut(s.as_bytes(), &mut hash[..algorithm.base64_decoded()])
-            .map_err(|err| {
-                ParseHashError::new(
-                    s,
-                    ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::Base64), err.error),
-                )
-            })?;
+        let len =
+            decode_for_base(Base::Base64)(s.as_bytes(), &mut hash[..algorithm.base64_decoded()])
+                .map_err(|err| {
+                    ParseHashError::new(
+                        s,
+                        ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::Base64), err.error),
+                    )
+                })?;
+
         if len != algorithm.size() {
-            Err(ParseHashError::new(
+            return Err(ParseHashError::new(
                 s,
                 ParseHashErrorKind::BadEncoding(
                     Encoding::NoAlgo(Base::Base64),
@@ -850,11 +866,11 @@ impl<H: CommonHash> Format for Base64<H> {
                         kind: DecodeKind::Length,
                     },
                 ),
-            ))
-        } else {
-            H::from_slice(algorithm, &hash[..algorithm.size()])
-                .map_err(|kind| ParseHashError::new(s, kind))
+            ));
         }
+
+        H::from_slice(algorithm, &hash[..algorithm.size()])
+            .map_err(|kind| ParseHashError::new(s, kind))
     }
 
     fn into_inner(self) -> Self::Hash {
