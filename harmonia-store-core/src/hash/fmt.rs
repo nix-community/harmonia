@@ -545,13 +545,12 @@ impl sfmt::UpperHex for hash::NarHash {
 fn parse_with_base<H, const SCRATCH_SIZE: usize>(
     algorithm: hash::Algorithm,
     s: &str,
-    expected_len: usize,
     base: Base,
-    algo_scratch_size: usize,
 ) -> Result<H, ParseHashError>
 where
     H: CommonHash,
 {
+    let expected_len = base.input_len(algorithm.size());
     if s.len() != expected_len {
         return Err(ParseHashError::new(
             s,
@@ -559,6 +558,7 @@ where
         ));
     }
 
+    let algo_scratch_size = base.scratch_len(algorithm.size());
     let mut hash = [0u8; SCRATCH_SIZE];
     let decoded_len =
         decode_for_base(base)(s.as_bytes(), &mut hash[..algo_scratch_size]).map_err(|err| {
@@ -642,9 +642,7 @@ impl<H: CommonHash> Format for Base16<H> {
         parse_with_base::<_, { hash::LARGEST_ALGORITHM.size() }>(
             algorithm,
             s,
-            algorithm.base16_len(),
             Base::Hex,
-            algorithm.size(),
         )
     }
 
@@ -742,9 +740,7 @@ impl<H: CommonHash> Format for Base32<H> {
         parse_with_base::<_, { hash::LARGEST_ALGORITHM.size() }>(
             algorithm,
             s,
-            algorithm.base32_len(),
             Base::NixBase32,
-            algorithm.size(),
         )
     }
 
@@ -759,8 +755,8 @@ impl<H: CommonHash> Format for Base32<H> {
 
 impl<H: CommonHash> sfmt::Display for Base32<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        let mut buf = [0u8; hash::LARGEST_ALGORITHM.base32_len()];
-        let output = &mut buf[..self.0.algorithm().base32_len()];
+        let mut buf = [0u8; Base::NixBase32.input_len(hash::LARGEST_ALGORITHM.size())];
+        let output = &mut buf[..Base::NixBase32.input_len(self.0.algorithm().size())];
         base32::encode_mut(self.0.digest_bytes(), output);
 
         // SAFETY: Nix Base32 is a subset of ASCII, which guarantees valid UTF-8.
@@ -842,12 +838,10 @@ impl<H: CommonHash> Format for Base64<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        parse_with_base::<_, { hash::LARGEST_ALGORITHM.base64_decoded() }>(
+        parse_with_base::<_, { Base::Base64.scratch_len(hash::LARGEST_ALGORITHM.size()) }>(
             algorithm,
             s,
-            algorithm.base64_len(),
             Base::Base64,
-            algorithm.base64_decoded(),
         )
     }
 
@@ -862,8 +856,8 @@ impl<H: CommonHash> Format for Base64<H> {
 
 impl<H: CommonHash> sfmt::Display for Base64<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        let mut buf = [0u8; hash::LARGEST_ALGORITHM.base64_len()];
-        let output = &mut buf[..self.0.algorithm().base64_len()];
+        let mut buf = [0u8; Base::Base64.input_len(hash::LARGEST_ALGORITHM.size())];
+        let output = &mut buf[..Base::Base64.input_len(self.0.algorithm().size())];
         BASE64.encode_mut(self.0.digest_bytes(), output);
 
         // SAFETY: Bas64 is a subset of ASCII, which guarantees valid UTF-8.
@@ -925,11 +919,11 @@ impl<H: CommonHash> Format for Any<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        if s.len() == algorithm.base16_len() {
+        if s.len() == Base::Hex.input_len(algorithm.size()) {
             Ok(Base16::parse(algorithm, s)?)
-        } else if s.len() == algorithm.base32_len() {
+        } else if s.len() == Base::NixBase32.input_len(algorithm.size()) {
             Ok(Base32::parse(algorithm, s)?)
-        } else if s.len() == algorithm.base64_len() {
+        } else if s.len() == Base::Base64.input_len(algorithm.size()) {
             Ok(Base64::parse(algorithm, s)?)
         } else {
             Err(ParseHashError::new(
@@ -966,7 +960,7 @@ impl<H: CommonHash> FromStr for Any<H> {
             let algorithm = prefix
                 .parse::<hash::Algorithm>()
                 .map_err(|err| ParseHashError::new(s, err.into()))?;
-            if rest.len() == algorithm.base64_len() {
+            if rest.len() == Base::Base64.input_len(algorithm.size()) {
                 let hash = Base64::parse(algorithm, rest).map_err(|mut err| {
                     err.hash = s.into();
                     err.kind.adjust_position(prefix.len() + 1);
@@ -1068,11 +1062,11 @@ impl<H: CommonHash> Format for NonSRI<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        if s.len() == algorithm.base16_len() {
+        if s.len() == Base::Hex.input_len(algorithm.size()) {
             Ok(Base16::parse(algorithm, s)?)
-        } else if s.len() == algorithm.base32_len() {
+        } else if s.len() == Base::NixBase32.input_len(algorithm.size()) {
             Ok(Base32::parse(algorithm, s)?)
-        } else if s.len() == algorithm.base64_len() {
+        } else if s.len() == Base::Base64.input_len(algorithm.size()) {
             Ok(Base64::parse(algorithm, s)?)
         } else {
             Err(ParseHashError::new(

@@ -10,6 +10,7 @@ use proptest_derive::Arbitrary;
 use ring::digest;
 use thiserror::Error;
 
+use crate::base::Base;
 use crate::wire::base64_len;
 
 use super::base32;
@@ -46,29 +47,6 @@ impl Algorithm {
             Algorithm::SHA256 => SHA256_SIZE,
             Algorithm::SHA512 => SHA512_SIZE,
         }
-    }
-
-    /// Returns the length of a base-16 representation of this hash.
-    #[inline]
-    pub const fn base16_len(&self) -> usize {
-        self.size() * 2
-    }
-
-    /// Returns the length of a base-32 representation of this hash.
-    #[inline]
-    pub const fn base32_len(&self) -> usize {
-        base32::encode_len(self.size())
-    }
-
-    /// Returns the length of a base-64 representation of this hash.
-    #[inline]
-    pub const fn base64_len(&self) -> usize {
-        base64_len(self.size())
-    }
-
-    #[inline]
-    const fn base64_decoded(&self) -> usize {
-        self.base64_len() / 4 * 3
     }
 
     #[inline]
@@ -541,11 +519,11 @@ mod unittests {
         #[case] base64_decoded: usize,
     ) {
         assert_eq!(algorithm.size(), size, "mismatched size");
-        assert_eq!(algorithm.base16_len(), base16_len, "mismatched base16_len");
-        assert_eq!(algorithm.base32_len(), base32_len, "mismatched base32_len");
-        assert_eq!(algorithm.base64_len(), base64_len, "mismatched base64_len");
+        assert_eq!(Base::Hex.input_len(algorithm.size()), base16_len, "mismatched base16_len");
+        assert_eq!(Base::NixBase32.input_len(algorithm.size()), base32_len, "mismatched base32_len");
+        assert_eq!(Base::Base64.input_len(algorithm.size()), base64_len, "mismatched base64_len");
         assert_eq!(
-            algorithm.base64_decoded(),
+            Base::Base64.scratch_len(algorithm.size()),
             base64_decoded,
             "mismatched base64_decoded"
         );
