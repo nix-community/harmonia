@@ -4,19 +4,22 @@ use derive_more::Display;
 
 #[cfg(any(test, feature = "test"))]
 use proptest_derive::Arbitrary;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use crate::hash::fmt::{NonSRI, ParseHashError, ParseHashErrorKind};
 use crate::hash::{Algorithm, Hash, Sha256, UnknownAlgorithm};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
+#[serde(rename_all = "lowercase")]
 pub enum ContentAddressMethod {
     #[display("text")]
     Text,
     #[display("fixed")]
     Flat,
     #[display("fixed:r")]
+    #[serde(rename = "nar")]
     Recursive,
 }
 
@@ -112,6 +115,39 @@ impl ContentAddress {
             ContentAddress::Flat(hash) => hash,
             ContentAddress::Recursive(hash) => hash,
         }
+    }
+}
+
+/// Raw content address representation for JSON serialization/deserialization
+#[derive(Serialize, Deserialize)]
+struct RawContentAddress {
+    method: ContentAddressMethod,
+    hash: Hash,
+}
+
+impl Serialize for ContentAddress {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let raw = RawContentAddress {
+            method: self.method(),
+            hash: self.hash(),
+        };
+        raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ContentAddress {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de;
+
+        let raw = RawContentAddress::deserialize(deserializer)?;
+
+        ContentAddress::from_hash(raw.method, raw.hash).map_err(de::Error::custom)
     }
 }
 
