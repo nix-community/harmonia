@@ -614,7 +614,10 @@ impl<H: CommonHash> Format for Base16<H> {
         HEXLOWER_PERMISSIVE
             .decode_mut(s.as_bytes(), &mut hash[..algorithm.size()])
             .map_err(|err| {
-                ParseHashError::new(s, ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::Hex), err.error))
+                ParseHashError::new(
+                    s,
+                    ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::Hex), err.error),
+                )
             })?;
         H::from_slice(algorithm, &hash[..algorithm.size()])
             .map_err(|kind| ParseHashError::new(s, kind))
