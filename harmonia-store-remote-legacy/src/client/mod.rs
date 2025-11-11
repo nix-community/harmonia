@@ -57,7 +57,12 @@ impl DaemonClient {
         Ok(if response.is_empty() {
             None
         } else {
-            Some(StorePath::from_bytes(&response)?)
+            let path_str = std::str::from_utf8(&response).map_err(|e| ProtocolError::DaemonError {
+                message: format!("StorePath is not valid UTF-8: {e}"),
+            })?;
+            Some(self.store_dir.parse(path_str).map_err(|e| ProtocolError::DaemonError {
+                message: format!("Failed to parse StorePath: {e}"),
+            })?)
         })
     }
 

@@ -43,7 +43,7 @@ pub async fn handle_connection<H: RequestHandler>(
                 let result = handler.handle_query_path_from_hash_part(&hash).await?;
                 // Nix protocol uses empty string for None
                 match result {
-                    Some(path) => path.to_string().as_bytes().serialize(&mut stream, version, &store_dir).await?,
+                    Some(path) => store_dir.display(&path).to_string().as_bytes().serialize(&mut stream, version, &store_dir).await?,
                     None => (&[] as &[u8]).serialize(&mut stream, version, &store_dir).await?,
                 }
             }
