@@ -1,16 +1,13 @@
-use data_encoding::{DecodeError, DecodeKind, DecodePartial};
+use data_encoding::{BitOrder, DecodeError, DecodeKind, DecodePartial, Encoding, Specification};
+use std::sync::LazyLock;
 
-const BASE32_CHARS: [u8; 32] = *b"0123456789abcdfghijklmnpqrsvwxyz";
-const BASE32_CHARS_REVERSE: [u8; 256] = {
-    let mut ret = [0xFFu8; 256];
-    let mut idx = 0u8;
-    while idx < 32 {
-        let ch = BASE32_CHARS[idx as usize];
-        ret[ch as usize] = idx;
-        idx += 1;
-    }
-    ret
-};
+/// Nix base32 encoding (lowercase, without padding, LSB first, reversed)
+static NIX_BASE32: LazyLock<Encoding> = LazyLock::new(|| {
+    let mut spec = Specification::new();
+    spec.symbols.push_str("0123456789abcdfghijklmnpqrsvwxyz");
+    spec.bit_order = BitOrder::LeastSignificantFirst;
+    spec.encoding().unwrap()
+});
 
 pub const fn encode_len(len: usize) -> usize {
     (8 * len).div_ceil(5)
@@ -31,72 +28,60 @@ pub const fn decode_len(len: usize) -> usize {
 
 #[allow(unsafe_code)]
 pub fn encode_string(input: &[u8]) -> String {
-    let mut output = vec![0u8; encode_len(input.len())];
-    encode_mut(input, &mut output);
-    // SAFETY: Nix Base32 is a subset of ASCII, which guarantees valid UTF-8.
-    unsafe { String::from_utf8_unchecked(output) }
+    let mut output = NIX_BASE32.encode(input);
+    // Nix base32 is reversed
+    unsafe { output.as_bytes_mut() }.reverse();
+    output
 }
 
 pub fn encode_mut(input: &[u8], output: &mut [u8]) {
     assert_eq!(output.len(), encode_len(input.len()));
-    input
-        .chunks(5)
-        .zip(output.rchunks_mut(8))
-        .for_each(|(input, output)| {
-            let mut x = 0u64;
-            for (i, input) in input.iter().enumerate() {
-                x |= u64::from(*input) << (8 * i);
-            }
-            for (i, output) in output.iter_mut().rev().enumerate() {
-                let y = x >> (5 * i);
-                *output = BASE32_CHARS[(y & 0x1f) as usize];
-            }
-        });
-}
 
-// Fails if there are non-zero trailing bits.
-fn check_trail(input: &[u8]) -> Result<(), DecodePartial> {
-    let trail = 5 * input.len() % 8;
-    if trail == 0 {
-        return Ok(());
-    }
-    let mut mask = (1 << trail) - 1;
-    mask <<= 5 - trail;
-    if BASE32_CHARS_REVERSE[input[0] as usize] & mask != 0 {
-        fail(0, DecodeKind::Trailing)
-    } else {
-        Ok(())
-    }
-}
+    // Encode using data-encoding
+    let encoded = NIX_BASE32.encode(input);
+    let encoded_bytes = encoded.as_bytes();
 
-fn fail(pos: usize, kind: DecodeKind) -> Result<(), DecodePartial> {
-    Err(DecodePartial {
-        read: pos / 8 * 8,
-        written: pos / 8 * 5,
-        error: DecodeError {
-            position: pos,
-            kind,
-        },
-    })
+    // Copy and reverse
+    output.copy_from_slice(encoded_bytes);
+    output.reverse();
 }
 
 pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<(), DecodePartial> {
     assert_eq!(output.len(), decode_len(input.len()));
-    let input_len = input.len();
-    for ((chunk, input), output) in input.rchunks(8).enumerate().zip(output.chunks_mut(5)) {
-        let mut x = 0u64;
-        for j in 0..input.len() {
-            let y = BASE32_CHARS_REVERSE[input[input.len() - j - 1] as usize];
-            if y >= 1 << 5 {
-                fail(input_len - (chunk * 8 + j) - 1, DecodeKind::Symbol)?;
+
+    // Reverse the input for decoding
+    let mut reversed = input.to_vec();
+    reversed.reverse();
+
+    // Decode using data-encoding
+    match NIX_BASE32.decode_mut(&reversed, output) {
+        Ok(len) => {
+            if len != output.len() {
+                Err(DecodePartial {
+                    read: 0,
+                    written: 0,
+                    error: DecodeError {
+                        position: 0,
+                        kind: DecodeKind::Length,
+                    },
+                })
+            } else {
+                Ok(())
             }
-            x |= u64::from(y) << (5 * j);
         }
-        for (j, output) in output.iter_mut().enumerate() {
-            *output = ((x >> (8 * j)) & 0xff) as u8;
+        Err(err) => {
+            // Adjust error position to account for reversal
+            let adjusted_pos = input.len() - err.error.position - 1;
+            Err(DecodePartial {
+                read: adjusted_pos / 8 * 8,
+                written: adjusted_pos / 8 * 5,
+                error: DecodeError {
+                    position: adjusted_pos,
+                    kind: err.error.kind,
+                },
+            })
         }
     }
-    check_trail(input)
 }
 
 #[cfg(test)]
@@ -252,6 +237,17 @@ mod unittests {
         let mut output = vec![0u8; decode_len(data.len())];
         decode_mut(data.as_bytes(), &mut output).unwrap();
         assert_eq!(output, expected);
+    }
+
+    fn fail(pos: usize, kind: DecodeKind) -> Result<(), DecodePartial> {
+        Err(DecodePartial {
+            read: pos / 8 * 8,
+            written: pos / 8 * 5,
+            error: DecodeError {
+                position: pos,
+                kind,
+            },
+        })
     }
 
     #[rstest]
