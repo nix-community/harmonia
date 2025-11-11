@@ -1,4 +1,4 @@
-use crate::base32;
+use harmonia_store_core::base32;
 use base64::{Engine as _, engine::general_purpose};
 use std::fmt;
 use thiserror::Error;
@@ -106,7 +106,10 @@ impl Hash {
             hex::decode(digest_bytes).map_err(|e| ParseHashError::HexDecodeError(e.to_string()))?
         } else if digest_bytes.len() == algo.base32_len() {
             // Nix base32 decoding - works with bytes directly
-            base32::from_nix_base32(digest_bytes).map_err(ParseHashError::Base32DecodeError)?
+            let mut decoded = vec![0u8; base32::decode_len(digest_bytes.len())];
+            base32::decode_mut(digest_bytes, &mut decoded)
+                .map_err(|e| ParseHashError::Base32DecodeError(format!("{:?}", e.error)))?;
+            decoded
         } else if digest_bytes.len() == algo.base64_len() {
             // Base64 decoding - accepts &[u8]
             general_purpose::STANDARD
@@ -151,7 +154,7 @@ impl Hash {
 
     /// Get base32 (nix-style) encoding of the digest as bytes
     pub fn to_nix_base32(&self) -> Vec<u8> {
-        base32::to_nix_base32(&self.digest)
+        base32::encode_string(&self.digest).into_bytes()
     }
 
     /// Get base64 encoding of the digest as bytes
