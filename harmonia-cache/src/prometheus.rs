@@ -167,7 +167,7 @@ pub fn initialize_metrics(
 
     // Create client metrics and register them
     let client_metrics = Arc::new(
-        harmonia_store_remote::client::ClientMetrics::new("harmonia", &metrics.registry).map_err(
+        harmonia_store_remote_legacy::client::ClientMetrics::new("harmonia", &metrics.registry).map_err(
             |e| error::ServerError::Startup {
                 reason: format!("Failed to create client metrics: {e}"),
             },

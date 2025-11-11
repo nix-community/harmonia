@@ -2,14 +2,14 @@ use std::path::Path;
 
 use crate::error::{CacheError, NarInfoError, Result, StoreError};
 use actix_web::{HttpResponse, http, web};
-use harmonia_store_remote::protocol::StorePath;
+use harmonia_store_remote_legacy::protocol::StorePath;
 use serde::{Deserialize, Serialize};
 use std::os::unix::ffi::OsStrExt;
 
 use crate::config::Config;
 use crate::{cache_control_max_age_1d, nixhash, some_or_404};
-use harmonia_store_core::SigningKey;
-use harmonia_store_core::fingerprint_path;
+use harmonia_store_core_legacy::SigningKey;
+use harmonia_store_core_legacy::fingerprint_path;
 
 #[derive(Debug, Deserialize)]
 pub struct Param {
@@ -57,7 +57,7 @@ async fn query_narinfo(
     };
     let nar_hash = path_info.hash.to_nix_base32();
     let mut res = NarInfo {
-        store_path: store_path.as_bytes().to_vec(),
+        store_path: store_path.to_string().as_bytes().to_vec(),
         url: crate::build_bytes!(b"nar/", &nar_hash, b".nar?hash=", hash.as_bytes(),),
         compression: b"none".to_vec(),
         nar_hash: crate::build_bytes!(b"sha256:", &nar_hash,),
@@ -66,7 +66,7 @@ async fn query_narinfo(
         deriver: path_info
             .deriver
             .as_ref()
-            .and_then(|d| extract_filename(d.as_bytes())),
+            .map(|d| d.to_string().as_bytes().to_vec()),
         sigs: vec![],
         ca: path_info.content_address.clone(),
     };
@@ -75,12 +75,19 @@ async fn query_narinfo(
         res.references = path_info
             .references
             .iter()
-            .filter_map(|r| extract_filename(r.as_bytes()))
+            .map(|r| r.to_string().as_bytes().to_vec())
             .collect::<Vec<Vec<u8>>>();
     }
 
+    // Convert virtual_nix_store bytes to StoreDir
+    let store_dir = harmonia_store_core::store_path::StoreDir::new(
+        std::str::from_utf8(virtual_nix_store)
+            .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidUtf8(e)))?
+    )
+    .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidStoreDir(format!("{}", e))))?;
+
     let fingerprint = fingerprint_path(
-        virtual_nix_store,
+        &store_dir,
         store_path,
         &res.nar_hash,
         res.nar_size,

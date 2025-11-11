@@ -44,6 +44,9 @@ pub enum ProtocolError {
 
     #[error("Invalid UTF-8 in string data: {0}")]
     InvalidUtf8(#[from] std::str::Utf8Error),
+
+    #[error("Invalid store path: {0}")]
+    InvalidStorePath(#[from] harmonia_store_core::store_path::StorePathError),
 }
 
 impl ProtocolError {

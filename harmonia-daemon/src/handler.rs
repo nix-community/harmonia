@@ -1,4 +1,4 @@
-use harmonia_store_remote::{
+use harmonia_store_remote_legacy::{
     error::ProtocolError,
     protocol::{StorePath, ValidPathInfo},
     server::RequestHandler,
@@ -46,8 +46,9 @@ impl RequestHandler for LocalStoreHandler {
         &self,
         path: &StorePath,
     ) -> Result<Option<ValidPathInfo>, ProtocolError> {
-        let path_str = path.to_string();
-        let store_path = self.parse_store_path(&path_str)?;
+        // Construct full path from store directory + StorePath
+        let full_path = format!("{}/{}", self.store_dir.display(), path);
+        let store_path = self.parse_store_path(&full_path)?;
 
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
@@ -88,8 +89,9 @@ impl RequestHandler for LocalStoreHandler {
     }
 
     async fn handle_is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
-        let path_str = path.to_string();
-        let store_path = self.parse_store_path(&path_str)?;
+        // Construct full path from store directory + StorePath
+        let full_path = format!("{}/{}", self.store_dir.display(), path);
+        let store_path = self.parse_store_path(&full_path)?;
 
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {

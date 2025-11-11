@@ -1,6 +1,6 @@
 use crate::error::{CacheError, ConfigError, Result};
 use crate::store::Store;
-use harmonia_store_core::SigningKey;
+use harmonia_store_core_legacy::SigningKey;
 use serde::Deserialize;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
@@ -76,7 +76,7 @@ pub(crate) struct Config {
 impl Config {
     pub fn set_pool_metrics(
         &mut self,
-        metrics: std::sync::Arc<harmonia_store_remote::client::ClientMetrics>,
+        metrics: std::sync::Arc<harmonia_store_remote_legacy::client::ClientMetrics>,
     ) {
         self.store.pool_config.metrics = Some(metrics);
     }
@@ -155,7 +155,7 @@ pub(crate) fn load() -> Result<Config> {
             .clone()
             .map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
         settings.daemon_socket.clone(),
-        harmonia_store_remote::client::PoolConfig {
+        harmonia_store_remote_legacy::client::PoolConfig {
             // Pool size should be at least workers + 1 for some headroom
             max_size: settings.workers + 1,
             ..Default::default()

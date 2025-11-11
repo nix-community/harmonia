@@ -1,6 +1,6 @@
 use crate::error::{Result, StoreError};
-use harmonia_store_remote::client::{DaemonClient, PoolConfig};
-use harmonia_store_remote::protocol::StorePath;
+use harmonia_store_remote_legacy::client::{DaemonClient, PoolConfig};
+use harmonia_store_remote_legacy::protocol::StorePath;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -33,17 +33,15 @@ impl Store {
         }
     }
     pub fn get_real_path(&self, store_path: &StorePath) -> PathBuf {
-        let virtual_path = Path::new(OsStr::from_bytes(store_path.as_bytes()));
-        if self.real_store.is_some()
-            && virtual_path.starts_with(OsStr::from_bytes(&self.virtual_store))
-        {
-            return self.real_store().join(
-                virtual_path
-                    .strip_prefix(OsStr::from_bytes(&self.virtual_store))
-                    .unwrap(),
-            );
+        // StorePath is now just "hash-name", construct full path
+        let virtual_store_path = Path::new(OsStr::from_bytes(&self.virtual_store));
+        let full_virtual_path = virtual_store_path.join(store_path.to_string());
+
+        if self.real_store.is_some() {
+            // Map from virtual store to real store
+            return self.real_store().join(store_path.to_string());
         }
-        PathBuf::from(virtual_path)
+        full_virtual_path
     }
 
     pub fn real_store(&self) -> &Path {
@@ -57,17 +55,8 @@ impl Store {
     }
 
     pub fn to_virtual_path(&self, store_path: &StorePath) -> StorePath {
-        if let Some(real_store) = &self.real_store {
-            let path_bytes = store_path.as_bytes();
-            if path_bytes.starts_with(real_store) {
-                // Replace real store prefix with virtual store prefix
-                let relative_path = &path_bytes[real_store.len()..];
-                let mut virtual_path = self.virtual_store.clone();
-                virtual_path.extend_from_slice(relative_path);
-                return StorePath::new(virtual_path);
-            }
-        }
-        // If no real_store configured or path doesn't match, return as-is
+        // StorePath is now just "hash-name", which is store-agnostic
+        // No translation needed - just return the same StorePath
         store_path.clone()
     }
 

@@ -10,7 +10,7 @@ use std::{fmt::Display, time::Duration};
 use url::Url;
 
 use actix_web::{App, HttpResponse, HttpServer, http, web};
-use harmonia_store_remote::protocol::StorePath;
+use harmonia_store_remote_legacy::protocol::StorePath;
 
 /// Macro for building byte vectors efficiently from parts
 #[macro_export]

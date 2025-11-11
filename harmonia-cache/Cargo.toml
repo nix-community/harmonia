@@ -35,8 +35,9 @@ url = "2.5.7"
 async-compression = { version = "0.4.32", features = ["tokio", "bzip2"] }
 tokio-util = "0.7.17"
 # TODO: Update to use new Nix.rs-based crates in Phase 3
-# harmonia-store-core = { path = "../harmonia-store-core" }  # Legacy - now harmonia-store-core-legacy
-# harmonia-store-remote = { path = "../harmonia-store-remote" }  # Legacy - now harmonia-store-remote-legacy
+harmonia-store-core = { path = "../harmonia-store-core" }  # For StoreDir
+harmonia-store-core-legacy = { path = "../harmonia-store-core-legacy" }  # Legacy
+harmonia-store-remote-legacy = { path = "../harmonia-store-remote-legacy" }  # Legacy
 prometheus = { workspace = true }
 
 [build-dependencies]

@@ -1,7 +1,7 @@
 use crate::handler::LocalStoreHandler;
 use crate::sqlite::StoreDb;
-use harmonia_store_remote::protocol::StorePath;
-use harmonia_store_remote::server::RequestHandler;
+use harmonia_store_remote_legacy::protocol::StorePath;
+use harmonia_store_remote_legacy::server::RequestHandler;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -160,13 +160,7 @@ async fn test_handler_with_nix_store() {
         .expect("Failed to create handler");
 
     // Test with a non-existent path
-    let fake_path = StorePath::from(
-        format!(
-            "{}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test",
-            store_dir.display()
-        )
-        .into_bytes(),
-    );
+    let fake_path = StorePath::from_bytes(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test").unwrap();
     let is_valid = handler.handle_is_valid_path(&fake_path).await.unwrap();
     assert!(!is_valid, "Non-existent path should not be valid");
 

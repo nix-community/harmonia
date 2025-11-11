@@ -4,7 +4,7 @@ use actix_web::Responder;
 use actix_web::http::header::HeaderValue;
 use actix_web::{HttpRequest, HttpResponse, http, web};
 use async_compression::tokio::bufread::BzDecoder;
-use harmonia_store_remote::protocol::StorePath;
+use harmonia_store_remote_legacy::protocol::StorePath;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -20,15 +20,16 @@ async fn query_drv_path(settings: &web::Data<Config>, drv: &[u8]) -> Result<Opti
 }
 
 pub fn get_build_log(store: &Path, drv_path: &StorePath) -> Option<PathBuf> {
-    let drv_path = Path::new(std::ffi::OsStr::from_bytes(drv_path.as_bytes()));
-    let drv_name = drv_path.file_name()?.as_bytes();
+    // StorePath is now just "hash-name", use it directly
+    let drv_name = drv_path.to_string();
+    let drv_name_bytes = drv_name.as_bytes();
     let log_path = store.parent().map(|p| {
         p.join("var")
             .join("log")
             .join("nix")
             .join("drvs")
-            .join(OsStr::from_bytes(&drv_name[0..2]))
-            .join(OsStr::from_bytes(&drv_name[2..]))
+            .join(OsStr::from_bytes(&drv_name_bytes[0..2]))
+            .join(OsStr::from_bytes(&drv_name_bytes[2..]))
     })?;
     if log_path.exists() {
         return Some(log_path);

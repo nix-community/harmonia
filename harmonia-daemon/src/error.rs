@@ -17,7 +17,7 @@ pub enum DaemonError {
     },
 
     #[error("Protocol error: {0}")]
-    Protocol(#[from] harmonia_store_remote::error::ProtocolError),
+    Protocol(#[from] harmonia_store_remote_legacy::error::ProtocolError),
 
     #[error("Configuration error: {0}")]
     Config(String),

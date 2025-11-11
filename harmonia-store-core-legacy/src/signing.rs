@@ -158,18 +158,17 @@ mod tests {
         let key = SigningKey::parse(key_str).unwrap();
 
         let mut references = std::collections::BTreeSet::new();
-        references.insert(crate::StorePath::from(
-            b"/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1" as &[u8],
-        ));
-        references.insert(crate::StorePath::from(
-            b"/nix/store/sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36" as &[u8],
-        ));
-
-        let store_path = crate::StorePath::from(
-            b"/nix/store/26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1" as &[u8],
+        references.insert(
+            crate::StorePath::from_bytes(b"26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1").unwrap()
         );
+        references.insert(
+            crate::StorePath::from_bytes(b"sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36").unwrap()
+        );
+
+        let store_path = crate::StorePath::from_bytes(b"26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1").unwrap();
+        let store_dir = harmonia_store_core::store_path::StoreDir::new("/nix/store").unwrap();
         let fingerprint = fingerprint_path(
-            b"/nix/store",
+            &store_dir,
             &store_path,
             b"sha256:1mkvday29m2qxg1fnbv8xh9s6151bh8a2xzhh0k86j7lqhyfwibh",
             226560,

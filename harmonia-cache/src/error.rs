@@ -22,10 +22,10 @@ pub enum CacheError {
     Nar(#[from] NarError),
 
     #[error("Signing error: {0}")]
-    Signing(#[from] harmonia_store_core::SigningError),
+    Signing(#[from] harmonia_store_core_legacy::SigningError),
 
     #[error("Fingerprint error: {0}")]
-    Fingerprint(#[from] harmonia_store_core::FingerprintError),
+    Fingerprint(#[from] harmonia_store_core_legacy::FingerprintError),
 
     #[error("NARInfo error: {0}")]
     NarInfo(#[from] NarInfoError),
@@ -74,7 +74,7 @@ pub enum StoreError {
     Operation { reason: String },
 
     #[error("Remote store error: {0}")]
-    Remote(#[from] harmonia_store_remote::ProtocolError),
+    Remote(#[from] harmonia_store_remote_legacy::ProtocolError),
 }
 
 #[derive(Error, Debug)]
@@ -104,6 +104,12 @@ pub enum NarError {
 pub enum NarInfoError {
     #[error("Failed to query path info: {reason}")]
     QueryFailed { reason: String },
+
+    #[error("Invalid UTF-8 in store directory: {0}")]
+    InvalidUtf8(#[from] std::str::Utf8Error),
+
+    #[error("Invalid store directory: {0}")]
+    InvalidStoreDir(String),
 }
 
 #[derive(Error, Debug)]

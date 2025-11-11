@@ -12,7 +12,8 @@ impl Serialize for StorePath {
         writer: &mut W,
         version: ProtocolVersion,
     ) -> Result<(), ProtocolError> {
-        self.as_bytes().serialize(writer, version).await
+        // Serialize as "hash-name" string bytes
+        self.to_string().as_bytes().serialize(writer, version).await
     }
 }
 
@@ -42,6 +43,7 @@ impl Deserialize for StorePath {
             .io_context("Failed to read StorePath data")?;
 
         buf.truncate(len as usize);
+        // from_bytes now returns Result, so map_err works
         StorePath::from_bytes(&buf).map_err(|e| ProtocolError::DaemonError {
             message: format!("Failed to parse StorePath from bytes: {e}"),
         })
@@ -177,13 +179,12 @@ impl Deserialize for ValidPathInfo {
         let raw_hash = hex::decode(&hash_str).map_err(|e| ProtocolError::DaemonError {
             message: format!("Failed to decode hex hash: {e}"),
         })?;
-        let hash = harmonia_store_core::hash::Hash::from_slice(
-            harmonia_store_core::hash::Algorithm::SHA256,
-            &raw_hash,
-        )
-        .map_err(|e| ProtocolError::DaemonError {
-            message: format!("Failed to create hash: {e}"),
-        })?;
+        // Create legacy Hash from raw bytes
+        use harmonia_store_core_legacy::{Hash as LegacyHash, HashAlgo};
+        let hash = LegacyHash::new(HashAlgo::Sha256, raw_hash)
+            .map_err(|e| ProtocolError::DaemonError {
+                message: format!("Failed to create hash: {e}"),
+            })?;
 
         // Deserialize references
         let references = BTreeSet::<StorePath>::deserialize(reader, version)

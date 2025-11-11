@@ -527,25 +527,14 @@ pub(crate) async fn get(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::store::Store;
-    use harmonia_store_remote::protocol::StorePath;
     use std::process::Command;
 
     async fn dump_to_vec(path: String) -> Result<Vec<u8>> {
-        let store = Store::new(
-            b"/nix/store".to_vec(),
-            None,
-            std::path::PathBuf::from("/nix/var/nix/daemon-socket/socket"),
-            harmonia_store_remote::client::PoolConfig {
-                max_size: 2, // Small pool for tests
-                ..Default::default()
-            },
-        );
         let (tx, mut rx) =
             tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
         task::spawn(async move {
-            let store_path = StorePath::from(path.into_bytes());
-            let e = dump_path(store.get_real_path(&store_path), &tx).await;
+            let path_buf = PathBuf::from(path);
+            let e = dump_path(path_buf, &tx).await;
             if let Err(e) = e {
                 eprintln!("Error dumping path: {e}");
             }

@@ -3,7 +3,7 @@ use crate::error::ProtocolError;
 use crate::protocol::{CURRENT_PROTOCOL_VERSION, StorePath, ValidPathInfo};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::{DaemonServer, RequestHandler};
-use harmonia_store_core::Hash;
+use harmonia_store_core_legacy::Hash;
 use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
 use std::path::Path;
@@ -16,6 +16,16 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 const SOCKET_PATH: &str = "/nix/var/nix/daemon-socket/socket";
+
+/// Helper to extract just the "hash-name" from a full path like "/nix/store/hash-name"
+fn extract_store_path_name(full_path: &[u8]) -> &[u8] {
+    // Find the last '/' and return everything after it
+    full_path
+        .iter()
+        .rposition(|&b| b == b'/')
+        .map(|pos| &full_path[pos + 1..])
+        .unwrap_or(full_path)
+}
 
 #[tokio::test]
 async fn test_serialization_roundtrip() {
@@ -105,15 +115,15 @@ async fn test_serialization_roundtrip() {
 #[tokio::test]
 async fn test_valid_path_info_serialization() {
     let info = ValidPathInfo {
-        deriver: Some(StorePath::from(b"/nix/store/abc-test.drv".to_vec())),
+        deriver: Some(StorePath::from_bytes(b"00000000000000000000000000000000-abc-test.drv").unwrap()),
         hash: Hash::parse(
             b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
         )
         .unwrap(),
         references: {
             let mut refs = BTreeSet::new();
-            refs.insert(StorePath::from(b"/nix/store/ref1".to_vec()));
-            refs.insert(StorePath::from(b"/nix/store/ref2".to_vec()));
+            refs.insert(StorePath::from_bytes(b"11111111111111111111111111111111-ref1").unwrap());
+            refs.insert(StorePath::from_bytes(b"22222222222222222222222222222222-ref2").unwrap());
             refs
         },
         registration_time: 1234567890,
@@ -157,7 +167,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     }
 
     let store_path = String::from_utf8(output.stdout)?.trim().to_string();
-    let store_path = StorePath::from(store_path.into_bytes());
+    let store_path = StorePath::from_bytes(extract_store_path_name(store_path.as_bytes())).unwrap();
 
     // Test is_valid_path
     let is_valid = client.is_valid_path(&store_path).await?;
@@ -191,8 +201,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     assert_eq!(not_found, None);
 
     // Test is_valid_path with non-existent path
-    let invalid_path =
-        StorePath::from(b"/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake" as &[u8]);
+    let invalid_path = StorePath::from_bytes(b"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake").unwrap();
     let is_valid = client.is_valid_path(&invalid_path).await?;
     assert!(!is_valid);
 
@@ -248,16 +257,18 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             // Add some test data
-            let test_path = StorePath::from(
-                b"/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1" as &[u8],
-            );
+            let test_path_full = b"/nix/store/abc123def456ghi789jkl012mno345pq-hello-2.12.1";
+            let test_path = StorePath::from_bytes(extract_store_path_name(test_path_full)).unwrap();
+
             let test_info = ValidPathInfo {
-                deriver: Some(StorePath::from(b"/nix/store/xyz789abc123def456ghi789jkl012m-hello-2.12.1.drv" as &[u8])),
+                deriver: Some(StorePath::from_bytes(extract_store_path_name(
+                    b"/nix/store/xyz789abc123def456ghi789jkl012mn-hello-2.12.1.drv"
+                )).unwrap()),
                 hash: Hash::parse(b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap(),
                 references: {
                     let mut refs = BTreeSet::new();
-                    refs.insert(StorePath::from(b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec()));
-                    refs.insert(StorePath::from(b"/nix/store/222222222222222222222222222222222-gcc-13.2.0-lib".to_vec()));
+                    refs.insert(StorePath::from_bytes(b"11111111111111111111111111111111-glibc-2.38").unwrap());
+                    refs.insert(StorePath::from_bytes(b"22222222222222222222222222222222-gcc-13.2.0-lib").unwrap());
                     refs
                 },
                 registration_time: 1700000000,
@@ -274,35 +285,29 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
 
             handler
                 .store_paths
-                .insert(test_path.as_bytes().to_vec(), test_info);
+                .insert(test_path_full.to_vec(), test_info);
             handler.hash_to_path.insert(
-                b"abc123def456ghi789jkl012mno345p".to_vec(),
+                b"abc123def456ghi789jkl012mno345pq".to_vec(),
                 test_path.clone(),
             );
 
             // Add another test path
-            let bash_path = StorePath::from(
-                b"/nix/store/qrs456tuv789wxy012abc345def678g-bash-5.2-p21".to_vec(),
-            );
+            let bash_path_full = b"/nix/store/qrs456tuv789wxy012abc345def678gh-bash-5.2-p21";
+            let bash_path = StorePath::from_bytes(extract_store_path_name(bash_path_full)).unwrap();
+
             let bash_info = ValidPathInfo {
-                deriver: Some(StorePath::from(
-                    b"/nix/store/mno345pqr678stu901vwx234yz567ab-bash-5.2-p21.drv".to_vec(),
-                )),
+                deriver: Some(StorePath::from_bytes(extract_store_path_name(
+                    b"/nix/store/mno345pqr678stu901vwx234yz567abc-bash-5.2-p21.drv"
+                )).unwrap()),
                 hash: Hash::parse(
                     b"sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
                 )
                 .unwrap(),
                 references: {
                     let mut refs = BTreeSet::new();
-                    refs.insert(StorePath::from(
-                        b"/nix/store/111111111111111111111111111111111-glibc-2.38".to_vec(),
-                    ));
-                    refs.insert(StorePath::from(
-                        b"/nix/store/333333333333333333333333333333333-readline-8.2p7".to_vec(),
-                    ));
-                    refs.insert(StorePath::from(
-                        b"/nix/store/444444444444444444444444444444444-ncurses-6.4".to_vec(),
-                    ));
+                    refs.insert(StorePath::from_bytes(b"11111111111111111111111111111111-glibc-2.38").unwrap());
+                    refs.insert(StorePath::from_bytes(b"33333333333333333333333333333333-readline-8.2p7").unwrap());
+                    refs.insert(StorePath::from_bytes(b"44444444444444444444444444444444-ncurses-6.4").unwrap());
                     refs
                 },
                 registration_time: 1700000100,
@@ -314,10 +319,10 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
 
             handler
                 .store_paths
-                .insert(bash_path.as_bytes().to_vec(), bash_info);
+                .insert(bash_path_full.to_vec(), bash_info);
             handler
                 .hash_to_path
-                .insert(b"qrs456tuv789wxy012abc345def678g".to_vec(), bash_path);
+                .insert(b"qrs456tuv789wxy012abc345def678gh".to_vec(), bash_path);
 
             handler
         }
@@ -328,7 +333,9 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             &self,
             path: &StorePath,
         ) -> Result<Option<ValidPathInfo>, ProtocolError> {
-            Ok(self.store_paths.get(path.as_bytes()).cloned())
+            // Convert StorePath to full path for lookup
+            let full_path = format!("/nix/store/{}", path);
+            Ok(self.store_paths.get(full_path.as_bytes()).cloned())
         }
 
         async fn handle_query_path_from_hash_part(
@@ -345,7 +352,9 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         async fn handle_is_valid_path(&self, path: &StorePath) -> Result<bool, ProtocolError> {
-            Ok(self.store_paths.contains_key(path.as_bytes()))
+            // Convert StorePath to full path for lookup
+            let full_path = format!("/nix/store/{}", path);
+            Ok(self.store_paths.contains_key(full_path.as_bytes()))
         }
     }
 
@@ -363,8 +372,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     let client = wait_for_daemon_server(&socket_path, Duration::from_secs(5)).await?;
 
     // Test valid path operations
-    let hello_path =
-        StorePath::from(b"/nix/store/abc123def456ghi789jkl012mno345p-hello-2.12.1".to_vec());
+    let hello_path = StorePath::from_bytes(b"abc123def456ghi789jkl012mno345pq-hello-2.12.1").unwrap();
     assert!(client.is_valid_path(&hello_path).await?);
 
     let path_info = client.query_path_info(&hello_path).await?;
@@ -385,7 +393,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     assert!(bash_path.unwrap().to_string().contains("bash"));
 
     // Test with non-existent data
-    let fake_path = StorePath::from(b"/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake".to_vec());
+    let fake_path = StorePath::from_bytes(b"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fake").unwrap();
     assert!(!client.is_valid_path(&fake_path).await?);
     assert_eq!(client.query_path_info(&fake_path).await?, None);
     assert_eq!(client.query_path_from_hash_part(b"zzzzz").await?, None);
@@ -417,9 +425,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
             };
 
             // Add test data
-            let test_path = StorePath::from(
-                b"/nix/store/test123abc456def789ghi012jkl345m-test-package".to_vec(),
-            );
+            let test_path_full = b"/nix/store/test123abc456def789ghi012jkl345m-test-package";
             let test_info = ValidPathInfo {
                 deriver: None,
                 hash: Hash::parse(
@@ -436,7 +442,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
 
             handler
                 .store_paths
-                .insert(test_path.as_bytes().to_vec(), test_info);
+                .insert(test_path_full.to_vec(), test_info);
 
             handler
         }
@@ -456,7 +462,9 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                 "TestHandler[{}]::handle_query_path_info called, count={}",
                 self.id, count
             );
-            Ok(self.store_paths.get(path.as_bytes()).cloned())
+            // Convert StorePath to full path for lookup
+            let full_path = format!("/nix/store/{}", path);
+            Ok(self.store_paths.get(full_path.as_bytes()).cloned())
         }
 
         async fn handle_query_path_from_hash_part(
@@ -485,7 +493,9 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                 "TestHandler[{}]::handle_is_valid_path called, count={}",
                 self.id, count
             );
-            Ok(self.store_paths.contains_key(path.as_bytes()))
+            // Convert StorePath to full path for lookup
+            let full_path = format!("/nix/store/{}", path);
+            Ok(self.store_paths.contains_key(full_path.as_bytes()))
         }
     }
 
@@ -531,8 +541,9 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
     dbg!("Client connected");
 
     // Make some requests to establish connections in the pool
-    let test_path =
-        StorePath::from(b"/nix/store/test123abc456def789ghi012jkl345m-test-package".to_vec());
+    let test_path = StorePath::from_bytes(
+        extract_store_path_name(b"/nix/store/test123abc456def789ghi012jkl345m-test-package")
+    ).unwrap();
 
     // Make some concurrent requests to exercise the connection pool
     let client1 = client.clone();

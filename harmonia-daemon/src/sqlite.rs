@@ -1,5 +1,5 @@
-use harmonia_store_core::Hash;
-use harmonia_store_remote::{
+use harmonia_store_core_legacy::Hash;
+use harmonia_store_remote_legacy::{
     error::ProtocolError,
     protocol::{StorePath, ValidPathInfo},
 };
@@ -8,6 +8,22 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::error::{DaemonError, DbContext};
+
+/// Helper function to parse a store path from a full path string
+/// e.g., "/nix/store/hash-name" -> StorePath
+fn parse_store_path_from_full_path(full_path: &str) -> Result<StorePath, ProtocolError> {
+    // Find the last '/' to get just the "hash-name" part
+    let base_name = full_path
+        .rsplit('/')
+        .next()
+        .ok_or_else(|| ProtocolError::DaemonError {
+            message: format!("Invalid store path format: {}", full_path),
+        })?;
+
+    StorePath::from_bytes(base_name.as_bytes()).map_err(|e| ProtocolError::DaemonError {
+        message: format!("Failed to parse store path '{}': {}", base_name, e),
+    })
+}
 
 /// Helper trait for adding context to database errors and converting to ProtocolError
 trait DbProtocolContext<T> {
@@ -110,13 +126,16 @@ impl StoreDb {
         let references: BTreeSet<StorePath> = ref_stmt
             .query_map(params![id], |row| {
                 let path: String = row.get(0)?;
-                Ok(StorePath::from(path.into_bytes()))
+                Ok(path)
             })
             .db_protocol_context(|| format!("Failed to query references for path '{path_str}'"))?
-            .collect::<Result<BTreeSet<_>, _>>()
+            .collect::<Result<Vec<_>, _>>()
             .db_protocol_context(|| {
                 format!("Failed to collect references for path '{path_str}'")
-            })?;
+            })?
+            .into_iter()
+            .map(|path| parse_store_path_from_full_path(&path))
+            .collect::<Result<BTreeSet<_>, _>>()?;
 
         // Parse the hash from database format
         let parsed_hash = Hash::parse(hash.as_bytes()).map_err(|e| ProtocolError::DaemonError {
@@ -125,7 +144,7 @@ impl StoreDb {
 
         // Build ValidPathInfo
         let info = ValidPathInfo {
-            deriver: deriver.map(|s| StorePath::from(s.into_bytes())),
+            deriver: deriver.map(|s| parse_store_path_from_full_path(&s)).transpose()?,
             hash: parsed_hash,
             references,
             registration_time: registration_time as u64,
@@ -174,7 +193,7 @@ impl StoreDb {
         if let Some(path) = result {
             // Check if it actually starts with our prefix
             if path.starts_with(&prefix) {
-                Ok(Some(StorePath::from(path.into_bytes())))
+                Ok(Some(parse_store_path_from_full_path(&path)?))
             } else {
                 Ok(None)
             }
