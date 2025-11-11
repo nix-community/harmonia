@@ -11,7 +11,7 @@ use crate::hash;
 use crate::hash::InvalidHashError;
 use crate::hash::UnknownAlgorithm;
 
-use crate::base::{decode_for_base, Base};
+use crate::base::{Base, decode_for_base};
 
 mod private {
     pub trait Sealed {}
@@ -542,11 +542,12 @@ impl sfmt::UpperHex for hash::NarHash {
 }
 
 /// Helper function for parsing hash strings with a given base encoding
-fn parse_with_base<H>(
+fn parse_with_base<H, const SCRATCH_SIZE: usize>(
     algorithm: hash::Algorithm,
     s: &str,
     expected_len: usize,
     base: Base,
+    algo_scratch_size: usize,
 ) -> Result<H, ParseHashError>
 where
     H: CommonHash,
@@ -558,14 +559,27 @@ where
         ));
     }
 
-    let mut hash = [0u8; hash::LARGEST_ALGORITHM.size()];
-    let _decoded_len =
-        decode_for_base(base)(s.as_bytes(), &mut hash[..algorithm.size()]).map_err(|err| {
+    let mut hash = [0u8; SCRATCH_SIZE];
+    let decoded_len =
+        decode_for_base(base)(s.as_bytes(), &mut hash[..algo_scratch_size]).map_err(|err| {
             ParseHashError::new(
                 s,
                 ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(base), err.error),
             )
         })?;
+
+    if decoded_len != algorithm.size() {
+        return Err(ParseHashError::new(
+            s,
+            ParseHashErrorKind::BadEncoding(
+                Encoding::NoAlgo(base),
+                DecodeError {
+                    position: 0,
+                    kind: DecodeKind::Length,
+                },
+            ),
+        ));
+    }
 
     H::from_slice(algorithm, &hash[..algorithm.size()]).map_err(|kind| ParseHashError::new(s, kind))
 }
@@ -625,7 +639,13 @@ impl<H: CommonHash> Format for Base16<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        parse_with_base(algorithm, s, algorithm.base16_len(), Base::Hex)
+        parse_with_base::<_, { hash::LARGEST_ALGORITHM.size() }>(
+            algorithm,
+            s,
+            algorithm.base16_len(),
+            Base::Hex,
+            algorithm.size(),
+        )
     }
 
     fn into_inner(self) -> Self::Hash {
@@ -719,7 +739,13 @@ impl<H: CommonHash> Format for Base32<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        parse_with_base(algorithm, s, algorithm.base32_len(), Base::NixBase32)
+        parse_with_base::<_, { hash::LARGEST_ALGORITHM.size() }>(
+            algorithm,
+            s,
+            algorithm.base32_len(),
+            Base::NixBase32,
+            algorithm.size(),
+        )
     }
 
     fn into_inner(self) -> Self::Hash {
@@ -816,38 +842,13 @@ impl<H: CommonHash> Format for Base64<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        if s.len() != algorithm.base64_len() {
-            return Err(ParseHashError::new(
-                s,
-                ParseHashErrorKind::WrongHashLength(algorithm),
-            ));
-        }
-
-        let mut hash = [0u8; hash::LARGEST_ALGORITHM.base64_decoded()];
-        let len =
-            decode_for_base(Base::Base64)(s.as_bytes(), &mut hash[..algorithm.base64_decoded()])
-                .map_err(|err| {
-                    ParseHashError::new(
-                        s,
-                        ParseHashErrorKind::BadEncoding(Encoding::NoAlgo(Base::Base64), err.error),
-                    )
-                })?;
-
-        if len != algorithm.size() {
-            return Err(ParseHashError::new(
-                s,
-                ParseHashErrorKind::BadEncoding(
-                    Encoding::NoAlgo(Base::Base64),
-                    DecodeError {
-                        position: 0,
-                        kind: DecodeKind::Length,
-                    },
-                ),
-            ));
-        }
-
-        H::from_slice(algorithm, &hash[..algorithm.size()])
-            .map_err(|kind| ParseHashError::new(s, kind))
+        parse_with_base::<_, { hash::LARGEST_ALGORITHM.base64_decoded() }>(
+            algorithm,
+            s,
+            algorithm.base64_len(),
+            Base::Base64,
+            algorithm.base64_decoded(),
+        )
     }
 
     fn into_inner(self) -> Self::Hash {
