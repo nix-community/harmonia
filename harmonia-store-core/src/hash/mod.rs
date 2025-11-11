@@ -1,9 +1,5 @@
-use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt as sfmt;
-use std::str::FromStr;
-
-use derive_more::Display;
 
 #[cfg(any(test, feature = "test"))]
 use proptest_derive::Arbitrary;
@@ -13,122 +9,12 @@ use thiserror::Error;
 
 use crate::base::Base;
 
+mod algo;
 pub mod fmt;
 
-const MD5_SIZE: usize = 128 / 8;
-const SHA1_SIZE: usize = 160 / 8;
-const SHA256_SIZE: usize = 256 / 8;
-const SHA512_SIZE: usize = 512 / 8;
-const LARGEST_ALGORITHM: Algorithm = Algorithm::SHA512;
+pub use algo::{Algorithm, UnknownAlgorithm};
 
-/// A digest algorithm.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Display, Default)]
-pub enum Algorithm {
-    #[display("md5")]
-    MD5,
-    #[display("sha1")]
-    SHA1,
-    #[default]
-    #[display("sha256")]
-    SHA256,
-    #[display("sha512")]
-    SHA512,
-}
-
-impl Algorithm {
-    /// Returns the size in bytes of this hash.
-    #[inline]
-    pub const fn size(&self) -> usize {
-        match &self {
-            Algorithm::MD5 => MD5_SIZE,
-            Algorithm::SHA1 => SHA1_SIZE,
-            Algorithm::SHA256 => SHA256_SIZE,
-            Algorithm::SHA512 => SHA512_SIZE,
-        }
-    }
-
-    #[inline]
-    fn digest_algorithm(&self) -> &'static digest::Algorithm {
-        match self {
-            Algorithm::SHA1 => &digest::SHA1_FOR_LEGACY_USE_ONLY,
-            Algorithm::SHA256 => &digest::SHA256,
-            Algorithm::SHA512 => &digest::SHA512,
-            _ => panic!("Unsupported digest algorithm {self:?}"),
-        }
-    }
-
-    /// Returns the digest of `data` using the given digest algorithm.
-    ///
-    /// ```
-    /// # use harmonia_store_core::hash::Algorithm;
-    /// let hash = Algorithm::SHA256.digest("abc");
-    ///
-    /// assert_eq!("sha256:1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s", hash.as_base32().to_string());
-    /// ```
-    pub fn digest<B: AsRef<[u8]>>(&self, data: B) -> Hash {
-        match *self {
-            Algorithm::MD5 => Hash::new(Algorithm::MD5, md5::compute(data).as_ref()),
-            _ => digest::digest(self.digest_algorithm(), data.as_ref())
-                .try_into()
-                .unwrap(),
-        }
-    }
-}
-
-#[derive(Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-#[error("unsupported digest algorithm '{0}'")]
-pub struct UnknownAlgorithm(String);
-
-impl<'a> TryFrom<&'a digest::Algorithm> for Algorithm {
-    type Error = UnknownAlgorithm;
-    fn try_from(value: &'a digest::Algorithm) -> Result<Self, Self::Error> {
-        if *value == digest::SHA1_FOR_LEGACY_USE_ONLY {
-            Ok(Algorithm::SHA1)
-        } else if *value == digest::SHA256 {
-            Ok(Algorithm::SHA256)
-        } else if *value == digest::SHA512 {
-            Ok(Algorithm::SHA512)
-        } else {
-            Err(UnknownAlgorithm(format!("{value:?}")))
-        }
-    }
-}
-
-impl FromStr for Algorithm {
-    type Err = UnknownAlgorithm;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("sha256") {
-            Ok(Algorithm::SHA256)
-        } else if s.eq_ignore_ascii_case("sha512") {
-            Ok(Algorithm::SHA512)
-        } else if s.eq_ignore_ascii_case("sha1") {
-            Ok(Algorithm::SHA1)
-        } else if s.eq_ignore_ascii_case("md5") {
-            Ok(Algorithm::MD5)
-        } else {
-            Err(UnknownAlgorithm(s.to_owned()))
-        }
-    }
-}
-
-impl Serialize for Algorithm {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for Algorithm {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
+const LARGEST_ALGORITHM: Algorithm = Algorithm::LARGEST;
 
 #[derive(Error, Debug, PartialEq, Eq, Clone, Copy)]
 #[error("hash has wrong length {length} != {} for hash type '{algorithm}'", algorithm.size())]
