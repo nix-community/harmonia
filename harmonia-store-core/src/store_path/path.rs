@@ -8,7 +8,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use serde_with::{DeserializeFromStr, SerializeDisplay};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use crate::base32;
@@ -18,7 +18,7 @@ use super::FromStoreDirStr;
 use super::StoreDir;
 use super::StoreDirDisplay;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, SerializeDisplay, DeserializeFromStr)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StorePath {
     hash: StorePathHash,
     name: StorePathName,
@@ -94,6 +94,23 @@ impl StorePath {
     pub fn from_base_path(s: &str) -> Result<Self, ParseStorePathError> {
         s.parse()
     }
+
+    /// Serialize as base path (just the hash-name part, without store directory)
+    pub fn serialize_as_base_path<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_base_path())
+    }
+
+    /// Deserialize from base path (just the hash-name part, without store directory)
+    pub fn deserialize_from_base_path<'de, D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::from_base_path(&s).map_err(serde::de::Error::custom)
+    }
 }
 
 impl fmt::Debug for StorePath {
@@ -107,6 +124,24 @@ impl fmt::Debug for StorePath {
 impl fmt::Display for StorePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}-{}", self.hash, self.name)
+    }
+}
+
+impl Serialize for StorePath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.serialize_as_base_path(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for StorePath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::deserialize_from_base_path(deserializer)
     }
 }
 

@@ -82,28 +82,7 @@ pub enum SingleDerivedPath {
         drv_path: Box<SingleDerivedPath>,
         output: OutputName,
     },
-    Opaque(
-        #[serde(
-            serialize_with = "serialize_store_path",
-            deserialize_with = "deserialize_store_path"
-        )]
-        StorePath,
-    ),
-}
-
-fn serialize_store_path<S>(path: &StorePath, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&path.to_base_path())
-}
-
-fn deserialize_store_path<'de, D>(deserializer: D) -> Result<StorePath, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    StorePath::from_base_path(&s).map_err(serde::de::Error::custom)
+    Opaque(StorePath),
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -209,13 +188,7 @@ pub enum DerivedPath {
         drv_path: SingleDerivedPath,
         outputs: OutputSpec,
     },
-    Opaque(
-        #[serde(
-            serialize_with = "serialize_store_path",
-            deserialize_with = "deserialize_store_path"
-        )]
-        StorePath,
-    ),
+    Opaque(StorePath),
 }
 
 #[cfg(any(test, feature = "test"))]

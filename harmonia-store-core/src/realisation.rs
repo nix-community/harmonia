@@ -70,63 +70,10 @@ impl FromStr for DrvOutput {
 #[serde(rename_all = "camelCase")]
 pub struct Realisation {
     pub id: DrvOutput,
-    #[serde(
-        serialize_with = "serialize_store_path_base",
-        deserialize_with = "deserialize_store_path_base"
-    )]
     pub out_path: StorePath,
     pub signatures: BTreeSet<Signature>,
-    #[serde(default, with = "store_path_map_as_base")]
+    #[serde(default)]
     pub dependent_realisations: BTreeMap<DrvOutput, StorePath>,
-}
-
-fn serialize_store_path_base<S>(path: &StorePath, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&path.to_base_path())
-}
-
-fn deserialize_store_path_base<'de, D>(deserializer: D) -> Result<StorePath, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    StorePath::from_base_path(&s).map_err(serde::de::Error::custom)
-}
-
-mod store_path_map_as_base {
-    use super::*;
-    use std::collections::BTreeMap;
-
-    pub fn serialize<S>(
-        map: &BTreeMap<DrvOutput, StorePath>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut s = serializer.serialize_map(Some(map.len()))?;
-        for (k, v) in map {
-            s.serialize_entry(&k.to_string(), &v.to_base_path())?;
-        }
-        s.end()
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<DrvOutput, StorePath>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let map: BTreeMap<String, String> = BTreeMap::deserialize(deserializer)?;
-        let mut result = BTreeMap::new();
-        for (k, v) in map {
-            let key = k.parse().map_err(serde::de::Error::custom)?;
-            let value = StorePath::from_base_path(&v).map_err(serde::de::Error::custom)?;
-            result.insert(key, value);
-        }
-        Ok(result)
-    }
 }
 
 pub type DrvOutputs = BTreeMap<DrvOutput, Realisation>;

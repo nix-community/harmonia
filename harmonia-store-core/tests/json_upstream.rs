@@ -4,6 +4,7 @@
 
 use harmonia_store_core::derived_path::{DerivedPath, OutputSpec, SingleDerivedPath};
 use harmonia_store_core::realisation::Realisation;
+use harmonia_store_core::store_path::StorePath;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -32,6 +33,16 @@ where
     let serialized = serde_json::to_value(&parsed).unwrap();
     let deserialized: T = serde_json::from_value(serialized).unwrap();
     assert_eq!(parsed, deserialized);
+}
+
+#[test]
+fn test_store_path_simple() {
+    test_upstream_json(
+        "store-path/simple.json",
+        "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv"
+            .parse::<StorePath>()
+            .unwrap(),
+    );
 }
 
 #[test]
