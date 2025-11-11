@@ -639,7 +639,7 @@ impl<H: CommonHash> Format for Base16<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        parse_with_base::<_, { hash::LARGEST_ALGORITHM.size() }>(
+        parse_with_base::<_, { Base::Hex.scratch_len(hash::LARGEST_ALGORITHM.size()) }>(
             algorithm,
             s,
             Base::Hex,
@@ -737,7 +737,7 @@ impl<H: CommonHash> Format for Base32<H> {
     type Hash = H;
 
     fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        parse_with_base::<_, { hash::LARGEST_ALGORITHM.size() }>(
+        parse_with_base::<_, { Base::NixBase32.scratch_len(hash::LARGEST_ALGORITHM.size()) }>(
             algorithm,
             s,
             Base::NixBase32,
