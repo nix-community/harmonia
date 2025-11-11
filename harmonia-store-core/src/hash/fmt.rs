@@ -2,7 +2,7 @@
 
 use std::{fmt as sfmt, str::FromStr};
 
-use data_encoding::{BASE64, DecodeError, DecodeKind, DecodePartial, HEXLOWER_PERMISSIVE};
+use data_encoding::{BASE64, DecodeError, DecodeKind};
 
 use thiserror::Error;
 
@@ -11,18 +11,10 @@ use crate::hash;
 use crate::hash::InvalidHashError;
 use crate::hash::UnknownAlgorithm;
 
+use crate::base::{decode_for_base, Base};
+
 mod private {
     pub trait Sealed {}
-}
-
-#[derive(derive_more::Display, Debug, PartialEq, Clone, Copy)]
-pub enum Base {
-    #[display("hex")]
-    Hex,
-    #[display("nixbase32")]
-    NixBase32,
-    #[display("base64")]
-    Base64,
 }
 
 #[derive(derive_more::Display, Debug, PartialEq, Clone, Copy)]
@@ -546,19 +538,6 @@ impl sfmt::UpperHex for hash::NarHash {
             write!(f, "{val:02X}")?;
         }
         Ok(())
-    }
-}
-
-/// Get the decode function for a given base encoding
-fn decode_for_base(
-    base: Base,
-) -> impl Fn(&[u8], &mut [u8]) -> Result<usize, DecodePartial> + 'static {
-    match base {
-        Base::Hex => {
-            move |input: &[u8], output: &mut [u8]| HEXLOWER_PERMISSIVE.decode_mut(input, output)
-        }
-        Base::NixBase32 => move |input: &[u8], output: &mut [u8]| base32::decode_mut(input, output),
-        Base::Base64 => move |input: &[u8], output: &mut [u8]| BASE64.decode_mut(input, output),
     }
 }
 

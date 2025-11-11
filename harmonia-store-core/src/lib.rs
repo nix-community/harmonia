@@ -62,6 +62,7 @@ pub mod wire {
     }
 }
 
+pub mod base;
 pub mod base32;
 pub mod derivation;
 pub mod derived_path;
