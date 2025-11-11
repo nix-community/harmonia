@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-pub use harmonia_store_core_legacy::hash::Hash;
+pub use harmonia_store_core::hash::Hash;
 pub use harmonia_store_core::store_path::StorePath;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

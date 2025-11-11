@@ -1,4 +1,4 @@
-use harmonia_store_core_legacy::Hash;
+use harmonia_store_core::hash::{Hash, fmt::Any};
 use harmonia_store_remote_legacy::{
     error::ProtocolError,
     protocol::{StorePath, ValidPathInfo},
@@ -138,9 +138,11 @@ impl StoreDb {
             .collect::<Result<BTreeSet<_>, _>>()?;
 
         // Parse the hash from database format
-        let parsed_hash = Hash::parse(hash.as_bytes()).map_err(|e| ProtocolError::DaemonError {
-            message: format!("Failed to parse hash from database '{hash}': {e}"),
-        })?;
+        let parsed_hash = hash.parse::<Any<Hash>>()
+            .map_err(|e| ProtocolError::DaemonError {
+                message: format!("Failed to parse hash from database '{hash}': {e}"),
+            })?
+            .into_hash();
 
         // Build ValidPathInfo
         let info = ValidPathInfo {

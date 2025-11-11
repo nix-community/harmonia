@@ -106,8 +106,8 @@ impl Serialize for ValidPathInfo {
         }
 
         // Serialize hash as hex string bytes (nix-daemon compatibility)
-        self.hash
-            .to_hex()
+        hex::encode(self.hash.digest_bytes())
+            .into_bytes()
             .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write hash")?;
@@ -192,9 +192,9 @@ impl Deserialize for ValidPathInfo {
         let raw_hash = hex::decode(&hash_str).map_err(|e| ProtocolError::DaemonError {
             message: format!("Failed to decode hex hash: {e}"),
         })?;
-        // Create legacy Hash from raw bytes
-        use harmonia_store_core_legacy::{Hash as LegacyHash, HashAlgo};
-        let hash = LegacyHash::new(HashAlgo::Sha256, raw_hash)
+        // Create Hash from raw bytes
+        use harmonia_store_core::hash::{Hash, Algorithm};
+        let hash = Hash::from_slice(Algorithm::SHA256, &raw_hash)
             .map_err(|e| ProtocolError::DaemonError {
                 message: format!("Failed to create hash: {e}"),
             })?;

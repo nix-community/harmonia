@@ -1082,6 +1082,7 @@ name = "harmonia-daemon"
 version = "2.1.0"
 dependencies = [
  "env_logger",
+ "harmonia-store-core",
  "harmonia-store-core-legacy",
  "harmonia-store-remote-legacy",
  "log",

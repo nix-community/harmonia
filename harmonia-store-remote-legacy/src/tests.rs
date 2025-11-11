@@ -4,7 +4,7 @@ use crate::protocol::{CURRENT_PROTOCOL_VERSION, StorePath, ValidPathInfo};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::{DaemonServer, RequestHandler};
 use harmonia_store_core::store_path::StoreDir;
-use harmonia_store_core_legacy::Hash;
+use harmonia_store_core::hash::{Hash, fmt::Any};
 use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
 use std::path::Path;
@@ -107,10 +107,10 @@ async fn test_serialization_roundtrip() {
 async fn test_valid_path_info_serialization() {
     let info = ValidPathInfo {
         deriver: Some(StorePath::from_bytes(b"00000000000000000000000000000000-abc-test.drv").unwrap()),
-        hash: Hash::parse(
-            b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-        )
-        .unwrap(),
+        hash: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+            .parse::<Any<Hash>>()
+            .unwrap()
+            .into_hash(),
         references: {
             let mut refs = BTreeSet::new();
             refs.insert(StorePath::from_bytes(b"11111111111111111111111111111111-ref1").unwrap());
@@ -169,7 +169,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
     assert!(path_info.is_some());
     let path_info = path_info.unwrap();
     assert!(path_info.nar_size > 0);
-    assert!(!path_info.hash.digest.is_empty());
+    assert!(!path_info.hash.digest_bytes().is_empty());
 
     // Test query_path_from_hash_part
     // StorePath::to_string() returns just "hash-name", so extract the hash part (first 32 chars)
@@ -251,7 +251,10 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
 
             let test_info = ValidPathInfo {
                 deriver: Some("xyz789abc123daf456ghi789jkl012mn-hello-2.12.1.drv".parse().unwrap()),
-                hash: Hash::parse(b"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap(),
+                hash: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                    .parse::<Any<Hash>>()
+                    .unwrap()
+                    .into_hash(),
                 references: {
                     let mut refs = BTreeSet::new();
                     refs.insert(StorePath::from_bytes(b"11111111111111111111111111111111-glibc-2.38").unwrap());
@@ -283,10 +286,10 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
 
             let bash_info = ValidPathInfo {
                 deriver: Some("mni345pqr678sxx901vwx234yz567abc-bash-5.2-p21.drv".parse().unwrap()),
-                hash: Hash::parse(
-                    b"sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
-                )
-                .unwrap(),
+                hash: "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
+                    .parse::<Any<Hash>>()
+                    .unwrap()
+                    .into_hash(),
                 references: {
                     let mut refs = BTreeSet::new();
                     refs.insert(StorePath::from_bytes(b"11111111111111111111111111111111-glibc-2.38").unwrap());
@@ -408,10 +411,10 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
             let test_path = "xack123abc456daf789ghi012jkl345m-test-package".parse().unwrap();
             let test_info = ValidPathInfo {
                 deriver: None,
-                hash: Hash::parse(
-                    b"sha256:1111111111111111111111111111111111111111111111111111111111111111",
-                )
-                .unwrap(),
+                hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                    .parse::<Any<Hash>>()
+                    .unwrap()
+                    .into_hash(),
                 references: BTreeSet::new(),
                 registration_time: 1700000000,
                 nar_size: 42,

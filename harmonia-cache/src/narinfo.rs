@@ -55,7 +55,7 @@ async fn query_narinfo(
             return Ok(None);
         }
     };
-    let nar_hash = path_info.hash.to_nix_base32();
+    let nar_hash = format!("{:#}", path_info.hash.as_base32()).into_bytes();
     let mut res = NarInfo {
         store_path: store_path.to_string().as_bytes().to_vec(),
         url: crate::build_bytes!(b"nar/", &nar_hash, b".nar?hash=", hash.as_bytes(),),
