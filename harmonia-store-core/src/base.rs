@@ -1,4 +1,5 @@
 use data_encoding::{BASE64, DecodePartial, HEXLOWER_PERMISSIVE};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::base32::{self};
 use crate::wire::base64_len;
@@ -11,6 +12,33 @@ pub enum Base {
     NixBase32,
     #[display("base64")]
     Base64,
+}
+
+impl Serialize for Base {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for Base {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "base16" | "hex" => Ok(Base::Hex),
+            "base64" => Ok(Base::Base64),
+            "nix32" | "nixbase32" => Ok(Base::NixBase32),
+            _ => Err(serde::de::Error::unknown_variant(
+                &s,
+                &["base16", "hex", "base64", "nix32", "nixbase32"],
+            )),
+        }
+    }
 }
 
 impl Base {
@@ -59,5 +87,30 @@ pub fn encode_for_base(base: Base) -> impl Fn(&[u8], &mut [u8]) + 'static {
         }
         Base::NixBase32 => move |input: &[u8], output: &mut [u8]| base32::encode_mut(input, output),
         Base::Base64 => move |input: &[u8], output: &mut [u8]| BASE64.encode_mut(input, output),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base_serde() {
+        // Test serialization
+        assert_eq!(serde_json::to_string(&Base::Hex).unwrap(), "\"hex\"");
+        assert_eq!(serde_json::to_string(&Base::NixBase32).unwrap(), "\"nixbase32\"");
+        assert_eq!(serde_json::to_string(&Base::Base64).unwrap(), "\"base64\"");
+
+        // Test deserialization with canonical names
+        assert_eq!(serde_json::from_str::<Base>("\"hex\"").unwrap(), Base::Hex);
+        assert_eq!(serde_json::from_str::<Base>("\"nixbase32\"").unwrap(), Base::NixBase32);
+        assert_eq!(serde_json::from_str::<Base>("\"base64\"").unwrap(), Base::Base64);
+
+        // Test deserialization with aliases
+        assert_eq!(serde_json::from_str::<Base>("\"base16\"").unwrap(), Base::Hex);
+        assert_eq!(serde_json::from_str::<Base>("\"nix32\"").unwrap(), Base::NixBase32);
+
+        // Test invalid format
+        assert!(serde_json::from_str::<Base>("\"invalid\"").is_err());
     }
 }

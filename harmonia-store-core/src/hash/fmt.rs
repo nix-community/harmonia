@@ -542,7 +542,7 @@ impl sfmt::UpperHex for hash::NarHash {
 }
 
 /// Helper function for parsing hash strings with a given base encoding
-fn parse_with_base<H, const SCRATCH_SIZE: usize>(
+pub(crate) fn parse_with_base<H, const SCRATCH_SIZE: usize>(
     algorithm: hash::Algorithm,
     s: &str,
     base: Base,

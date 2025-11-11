@@ -8,6 +8,7 @@ use derive_more::Display;
 #[cfg(any(test, feature = "test"))]
 use proptest_derive::Arbitrary;
 use ring::digest;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use crate::base::Base;
@@ -113,6 +114,25 @@ impl FromStr for Algorithm {
     }
 }
 
+impl Serialize for Algorithm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for Algorithm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Error, Debug, PartialEq, Eq, Clone, Copy)]
 #[error("hash has wrong length {length} != {} for hash type '{algorithm}'", algorithm.size())]
 pub struct InvalidHashError {
@@ -172,6 +192,47 @@ impl TryFrom<digest::Digest> for Hash {
     type Error = UnknownAlgorithm;
     fn try_from(digest: digest::Digest) -> Result<Self, Self::Error> {
         Ok(Hash::new(digest.algorithm().try_into()?, digest.as_ref()))
+    }
+}
+
+/// Raw hash representation for JSON serialization/deserialization
+#[derive(Serialize, Deserialize)]
+struct RawHash {
+    algorithm: Algorithm,
+    format: crate::base::Base,
+    hash: String,
+}
+
+impl Serialize for Hash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let raw = RawHash {
+            algorithm: self.algorithm,
+            format: crate::base::Base::Base64,
+            hash: format!("{:#}", self.as_base64()),
+        };
+        raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Hash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de;
+
+        let raw = RawHash::deserialize(deserializer)?;
+
+        // Use the existing parse_with_base function which handles buffer sizing correctly
+        crate::hash::fmt::parse_with_base::<Hash, { LARGEST_ALGORITHM.size() }>(
+            raw.algorithm,
+            &raw.hash,
+            raw.format,
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -575,5 +636,57 @@ mod unittests {
             Err(UnknownAlgorithm("SHA384".into())),
             Algorithm::try_from(&digest::SHA384)
         );
+    }
+
+    #[rstest]
+    #[case::sha256_base64(&SHA256_ABC, "sha256", "base64", "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=")]
+    #[case::sha256_hex(&SHA256_ABC, "sha256", "hex", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
+    #[case::sha256_nix32(&SHA256_ABC, "sha256", "nix32", "1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s")]
+    #[case::sha1_base64(&SHA1_ABC, "sha1", "base64", "qZk+NkcGgWq6PiVxeFDCbJzQ2J0=")]
+    #[case::sha1_hex(&SHA1_ABC, "sha1", "hex", "a9993e364706816aba3e25717850c26c9cd0d89d")]
+    #[case::sha1_nix32(&SHA1_ABC, "sha1", "nix32", "kpcd173cq987hw957sx6m0868wv3x6d9")]
+    fn test_serde_hash(
+        #[case] hash: &Hash,
+        #[case] algo_str: &str,
+        #[case] format_str: &str,
+        #[case] hash_str: &str,
+    ) {
+        // Test serialization
+        let json = serde_json::json!({
+            "algorithm": algo_str,
+            "format": format_str,
+            "hash": hash_str,
+        });
+
+        let serialized = serde_json::to_value(hash).unwrap();
+        assert_eq!(serialized["algorithm"], algo_str);
+        assert_eq!(serialized["format"], "base64"); // Always serializes as base64
+
+        // Test deserialization with different formats
+        let deserialized: Hash = serde_json::from_value(json).unwrap();
+        assert_eq!(&deserialized, hash);
+    }
+
+    #[test]
+    fn test_serde_hash_invalid_format() {
+        let json = serde_json::json!({
+            "algorithm": "sha256",
+            "format": "invalid",
+            "hash": "test",
+        });
+
+        let result: Result<Hash, _> = serde_json::from_value(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_serde_hash_missing_field() {
+        let json = serde_json::json!({
+            "algorithm": "sha256",
+            "format": "base64",
+        });
+
+        let result: Result<Hash, _> = serde_json::from_value(json);
+        assert!(result.is_err());
     }
 }
