@@ -557,9 +557,7 @@ fn decode_for_base(
         Base::Hex => {
             move |input: &[u8], output: &mut [u8]| HEXLOWER_PERMISSIVE.decode_mut(input, output)
         }
-        Base::NixBase32 => move |input: &[u8], output: &mut [u8]| {
-            base32::decode_mut(input, output).map(|()| output.len())
-        },
+        Base::NixBase32 => move |input: &[u8], output: &mut [u8]| base32::decode_mut(input, output),
         Base::Base64 => move |input: &[u8], output: &mut [u8]| BASE64.decode_mut(input, output),
     }
 }

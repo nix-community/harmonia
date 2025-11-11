@@ -35,53 +35,31 @@ pub fn encode_string(input: &[u8]) -> String {
 }
 
 pub fn encode_mut(input: &[u8], output: &mut [u8]) {
-    assert_eq!(output.len(), encode_len(input.len()));
+    // Encode directly into output buffer
+    NIX_BASE32.encode_mut(input, output);
 
-    // Encode using data-encoding
-    let encoded = NIX_BASE32.encode(input);
-    let encoded_bytes = encoded.as_bytes();
-
-    // Copy and reverse
-    output.copy_from_slice(encoded_bytes);
+    // Reverse for Nix format
     output.reverse();
 }
 
-pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<(), DecodePartial> {
-    assert_eq!(output.len(), decode_len(input.len()));
-
+pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartial> {
     // Reverse the input for decoding
     let mut reversed = input.to_vec();
     reversed.reverse();
 
     // Decode using data-encoding
-    match NIX_BASE32.decode_mut(&reversed, output) {
-        Ok(len) => {
-            if len != output.len() {
-                Err(DecodePartial {
-                    read: 0,
-                    written: 0,
-                    error: DecodeError {
-                        position: 0,
-                        kind: DecodeKind::Length,
-                    },
-                })
-            } else {
-                Ok(())
-            }
+    NIX_BASE32.decode_mut(&reversed, output).map_err(|err| {
+        // Adjust error position to account for reversal
+        let adjusted_pos = input.len() - err.error.position - 1;
+        DecodePartial {
+            read: adjusted_pos / 8 * 8,
+            written: adjusted_pos / 8 * 5,
+            error: DecodeError {
+                position: adjusted_pos,
+                kind: err.error.kind,
+            },
         }
-        Err(err) => {
-            // Adjust error position to account for reversal
-            let adjusted_pos = input.len() - err.error.position - 1;
-            Err(DecodePartial {
-                read: adjusted_pos / 8 * 8,
-                written: adjusted_pos / 8 * 5,
-                error: DecodeError {
-                    position: adjusted_pos,
-                    kind: err.error.kind,
-                },
-            })
-        }
-    }
+    })
 }
 
 #[cfg(test)]
@@ -239,7 +217,7 @@ mod unittests {
         assert_eq!(output, expected);
     }
 
-    fn fail(pos: usize, kind: DecodeKind) -> Result<(), DecodePartial> {
+    fn fail(pos: usize, kind: DecodeKind) -> Result<usize, DecodePartial> {
         Err(DecodePartial {
             read: pos / 8 * 8,
             written: pos / 8 * 5,
@@ -260,7 +238,7 @@ mod unittests {
     #[case::invalid_char_4("czz0|", fail(4, DecodeKind::Symbol))]
     #[case::invalid_char_10("czzzzzzzzz|0", fail(10, DecodeKind::Symbol))]
     #[case::invalid_char_chunk_2("c|zzzzzzzzz0", fail(1, DecodeKind::Symbol))]
-    fn test_decode_bytes_fail(#[case] data: &str, #[case] expected: Result<(), DecodePartial>) {
+    fn test_decode_bytes_fail(#[case] data: &str, #[case] expected: Result<usize, DecodePartial>) {
         let mut output = vec![0u8; decode_len(data.len())];
         assert_eq!(decode_mut(data.as_bytes(), &mut output), expected);
     }
