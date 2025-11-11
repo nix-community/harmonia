@@ -11,9 +11,11 @@ impl Serialize for StorePath {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &harmonia_store_core::store_path::StoreDir,
     ) -> Result<(), ProtocolError> {
-        // Serialize as "hash-name" string bytes
-        self.to_string().as_bytes().serialize(writer, version).await
+        // Serialize as full path "/nix/store/hash-name"
+        let full_path = format!("{}/{}", store_dir, self);
+        full_path.as_bytes().serialize(writer, version, store_dir).await
     }
 }
 
@@ -21,9 +23,10 @@ impl Deserialize for StorePath {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &harmonia_store_core::store_path::StoreDir,
     ) -> Result<Self, ProtocolError> {
         // Read length
-        let len = u64::deserialize(reader, version)
+        let len = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read StorePath length")?;
 
@@ -43,9 +46,13 @@ impl Deserialize for StorePath {
             .io_context("Failed to read StorePath data")?;
 
         buf.truncate(len as usize);
-        // from_bytes now returns Result, so map_err works
-        StorePath::from_bytes(&buf).map_err(|e| ProtocolError::DaemonError {
-            message: format!("Failed to parse StorePath from bytes: {e}"),
+
+        // Parse the full path using store_dir to extract just the hash-name
+        let path_str = std::str::from_utf8(&buf).map_err(|e| ProtocolError::DaemonError {
+            message: format!("StorePath is not valid UTF-8: {e}"),
+        })?;
+        store_dir.parse(path_str).map_err(|e| ProtocolError::DaemonError {
+            message: format!("Failed to parse StorePath: {e}"),
         })
     }
 }
@@ -54,8 +61,9 @@ impl Deserialize for Vec<StorePath> {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &harmonia_store_core::store_path::StoreDir,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version)
+        let len = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read Vec<StorePath> length")?;
 
@@ -69,7 +77,7 @@ impl Deserialize for Vec<StorePath> {
         let mut result = Vec::with_capacity(len as usize);
         for i in 0..len {
             result.push(
-                StorePath::deserialize(reader, version)
+                StorePath::deserialize(reader, version, store_dir)
                     .await
                     .io_context(format!("Failed to read Vec<StorePath> item {i}"))?,
             );
@@ -83,15 +91,16 @@ impl Serialize for ValidPathInfo {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &harmonia_store_core::store_path::StoreDir,
     ) -> Result<(), ProtocolError> {
         // Serialize deriver (empty bytes if None)
         match &self.deriver {
             None => (&[] as &[u8])
-                .serialize(writer, version)
+                .serialize(writer, version, store_dir)
                 .await
                 .io_context("Failed to write empty deriver")?,
             Some(path) => path
-                .serialize(writer, version)
+                .serialize(writer, version, store_dir)
                 .await
                 .io_context("Failed to write deriver")?,
         }
@@ -99,48 +108,48 @@ impl Serialize for ValidPathInfo {
         // Serialize hash as hex string bytes (nix-daemon compatibility)
         self.hash
             .to_hex()
-            .serialize(writer, version)
+            .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write hash")?;
 
         // Serialize references
         self.references
-            .serialize(writer, version)
+            .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write references")?;
 
         // Serialize registration time
         self.registration_time
-            .serialize(writer, version)
+            .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write registration_time")?;
 
         // Serialize nar size
         self.nar_size
-            .serialize(writer, version)
+            .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write nar_size")?;
 
         // Serialize ultimate flag
         self.ultimate
-            .serialize(writer, version)
+            .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write ultimate")?;
 
         // Serialize signatures
         self.signatures
-            .serialize(writer, version)
+            .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write signatures")?;
 
         // Serialize content address (empty string if None)
         match &self.content_address {
             None => <Vec<u8>>::new()
-                .serialize(writer, version)
+                .serialize(writer, version, store_dir)
                 .await
                 .io_context("Failed to write empty content_address")?,
             Some(ca) => ca
-                .serialize(writer, version)
+                .serialize(writer, version, store_dir)
                 .await
                 .io_context("Failed to write content_address")?,
         }
@@ -153,23 +162,27 @@ impl Deserialize for ValidPathInfo {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &harmonia_store_core::store_path::StoreDir,
     ) -> Result<Self, ProtocolError> {
         // Deserialize deriver
-        let deriver_bytes = Vec::<u8>::deserialize(reader, version)
+        let deriver_bytes = Vec::<u8>::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read deriver")?;
         let deriver = if deriver_bytes.is_empty() {
             None
         } else {
+            let deriver_str = std::str::from_utf8(&deriver_bytes).map_err(|e| ProtocolError::DaemonError {
+                message: format!("Deriver StorePath is not valid UTF-8: {e}"),
+            })?;
             Some(
-                StorePath::from_bytes(&deriver_bytes).map_err(|e| ProtocolError::DaemonError {
+                store_dir.parse(deriver_str).map_err(|e| ProtocolError::DaemonError {
                     message: format!("Failed to parse deriver StorePath: {e}"),
                 })?,
             )
         };
 
         // Deserialize hash (comes as hex string bytes from nix-daemon)
-        let hash_bytes = Vec::<u8>::deserialize(reader, version)
+        let hash_bytes = Vec::<u8>::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read hash")?;
         // Decode hex to raw bytes and create Hash (assuming SHA256)
@@ -187,32 +200,32 @@ impl Deserialize for ValidPathInfo {
             })?;
 
         // Deserialize references
-        let references = BTreeSet::<StorePath>::deserialize(reader, version)
+        let references = BTreeSet::<StorePath>::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read references")?;
 
         // Deserialize registration time
-        let registration_time = u64::deserialize(reader, version)
+        let registration_time = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read registration_time")?;
 
         // Deserialize nar size
-        let nar_size = u64::deserialize(reader, version)
+        let nar_size = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read nar_size")?;
 
         // Deserialize ultimate flag
-        let ultimate = bool::deserialize(reader, version)
+        let ultimate = bool::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read ultimate")?;
 
         // Deserialize signatures
-        let signatures = Vec::<Vec<u8>>::deserialize(reader, version)
+        let signatures = Vec::<Vec<u8>>::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read signatures")?;
 
         // Deserialize content address
-        let ca = <Vec<u8>>::deserialize(reader, version)
+        let ca = <Vec<u8>>::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read content_address")?;
         let content_address = if ca.is_empty() { None } else { Some(ca) };

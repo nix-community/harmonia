@@ -4,6 +4,7 @@ pub mod handler;
 pub use handler::RequestHandler;
 
 use crate::error::{IoErrorContext, ProtocolError};
+use harmonia_store_core::store_path::StoreDir;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::UnixListener;
@@ -13,6 +14,7 @@ use tokio::task::JoinHandle;
 pub struct DaemonServer<H: RequestHandler> {
     handler: H,
     socket_path: PathBuf,
+    store_dir: StoreDir,
     connection_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
@@ -21,6 +23,7 @@ impl<H: RequestHandler + Clone + 'static> DaemonServer<H> {
         Self {
             handler,
             socket_path,
+            store_dir: StoreDir::default(),
             connection_handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -61,9 +64,10 @@ impl<H: RequestHandler + Clone + 'static> DaemonServer<H> {
                 .await
                 .io_context("Failed to accept connection")?;
             let handler = self.handler.clone();
+            let store_dir = self.store_dir.clone();
 
             let handle = tokio::spawn(async move {
-                if let Err(e) = connection::handle_connection(stream, handler).await {
+                if let Err(e) = connection::handle_connection(stream, handler, store_dir).await {
                     eprintln!("Connection error: {e}");
                 }
             });

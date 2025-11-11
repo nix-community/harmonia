@@ -32,11 +32,11 @@ async fn test_serialization_roundtrip() {
     // Test u64
     let num: u64 = 42;
     let mut buf = Vec::new();
-    num.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+    num.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = u64::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+    let deserialized = u64::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     assert_eq!(num, deserialized);
@@ -44,11 +44,11 @@ async fn test_serialization_roundtrip() {
     // Test string
     let s = "hello world".to_string();
     let mut buf = Vec::new();
-    s.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+    s.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = String::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+    let deserialized = String::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     assert_eq!(s, deserialized);
@@ -57,7 +57,7 @@ async fn test_serialization_roundtrip() {
     let s = "test"; // 4 bytes, needs 4 bytes padding
     let mut buf = Vec::new();
     s.to_string()
-        .serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+        .serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     assert_eq!(buf.len(), 8 + 8); // 8 bytes for length + 8 bytes for padded string
@@ -65,11 +65,11 @@ async fn test_serialization_roundtrip() {
     // Test bool
     let b = true;
     let mut buf = Vec::new();
-    b.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+    b.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = bool::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+    let deserialized = bool::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     assert_eq!(b, deserialized);
@@ -77,11 +77,11 @@ async fn test_serialization_roundtrip() {
     // Test Option<String>
     let opt: Option<String> = Some("test".to_string());
     let mut buf = Vec::new();
-    opt.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+    opt.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = Option::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+    let deserialized = Option::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     assert_eq!(opt, deserialized);
@@ -89,11 +89,11 @@ async fn test_serialization_roundtrip() {
     // Test None
     let opt: Option<String> = None;
     let mut buf = Vec::new();
-    opt.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+    opt.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = Option::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+    let deserialized = Option::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     assert_eq!(opt, deserialized);
@@ -101,12 +101,12 @@ async fn test_serialization_roundtrip() {
     // Test Vec<Vec<u8>>
     let vec = vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()];
     let mut buf = Vec::new();
-    vec.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+    vec.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
     let deserialized =
-        <Vec<Vec<u8>> as Deserialize>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+        <Vec<Vec<u8>> as Deserialize>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
             .await
             .unwrap();
     assert_eq!(vec, deserialized);
@@ -134,11 +134,11 @@ async fn test_valid_path_info_serialization() {
     };
 
     let mut buf = Vec::new();
-    info.serialize(&mut buf, CURRENT_PROTOCOL_VERSION)
+    info.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = ValidPathInfo::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION)
+    let deserialized = ValidPathInfo::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
         .await
         .unwrap();
 

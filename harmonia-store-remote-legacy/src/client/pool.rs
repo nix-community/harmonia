@@ -87,6 +87,7 @@ pub struct PooledConnectionGuard {
 pub struct ConnectionPool {
     state: Arc<Mutex<PoolState>>,
     socket_path: PathBuf,
+    store_dir: harmonia_store_core::store_path::StoreDir,
     max_idle_time: Duration,
     connection_timeout: Duration,
     metrics: Option<Arc<ClientMetrics>>,
@@ -95,7 +96,7 @@ pub struct ConnectionPool {
 
 impl ConnectionPool {
     /// Create a new pool with given configuration
-    pub fn new(socket_path: PathBuf, config: PoolConfig) -> Self {
+    pub fn new(socket_path: PathBuf, store_dir: harmonia_store_core::store_path::StoreDir, config: PoolConfig) -> Self {
         assert!(config.max_size > 0, "Capacity must be positive");
 
         let state = PoolState {
@@ -110,6 +111,7 @@ impl ConnectionPool {
         Self {
             state: Arc::new(Mutex::new(state)),
             socket_path,
+            store_dir,
             max_idle_time: config.max_idle_time,
             connection_timeout: config.connection_timeout,
             metrics: config.metrics,
@@ -271,7 +273,7 @@ impl ConnectionPool {
     }
 
     async fn create_new_connection(&self) -> Result<PooledConnection, ProtocolError> {
-        let connect_fut = Connection::connect(&self.socket_path);
+        let connect_fut = Connection::connect(&self.socket_path, self.store_dir.clone());
         let (connection, version, _features) =
             tokio::time::timeout(self.connection_timeout, connect_fut)
                 .await

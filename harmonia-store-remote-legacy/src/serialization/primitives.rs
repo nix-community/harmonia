@@ -1,6 +1,7 @@
 use crate::error::{IoErrorContext, ProtocolError};
 use crate::protocol::{MAX_STRING_LIST_SIZE, MAX_STRING_SIZE, ProtocolVersion};
 use crate::serialization::{Deserialize, Serialize};
+use harmonia_store_core::store_path::StoreDir;
 use std::collections::BTreeSet;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -9,6 +10,7 @@ impl Serialize for u64 {
         &self,
         writer: &mut W,
         _version: ProtocolVersion,
+        _store_dir: &StoreDir,
     ) -> Result<(), ProtocolError> {
         writer
             .write_all(&self.to_le_bytes())
@@ -22,6 +24,7 @@ impl Deserialize for u64 {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         _version: ProtocolVersion,
+        _store_dir: &StoreDir,
     ) -> Result<Self, ProtocolError> {
         let mut buf = [0; 8];
         reader
@@ -37,8 +40,9 @@ impl Serialize for bool {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<(), ProtocolError> {
-        (*self as u64).serialize(writer, version).await
+        (*self as u64).serialize(writer, version, store_dir).await
     }
 }
 
@@ -46,8 +50,9 @@ impl Deserialize for bool {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<Self, ProtocolError> {
-        let value = u64::deserialize(reader, version)
+        let value = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read bool")?;
         Ok(value != 0)
@@ -59,9 +64,10 @@ impl Serialize for String {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<(), ProtocolError> {
         let len = self.len() as u64;
-        len.serialize(writer, version)
+        len.serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write string length")?;
         writer
@@ -86,8 +92,9 @@ impl Deserialize for String {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version)
+        let len = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read string length")?;
 
@@ -115,9 +122,10 @@ impl Serialize for &[u8] {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<(), ProtocolError> {
         let len = self.len() as u64;
-        len.serialize(writer, version)
+        len.serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write bytes length")?;
         writer
@@ -143,8 +151,9 @@ impl Serialize for Vec<u8> {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<(), ProtocolError> {
-        self.as_slice().serialize(writer, version).await
+        self.as_slice().serialize(writer, version, store_dir).await
     }
 }
 
@@ -152,8 +161,9 @@ impl Deserialize for Vec<u8> {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version)
+        let len = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read bytes length")?;
 
@@ -182,13 +192,14 @@ impl<T: Serialize> Serialize for Vec<T> {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<(), ProtocolError> {
         (self.len() as u64)
-            .serialize(writer, version)
+            .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write Vec length")?;
         for (i, item) in self.iter().enumerate() {
-            item.serialize(writer, version)
+            item.serialize(writer, version, store_dir)
                 .await
                 .io_context(format!("Failed to write Vec item {i}"))?;
         }
@@ -200,8 +211,9 @@ impl Deserialize for Vec<Vec<u8>> {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version)
+        let len = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read Vec<Vec<u8>> length")?;
 
@@ -215,7 +227,7 @@ impl Deserialize for Vec<Vec<u8>> {
         let mut result = Vec::with_capacity(len as usize);
         for i in 0..len {
             result.push(
-                Vec::<u8>::deserialize(reader, version)
+                Vec::<u8>::deserialize(reader, version, store_dir)
                     .await
                     .io_context(format!("Failed to read Vec<Vec<u8>> item {i}"))?,
             );
@@ -229,18 +241,19 @@ impl<T: Serialize> Serialize for Option<T> {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<(), ProtocolError> {
         match self {
             None => 0u64
-                .serialize(writer, version)
+                .serialize(writer, version, store_dir)
                 .await
                 .io_context("Failed to write Option None discriminant"),
             Some(value) => {
-                1u64.serialize(writer, version)
+                1u64.serialize(writer, version, store_dir)
                     .await
                     .io_context("Failed to write Option Some discriminant")?;
                 value
-                    .serialize(writer, version)
+                    .serialize(writer, version, store_dir)
                     .await
                     .io_context("Failed to write Option value")
             }
@@ -252,15 +265,16 @@ impl<T: Deserialize> Deserialize for Option<T> {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<Self, ProtocolError> {
-        let present = u64::deserialize(reader, version)
+        let present = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read Option discriminant")?;
         if present == 0 {
             Ok(None)
         } else {
             Ok(Some(
-                T::deserialize(reader, version)
+                T::deserialize(reader, version, store_dir)
                     .await
                     .io_context("Failed to read Option value")?,
             ))
@@ -273,13 +287,14 @@ impl<T: Serialize> Serialize for BTreeSet<T> {
         &self,
         writer: &mut W,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<(), ProtocolError> {
         (self.len() as u64)
-            .serialize(writer, version)
+            .serialize(writer, version, store_dir)
             .await
             .io_context("Failed to write BTreeSet length")?;
         for (i, item) in self.iter().enumerate() {
-            item.serialize(writer, version)
+            item.serialize(writer, version, store_dir)
                 .await
                 .io_context(format!("Failed to write BTreeSet item {i}"))?;
         }
@@ -291,8 +306,9 @@ impl<T: Deserialize + Ord> Deserialize for BTreeSet<T> {
     async fn deserialize<R: AsyncRead + Unpin>(
         reader: &mut R,
         version: ProtocolVersion,
+        store_dir: &StoreDir,
     ) -> Result<Self, ProtocolError> {
-        let len = u64::deserialize(reader, version)
+        let len = u64::deserialize(reader, version, store_dir)
             .await
             .io_context("Failed to read BTreeSet length")?;
 
@@ -305,7 +321,7 @@ impl<T: Deserialize + Ord> Deserialize for BTreeSet<T> {
 
         let mut result = BTreeSet::new();
         for i in 0..len {
-            let item = T::deserialize(reader, version)
+            let item = T::deserialize(reader, version, store_dir)
                 .await
                 .io_context(format!("Failed to read BTreeSet item {i}"))?;
             result.insert(item);

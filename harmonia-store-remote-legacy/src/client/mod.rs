@@ -18,6 +18,7 @@ pub use pool::PoolConfig;
 #[derive(Clone)]
 pub struct DaemonClient {
     pool: Arc<ConnectionPool>,
+    store_dir: harmonia_store_core::store_path::StoreDir,
 }
 
 impl DaemonClient {
@@ -31,8 +32,10 @@ impl DaemonClient {
         path: &Path,
         pool_config: PoolConfig,
     ) -> Result<Self, ProtocolError> {
-        let pool = Arc::new(ConnectionPool::new(path.to_path_buf(), pool_config));
-        Ok(Self { pool })
+        // Use default store directory ("/nix/store")
+        let store_dir = harmonia_store_core::store_path::StoreDir::default();
+        let pool = Arc::new(ConnectionPool::new(path.to_path_buf(), store_dir.clone(), pool_config));
+        Ok(Self { pool, store_dir })
     }
 
     pub async fn query_path_info(
@@ -90,9 +93,9 @@ impl DaemonClient {
                 let (conn, version) = guard.connection_and_version();
 
                 conn.send_opcode(opcode).await?;
-                request.serialize(conn, version).await?;
+                request.serialize(conn, version, &self.store_dir).await?;
                 conn.process_stderr().await?;
-                Resp::deserialize(conn, version).await
+                Resp::deserialize(conn, version, &self.store_dir).await
             }
             .await;
 
