@@ -45,6 +45,7 @@ hex-literal = "0.4"
 harmonia-protocol = { path = "../harmonia-protocol", features = ["test"] }
 test-log = "0.2"
 rstest_reuse = "0.7"
+paste = "1.0"
 
 [features]
 test = ["proptest", "proptest-derive", "test-strategy"]
