@@ -39,7 +39,7 @@ impl NixSerialize for BasicDerivation {
             writer.write_value(output_name).await?;
             write_derivation_output(output, self.drv_path.name(), output_name, &mut writer).await?;
         }
-        writer.write_value(&self.input_srcs).await?;
+        writer.write_value(&self.inputs).await?;
         writer.write_value(&self.platform).await?;
         writer.write_value(&self.builder).await?;
         writer.write_value(&self.args).await?;
@@ -65,7 +65,7 @@ impl NixDeserialize for BasicDerivation {
                 outputs.insert(output_name, output);
             }
 
-            let input_srcs = reader.read_value().await?;
+            let inputs = reader.read_value().await?;
             let platform = reader.read_value().await?;
             let builder = reader.read_value().await?;
             let args = reader.read_value().await?;
@@ -74,7 +74,7 @@ impl NixDeserialize for BasicDerivation {
             Ok(Some(BasicDerivation {
                 drv_path,
                 outputs,
-                input_srcs,
+                inputs,
                 platform,
                 builder,
                 args,

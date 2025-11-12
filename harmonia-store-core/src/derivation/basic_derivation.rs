@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(test)]
 use proptest::prelude::{Arbitrary, BoxedStrategy};
@@ -8,16 +8,24 @@ use crate::store_path::{StorePath, StorePathSet};
 
 use super::DerivationOutputs;
 
+pub struct DerivationInputs {
+    pub srcs: StorePathSet,
+    pub drvs: BTreeMap<StorePath, BTreeSet<String>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BasicDerivation {
+pub struct DerivationT<Inputs> {
     pub drv_path: StorePath,
     pub outputs: DerivationOutputs,
-    pub input_srcs: StorePathSet,
+    pub inputs: Inputs,
     pub platform: ByteString,
     pub builder: ByteString,
     pub args: Vec<ByteString>,
     pub env: BTreeMap<ByteString, ByteString>,
 }
+
+pub type BasicDerivation = DerivationT<StorePathSet>;
+pub type Derivation = DerivationT<DerivationInputs>;
 
 #[cfg(test)]
 pub mod arbitrary {
@@ -42,7 +50,7 @@ pub mod arbitrary {
         pub fn arb_basic_derivation()
         (
             outputs in arb_derivation_outputs(1..15),
-            input_srcs in any::<StorePathSet>(),
+            inputs in any::<StorePathSet>(),
             platform in arb_byte_string(),
             builder in arb_byte_string(),
             args in proptest::collection::vec(arb_byte_string(), SizeRange::default()),
@@ -50,8 +58,8 @@ pub mod arbitrary {
             drv_path in any::<StorePath>()
         ) -> BasicDerivation
         {
-            BasicDerivation {
-                outputs, input_srcs, platform, builder, args, env, drv_path,
+            DerivationT {
+                outputs, inputs, platform, builder, args, env, drv_path,
             }
         }
     }
