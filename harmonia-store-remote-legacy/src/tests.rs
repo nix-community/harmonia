@@ -3,8 +3,8 @@ use crate::error::ProtocolError;
 use crate::protocol::{CURRENT_PROTOCOL_VERSION, StorePath, ValidPathInfo};
 use crate::serialization::{Deserialize, Serialize};
 use crate::server::{DaemonServer, RequestHandler};
-use harmonia_store_core::store_path::StoreDir;
 use harmonia_store_core::hash::{Hash, fmt::Any};
+use harmonia_store_core::store_path::StoreDir;
 use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
 use std::path::Path;
@@ -23,32 +23,52 @@ async fn test_serialization_roundtrip() {
     // Test u64
     let num: u64 = 42;
     let mut buf = Vec::new();
-    num.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    num.serialize(
+        &mut buf,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = u64::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    let deserialized = u64::deserialize(
+        &mut cursor,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(num, deserialized);
 
     // Test string
     let s = "hello world".to_string();
     let mut buf = Vec::new();
-    s.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    s.serialize(
+        &mut buf,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = String::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    let deserialized = String::deserialize(
+        &mut cursor,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(s, deserialized);
 
     // Test string padding
     let s = "test"; // 4 bytes, needs 4 bytes padding
     let mut buf = Vec::new();
     s.to_string()
-        .serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
+        .serialize(
+            &mut buf,
+            CURRENT_PROTOCOL_VERSION,
+            &harmonia_store_core::store_path::StoreDir::default(),
+        )
         .await
         .unwrap();
     assert_eq!(buf.len(), 8 + 8); // 8 bytes for length + 8 bytes for padded string
@@ -56,57 +76,90 @@ async fn test_serialization_roundtrip() {
     // Test bool
     let b = true;
     let mut buf = Vec::new();
-    b.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    b.serialize(
+        &mut buf,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = bool::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    let deserialized = bool::deserialize(
+        &mut cursor,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(b, deserialized);
 
     // Test Option<String>
     let opt: Option<String> = Some("test".to_string());
     let mut buf = Vec::new();
-    opt.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    opt.serialize(
+        &mut buf,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = Option::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    let deserialized = Option::<String>::deserialize(
+        &mut cursor,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(opt, deserialized);
 
     // Test None
     let opt: Option<String> = None;
     let mut buf = Vec::new();
-    opt.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    opt.serialize(
+        &mut buf,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = Option::<String>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    let deserialized = Option::<String>::deserialize(
+        &mut cursor,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(opt, deserialized);
 
     // Test Vec<Vec<u8>>
     let vec = vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()];
     let mut buf = Vec::new();
-    vec.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    vec.serialize(
+        &mut buf,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized =
-        <Vec<Vec<u8>> as Deserialize>::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-            .await
-            .unwrap();
+    let deserialized = <Vec<Vec<u8>> as Deserialize>::deserialize(
+        &mut cursor,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(vec, deserialized);
 }
 
 #[tokio::test]
 async fn test_valid_path_info_serialization() {
     let info = ValidPathInfo {
-        deriver: Some(StorePath::from_bytes(b"00000000000000000000000000000000-abc-test.drv").unwrap()),
+        deriver: Some(
+            StorePath::from_bytes(b"00000000000000000000000000000000-abc-test.drv").unwrap(),
+        ),
         hash: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
             .parse::<Any<Hash>>()
             .unwrap()
@@ -125,13 +178,21 @@ async fn test_valid_path_info_serialization() {
     };
 
     let mut buf = Vec::new();
-    info.serialize(&mut buf, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    info.serialize(
+        &mut buf,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
     let mut cursor = Cursor::new(buf);
-    let deserialized = ValidPathInfo::deserialize(&mut cursor, CURRENT_PROTOCOL_VERSION, &harmonia_store_core::store_path::StoreDir::default())
-        .await
-        .unwrap();
+    let deserialized = ValidPathInfo::deserialize(
+        &mut cursor,
+        CURRENT_PROTOCOL_VERSION,
+        &harmonia_store_core::store_path::StoreDir::default(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(info, deserialized);
 }
@@ -173,11 +234,7 @@ async fn test_daemon_operations(socket_path: &Path) -> Result<(), Box<dyn std::e
 
     // Test query_path_from_hash_part
     // StorePath::to_string() returns just "hash-name", so extract the hash part (first 32 chars)
-    let hash_part = store_path
-        .to_string()
-        .chars()
-        .take(32)
-        .collect::<String>();
+    let hash_part = store_path.to_string().chars().take(32).collect::<String>();
 
     let found_path = client
         .query_path_from_hash_part(hash_part.as_bytes())
@@ -247,7 +304,9 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             // Add some test data
-            let test_path: StorePath = "abc123daf456ghi789jkl012mnx345pq-hello-2.12.1".parse().unwrap();
+            let test_path: StorePath = "abc123daf456ghi789jkl012mnx345pq-hello-2.12.1"
+                .parse()
+                .unwrap();
 
             let test_info = ValidPathInfo {
                 deriver: Some("xyz789abc123daf456ghi789jkl012mn-hello-2.12.1.drv".parse().unwrap()),
@@ -273,28 +332,41 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
                 ),
             };
 
-            handler
-                .store_paths
-                .insert(test_path.clone(), test_info);
+            handler.store_paths.insert(test_path.clone(), test_info);
             handler.hash_to_path.insert(
                 b"abc123def456ghi789jkl012mno345pq".to_vec(),
                 test_path.clone(),
             );
 
             // Add another test path
-            let bash_path: StorePath = "qrs456xiv789wxy012abc345daf678gh-bash-5.2-p21".parse().unwrap();
+            let bash_path: StorePath = "qrs456xiv789wxy012abc345daf678gh-bash-5.2-p21"
+                .parse()
+                .unwrap();
 
             let bash_info = ValidPathInfo {
-                deriver: Some("mni345pqr678sxx901vwx234yz567abc-bash-5.2-p21.drv".parse().unwrap()),
+                deriver: Some(
+                    "mni345pqr678sxx901vwx234yz567abc-bash-5.2-p21.drv"
+                        .parse()
+                        .unwrap(),
+                ),
                 hash: "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
                     .parse::<Any<Hash>>()
                     .unwrap()
                     .into_hash(),
                 references: {
                     let mut refs = BTreeSet::new();
-                    refs.insert(StorePath::from_bytes(b"11111111111111111111111111111111-glibc-2.38").unwrap());
-                    refs.insert(StorePath::from_bytes(b"33333333333333333333333333333333-readline-8.2p7").unwrap());
-                    refs.insert(StorePath::from_bytes(b"44444444444444444444444444444444-ncurses-6.4").unwrap());
+                    refs.insert(
+                        StorePath::from_bytes(b"11111111111111111111111111111111-glibc-2.38")
+                            .unwrap(),
+                    );
+                    refs.insert(
+                        StorePath::from_bytes(b"33333333333333333333333333333333-readline-8.2p7")
+                            .unwrap(),
+                    );
+                    refs.insert(
+                        StorePath::from_bytes(b"44444444444444444444444444444444-ncurses-6.4")
+                            .unwrap(),
+                    );
                     refs
                 },
                 registration_time: 1700000100,
@@ -304,9 +376,7 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
                 content_address: None,
             };
 
-            handler
-                .store_paths
-                .insert(bash_path.clone(), bash_info);
+            handler.store_paths.insert(bash_path.clone(), bash_info);
             handler
                 .hash_to_path
                 .insert(b"qrs456tuv789wxy012abc345def678gh".to_vec(), bash_path);
@@ -355,7 +425,9 @@ async fn test_custom_daemon_server() -> Result<(), Box<dyn std::error::Error>> {
     let client = wait_for_daemon_server(&socket_path, Duration::from_secs(5)).await?;
 
     // Test valid path operations
-    let hello_path: StorePath = "abc123daf456ghi789jkl012mnx345pq-hello-2.12.1".parse().unwrap();
+    let hello_path: StorePath = "abc123daf456ghi789jkl012mnx345pq-hello-2.12.1"
+        .parse()
+        .unwrap();
     assert!(client.is_valid_path(&hello_path).await?);
 
     let path_info = client.query_path_info(&hello_path).await?;
@@ -408,7 +480,9 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
             };
 
             // Add test data
-            let test_path = "xack123abc456daf789ghi012jkl345m-test-package".parse().unwrap();
+            let test_path = "xack123abc456daf789ghi012jkl345m-test-package"
+                .parse()
+                .unwrap();
             let test_info = ValidPathInfo {
                 deriver: None,
                 hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -423,9 +497,7 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
                 content_address: None,
             };
 
-            handler
-                .store_paths
-                .insert(test_path, test_info);
+            handler.store_paths.insert(test_path, test_info);
 
             handler
         }
@@ -520,7 +592,9 @@ async fn test_connection_retry_with_server_restart() -> Result<(), Box<dyn std::
     dbg!("Client connected");
 
     // Make some requests to establish connections in the pool
-    let test_path: StorePath = "xack123abc456daf789ghi012jkl345m-test-package".parse().unwrap();
+    let test_path: StorePath = "xack123abc456daf789ghi012jkl345m-test-package"
+        .parse()
+        .unwrap();
 
     // Make some concurrent requests to exercise the connection pool
     let client1 = client.clone();

@@ -292,7 +292,9 @@ test_upstream_json!(
     {
         use harmonia_store_core::derivation::DerivationOutput;
         DerivationOutput::InputAddressed(
-            "c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-drv-name-output-name".parse().unwrap()
+            "c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-drv-name-output-name"
+                .parse()
+                .unwrap(),
         )
     }
 );
@@ -302,12 +304,10 @@ test_upstream_json!(
     libstore_test_data_path("derivation/output-caFixedFlat.json"),
     {
         use harmonia_store_core::derivation::DerivationOutput;
-        DerivationOutput::CAFixed(
-            ContentAddress::Flat(Hash::new(
-                Algorithm::SHA256,
-                &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
-            ))
-        )
+        DerivationOutput::CAFixed(ContentAddress::Flat(Hash::new(
+            Algorithm::SHA256,
+            &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
+        )))
     }
 );
 
@@ -316,12 +316,10 @@ test_upstream_json!(
     libstore_test_data_path("derivation/output-caFixedNAR.json"),
     {
         use harmonia_store_core::derivation::DerivationOutput;
-        DerivationOutput::CAFixed(
-            ContentAddress::Recursive(Hash::new(
-                Algorithm::SHA256,
-                &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
-            ))
-        )
+        DerivationOutput::CAFixed(ContentAddress::Recursive(Hash::new(
+            Algorithm::SHA256,
+            &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
+        )))
     }
 );
 
@@ -331,14 +329,14 @@ test_upstream_json!(
     {
         use harmonia_store_core::derivation::DerivationOutput;
         use harmonia_store_core::hash::Sha256;
-        DerivationOutput::CAFixed(
-            ContentAddress::Text(
-                Hash::new(
-                    Algorithm::SHA256,
-                    &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
-                ).try_into().unwrap()
+        DerivationOutput::CAFixed(ContentAddress::Text(
+            Hash::new(
+                Algorithm::SHA256,
+                &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
             )
-        )
+            .try_into()
+            .unwrap(),
+        ))
     }
 );
 
@@ -348,9 +346,7 @@ test_upstream_json!(
     {
         use harmonia_store_core::derivation::DerivationOutput;
         use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
-        DerivationOutput::CAFloating(
-            ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256)
-        )
+        DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256))
     }
 );
 
@@ -369,9 +365,7 @@ test_upstream_json!(
     {
         use harmonia_store_core::derivation::DerivationOutput;
         use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
-        DerivationOutput::Impure(
-            ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256)
-        )
+        DerivationOutput::Impure(ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256))
     }
 );
 
@@ -417,9 +411,11 @@ test_upstream_json!(
     test_derivation_ca_structured_attrs,
     libstore_test_data_path("derivation/ca/advanced-attributes-structured-attrs.json"),
     {
-        use harmonia_store_core::derivation::{Derivation, DerivationInputs, OutputInputs, DerivationOutput, StructuredAttrs};
-        use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
+        use harmonia_store_core::derivation::{
+            Derivation, DerivationInputs, DerivationOutput, OutputInputs, StructuredAttrs,
+        };
         use harmonia_store_core::hash::Algorithm;
+        use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
         use std::collections::{BTreeMap, BTreeSet};
         Derivation {
             name: "advanced-attributes-structured-attrs".parse().unwrap(),
@@ -516,21 +512,29 @@ test_upstream_json!(
     test_derivation_ca_structured_attrs_defaults,
     libstore_test_data_path("derivation/ca/advanced-attributes-structured-attrs-defaults.json"),
     {
-        use harmonia_store_core::derivation::{Derivation, DerivationInputs, DerivationOutput, StructuredAttrs};
-        use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
+        use harmonia_store_core::derivation::{
+            Derivation, DerivationInputs, DerivationOutput, StructuredAttrs,
+        };
         use harmonia_store_core::hash::Algorithm;
+        use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
         use std::collections::{BTreeMap, BTreeSet};
         Derivation {
-            name: "advanced-attributes-structured-attrs-defaults".parse().unwrap(),
+            name: "advanced-attributes-structured-attrs-defaults"
+                .parse()
+                .unwrap(),
             outputs: {
                 let mut map = BTreeMap::new();
                 map.insert(
                     "out".parse().unwrap(),
-                    DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256)),
+                    DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::Recursive(
+                        Algorithm::SHA256,
+                    )),
                 );
                 map.insert(
                     "dev".parse().unwrap(),
-                    DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256)),
+                    DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::Recursive(
+                        Algorithm::SHA256,
+                    )),
                 );
                 map
             },
@@ -540,22 +544,34 @@ test_upstream_json!(
             },
             platform: bytes::Bytes::from("my-system"),
             builder: bytes::Bytes::from("/bin/bash"),
-            args: vec![bytes::Bytes::from("-c"), bytes::Bytes::from("echo hello > $out")],
+            args: vec![
+                bytes::Bytes::from("-c"),
+                bytes::Bytes::from("echo hello > $out"),
+            ],
             env: {
                 let mut map = BTreeMap::new();
-                map.insert(bytes::Bytes::from("out"), bytes::Bytes::from("/1rz4g4znpzjwh1xymhjpm42vipw92pr73vdgl6xs1hycac8kf2n9"));
-                map.insert(bytes::Bytes::from("dev"), bytes::Bytes::from("/02qcpld1y6xhs5gz9bchpxaw0xdhmsp5dv88lh25r2ss44kh8dxz"));
+                map.insert(
+                    bytes::Bytes::from("out"),
+                    bytes::Bytes::from("/1rz4g4znpzjwh1xymhjpm42vipw92pr73vdgl6xs1hycac8kf2n9"),
+                );
+                map.insert(
+                    bytes::Bytes::from("dev"),
+                    bytes::Bytes::from("/02qcpld1y6xhs5gz9bchpxaw0xdhmsp5dv88lh25r2ss44kh8dxz"),
+                );
                 map
             },
             structured_attrs: Some(StructuredAttrs {
-                attrs: serde_json::from_str(r#"{
+                attrs: serde_json::from_str(
+                    r#"{
                     "builder": "/bin/bash",
                     "name": "advanced-attributes-structured-attrs-defaults",
                     "outputHashAlgo": "sha256",
                     "outputHashMode": "recursive",
                     "outputs": ["out", "dev"],
                     "system": "my-system"
-                }"#).unwrap(),
+                }"#,
+                )
+                .unwrap(),
             }),
         }
     }
@@ -565,7 +581,9 @@ test_upstream_json!(
     test_derivation_ia_structured_attrs,
     libstore_test_data_path("derivation/ia/advanced-attributes-structured-attrs.json"),
     {
-        use harmonia_store_core::derivation::{Derivation, DerivationInputs, OutputInputs, DerivationOutput, StructuredAttrs};
+        use harmonia_store_core::derivation::{
+            Derivation, DerivationInputs, DerivationOutput, OutputInputs, StructuredAttrs,
+        };
         use std::collections::{BTreeMap, BTreeSet};
         Derivation {
             name: "advanced-attributes-structured-attrs".parse().unwrap(),
@@ -660,10 +678,14 @@ test_upstream_json!(
     test_derivation_ia_structured_attrs_defaults,
     libstore_test_data_path("derivation/ia/advanced-attributes-structured-attrs-defaults.json"),
     {
-        use harmonia_store_core::derivation::{Derivation, DerivationInputs, DerivationOutput, StructuredAttrs};
+        use harmonia_store_core::derivation::{
+            Derivation, DerivationInputs, DerivationOutput, StructuredAttrs,
+        };
         use std::collections::{BTreeMap, BTreeSet};
         Derivation {
-            name: "advanced-attributes-structured-attrs-defaults".parse().unwrap(),
+            name: "advanced-attributes-structured-attrs-defaults"
+                .parse()
+                .unwrap(),
             outputs: {
                 let mut map = BTreeMap::new();
                 map.insert(
@@ -682,7 +704,10 @@ test_upstream_json!(
             },
             platform: bytes::Bytes::from("my-system"),
             builder: bytes::Bytes::from("/bin/bash"),
-            args: vec![bytes::Bytes::from("-c"), bytes::Bytes::from("echo hello > $out")],
+            args: vec![
+                bytes::Bytes::from("-c"),
+                bytes::Bytes::from("echo hello > $out"),
+            ],
             env: {
                 let mut map = BTreeMap::new();
                 map.insert(bytes::Bytes::from("out"), bytes::Bytes::from("/nix/store/f8f8nvnx32bxvyxyx2ff7akbvwhwd9dw-advanced-attributes-structured-attrs-defaults"));
@@ -690,12 +715,15 @@ test_upstream_json!(
                 map
             },
             structured_attrs: Some(StructuredAttrs {
-                attrs: serde_json::from_str(r#"{
+                attrs: serde_json::from_str(
+                    r#"{
                     "builder": "/bin/bash",
                     "name": "advanced-attributes-structured-attrs-defaults",
                     "outputs": ["out", "dev"],
                     "system": "my-system"
-                }"#).unwrap(),
+                }"#,
+                )
+                .unwrap(),
             }),
         }
     }

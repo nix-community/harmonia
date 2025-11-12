@@ -96,7 +96,11 @@ pub struct ConnectionPool {
 
 impl ConnectionPool {
     /// Create a new pool with given configuration
-    pub fn new(socket_path: PathBuf, store_dir: harmonia_store_core::store_path::StoreDir, config: PoolConfig) -> Self {
+    pub fn new(
+        socket_path: PathBuf,
+        store_dir: harmonia_store_core::store_path::StoreDir,
+        config: PoolConfig,
+    ) -> Self {
         assert!(config.max_size > 0, "Capacity must be positive");
 
         let state = PoolState {

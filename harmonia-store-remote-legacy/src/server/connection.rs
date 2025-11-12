@@ -43,8 +43,19 @@ pub async fn handle_connection<H: RequestHandler>(
                 let result = handler.handle_query_path_from_hash_part(&hash).await?;
                 // Nix protocol uses empty string for None
                 match result {
-                    Some(path) => store_dir.display(&path).to_string().as_bytes().serialize(&mut stream, version, &store_dir).await?,
-                    None => (&[] as &[u8]).serialize(&mut stream, version, &store_dir).await?,
+                    Some(path) => {
+                        store_dir
+                            .display(&path)
+                            .to_string()
+                            .as_bytes()
+                            .serialize(&mut stream, version, &store_dir)
+                            .await?
+                    }
+                    None => {
+                        (&[] as &[u8])
+                            .serialize(&mut stream, version, &store_dir)
+                            .await?
+                    }
                 }
             }
 
@@ -65,7 +76,10 @@ pub async fn handle_connection<H: RequestHandler>(
     Ok(())
 }
 
-async fn handshake(stream: &mut UnixStream, store_dir: &StoreDir) -> Result<ProtocolVersion, ProtocolError> {
+async fn handshake(
+    stream: &mut UnixStream,
+    store_dir: &StoreDir,
+) -> Result<ProtocolVersion, ProtocolError> {
     // Read client magic
     let magic = u64::deserialize(stream, CURRENT_PROTOCOL_VERSION, store_dir).await?;
     if magic != WORKER_MAGIC_1 {
@@ -115,7 +129,8 @@ async fn handshake(stream: &mut UnixStream, store_dir: &StoreDir) -> Result<Prot
             .serialize(stream, client_version, store_dir)
             .await?;
         // Read client features
-        let _client_features = Vec::<Vec<u8>>::deserialize(stream, client_version, store_dir).await?;
+        let _client_features =
+            Vec::<Vec<u8>>::deserialize(stream, client_version, store_dir).await?;
     }
 
     // Send daemon version string
@@ -140,5 +155,7 @@ async fn send_stderr_last(
 ) -> Result<(), ProtocolError> {
     // Send STDERR_LAST message
     use crate::protocol::Msg;
-    (Msg::Last as u64).serialize(stream, version, store_dir).await
+    (Msg::Last as u64)
+        .serialize(stream, version, store_dir)
+        .await
 }

@@ -5,7 +5,7 @@ use proptest::prelude::{Arbitrary, BoxedStrategy};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ByteString;
-use crate::store_path::{StorePath, StorePathSet, StorePathName};
+use crate::store_path::{StorePath, StorePathName, StorePathSet};
 
 use super::DerivationOutputs;
 
@@ -158,19 +158,21 @@ impl Serialize for Derivation {
             .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in builder: {}", e)))?;
         state.serialize_field("builder", &builder_str)?;
 
-        let args_strs: Result<Vec<&str>, _> = self.args.iter()
-            .map(|b| std::str::from_utf8(b))
-            .collect();
+        let args_strs: Result<Vec<&str>, _> =
+            self.args.iter().map(|b| std::str::from_utf8(b)).collect();
         let args_strs = args_strs
             .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in args: {}", e)))?;
         state.serialize_field("args", &args_strs)?;
 
         // Serialize env map
-        let env_map: Result<BTreeMap<&str, &str>, _> = self.env.iter()
+        let env_map: Result<BTreeMap<&str, &str>, _> = self
+            .env
+            .iter()
             .map(|(k, v)| Ok((std::str::from_utf8(k)?, std::str::from_utf8(v)?)))
             .collect();
-        let env_map = env_map
-            .map_err(|e: std::str::Utf8Error| serde::ser::Error::custom(format!("invalid UTF-8 in env: {}", e)))?;
+        let env_map = env_map.map_err(|e: std::str::Utf8Error| {
+            serde::ser::Error::custom(format!("invalid UTF-8 in env: {}", e))
+        })?;
         state.serialize_field("env", &env_map)?;
 
         if let Some(ref attrs) = self.structured_attrs {
@@ -209,18 +211,27 @@ impl<'de> Deserialize<'de> for Derivation {
 
         // Assert version is 4
         if helper.version != 4 {
-            return Err(serde::de::Error::custom(format!("unsupported derivation version: {}, expected 4", helper.version)));
+            return Err(serde::de::Error::custom(format!(
+                "unsupported derivation version: {}, expected 4",
+                helper.version
+            )));
         }
 
         Ok(Derivation {
-            name: helper.name.parse()
+            name: helper
+                .name
+                .parse()
                 .map_err(|e| serde::de::Error::custom(format!("invalid derivation name: {}", e)))?,
             outputs: helper.outputs,
             inputs: helper.inputs,
             platform: ByteString::from(helper.platform),
             builder: ByteString::from(helper.builder),
             args: helper.args.into_iter().map(ByteString::from).collect(),
-            env: helper.env.into_iter().map(|(k, v)| (ByteString::from(k), ByteString::from(v))).collect(),
+            env: helper
+                .env
+                .into_iter()
+                .map(|(k, v)| (ByteString::from(k), ByteString::from(v)))
+                .collect(),
             structured_attrs: helper.structured_attrs,
         })
     }

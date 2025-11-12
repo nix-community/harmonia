@@ -10,7 +10,9 @@ use thiserror::Error;
 use crate::hash::fmt::{NonSRI, ParseHashError, ParseHashErrorKind};
 use crate::hash::{Algorithm, Hash, Sha256, UnknownAlgorithm};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize,
+)]
 #[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
 #[serde(rename_all = "lowercase")]
 pub enum ContentAddressMethod {

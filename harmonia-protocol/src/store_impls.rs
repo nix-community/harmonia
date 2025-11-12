@@ -75,16 +75,19 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
             let args = reader.read_value().await?;
             let env = reader.read_value().await?;
 
-            Ok(Some((drv_path, BasicDerivation {
-                name,
-                outputs,
-                inputs,
-                platform,
-                builder,
-                args,
-                env,
-                structured_attrs: None, // TODO: Read from wire protocol if present
-            })))
+            Ok(Some((
+                drv_path,
+                BasicDerivation {
+                    name,
+                    outputs,
+                    inputs,
+                    platform,
+                    builder,
+                    args,
+                    env,
+                    structured_attrs: None, // TODO: Read from wire protocol if present
+                },
+            )))
         } else {
             Ok(None)
         }

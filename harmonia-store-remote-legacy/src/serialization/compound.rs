@@ -15,7 +15,10 @@ impl Serialize for StorePath {
     ) -> Result<(), ProtocolError> {
         // Serialize as full path "/nix/store/hash-name"
         let full_path = format!("{}/{}", store_dir, self);
-        full_path.as_bytes().serialize(writer, version, store_dir).await
+        full_path
+            .as_bytes()
+            .serialize(writer, version, store_dir)
+            .await
     }
 }
 
@@ -51,9 +54,11 @@ impl Deserialize for StorePath {
         let path_str = std::str::from_utf8(&buf).map_err(|e| ProtocolError::DaemonError {
             message: format!("StorePath is not valid UTF-8: {e}"),
         })?;
-        store_dir.parse(path_str).map_err(|e| ProtocolError::DaemonError {
-            message: format!("Failed to parse StorePath: {e}"),
-        })
+        store_dir
+            .parse(path_str)
+            .map_err(|e| ProtocolError::DaemonError {
+                message: format!("Failed to parse StorePath: {e}"),
+            })
     }
 }
 
@@ -171,13 +176,16 @@ impl Deserialize for ValidPathInfo {
         let deriver = if deriver_bytes.is_empty() {
             None
         } else {
-            let deriver_str = std::str::from_utf8(&deriver_bytes).map_err(|e| ProtocolError::DaemonError {
-                message: format!("Deriver StorePath is not valid UTF-8: {e}"),
-            })?;
+            let deriver_str =
+                std::str::from_utf8(&deriver_bytes).map_err(|e| ProtocolError::DaemonError {
+                    message: format!("Deriver StorePath is not valid UTF-8: {e}"),
+                })?;
             Some(
-                store_dir.parse(deriver_str).map_err(|e| ProtocolError::DaemonError {
-                    message: format!("Failed to parse deriver StorePath: {e}"),
-                })?,
+                store_dir
+                    .parse(deriver_str)
+                    .map_err(|e| ProtocolError::DaemonError {
+                        message: format!("Failed to parse deriver StorePath: {e}"),
+                    })?,
             )
         };
 
@@ -193,11 +201,12 @@ impl Deserialize for ValidPathInfo {
             message: format!("Failed to decode hex hash: {e}"),
         })?;
         // Create Hash from raw bytes
-        use harmonia_store_core::hash::{Hash, Algorithm};
-        let hash = Hash::from_slice(Algorithm::SHA256, &raw_hash)
-            .map_err(|e| ProtocolError::DaemonError {
+        use harmonia_store_core::hash::{Algorithm, Hash};
+        let hash = Hash::from_slice(Algorithm::SHA256, &raw_hash).map_err(|e| {
+            ProtocolError::DaemonError {
                 message: format!("Failed to create hash: {e}"),
-            })?;
+            }
+        })?;
 
         // Deserialize references
         let references = BTreeSet::<StorePath>::deserialize(reader, version, store_dir)

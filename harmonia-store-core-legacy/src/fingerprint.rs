@@ -65,7 +65,10 @@ pub fn fingerprint_path(
         0
     } else {
         // Each reference formatted with store_dir
-        references.iter().map(|r| format!("{}", store_dir.display(r)).len()).sum::<usize>()
+        references
+            .iter()
+            .map(|r| format!("{}", store_dir.display(r)).len())
+            .sum::<usize>()
             + references.len().saturating_sub(1) // commas between refs
     };
 
@@ -99,15 +102,16 @@ mod tests {
     #[test]
     fn test_fingerprint_basic() {
         let store_dir = StoreDir::new("/nix/store").unwrap();
-        let store_path = StorePath::from_bytes(b"syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin").unwrap();
+        let store_path =
+            StorePath::from_bytes(b"syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin").unwrap();
         let nar_hash = b"sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0";
         let nar_size = 196040;
         let mut references = BTreeSet::new();
         references.insert(
-            StorePath::from_bytes(b"0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0").unwrap()
+            StorePath::from_bytes(b"0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0").unwrap(),
         );
         references.insert(
-            StorePath::from_bytes(b"5dq2jj6d7k197p6fzqn8l5n0jfmhxmcg-glibc-2.33-59").unwrap()
+            StorePath::from_bytes(b"5dq2jj6d7k197p6fzqn8l5n0jfmhxmcg-glibc-2.33-59").unwrap(),
         );
 
         let fingerprint =
@@ -119,7 +123,8 @@ mod tests {
     #[test]
     fn test_fingerprint_no_references() {
         let store_dir = StoreDir::new("/nix/store").unwrap();
-        let store_path = StorePath::from_bytes(b"26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1").unwrap();
+        let store_path =
+            StorePath::from_bytes(b"26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1").unwrap();
         let nar_hash = b"sha256:1mkvday29m2qxg1fnbv8xh9s6151bh8a2xzhh0k86j7lqhyfwibh";
         let nar_size = 226560;
         let references = BTreeSet::new();

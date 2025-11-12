@@ -34,7 +34,11 @@ impl DaemonClient {
     ) -> Result<Self, ProtocolError> {
         // Use default store directory ("/nix/store")
         let store_dir = harmonia_store_core::store_path::StoreDir::default();
-        let pool = Arc::new(ConnectionPool::new(path.to_path_buf(), store_dir.clone(), pool_config));
+        let pool = Arc::new(ConnectionPool::new(
+            path.to_path_buf(),
+            store_dir.clone(),
+            pool_config,
+        ));
         Ok(Self { pool, store_dir })
     }
 
@@ -57,12 +61,17 @@ impl DaemonClient {
         Ok(if response.is_empty() {
             None
         } else {
-            let path_str = std::str::from_utf8(&response).map_err(|e| ProtocolError::DaemonError {
-                message: format!("StorePath is not valid UTF-8: {e}"),
-            })?;
-            Some(self.store_dir.parse(path_str).map_err(|e| ProtocolError::DaemonError {
-                message: format!("Failed to parse StorePath: {e}"),
-            })?)
+            let path_str =
+                std::str::from_utf8(&response).map_err(|e| ProtocolError::DaemonError {
+                    message: format!("StorePath is not valid UTF-8: {e}"),
+                })?;
+            Some(
+                self.store_dir
+                    .parse(path_str)
+                    .map_err(|e| ProtocolError::DaemonError {
+                        message: format!("Failed to parse StorePath: {e}"),
+                    })?,
+            )
         })
     }
 

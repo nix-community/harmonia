@@ -159,13 +159,15 @@ mod tests {
 
         let mut references = std::collections::BTreeSet::new();
         references.insert(
-            crate::StorePath::from_bytes(b"26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1").unwrap()
+            crate::StorePath::from_bytes(b"26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1").unwrap(),
         );
         references.insert(
-            crate::StorePath::from_bytes(b"sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36").unwrap()
+            crate::StorePath::from_bytes(b"sl141d1g77wvhr050ah87lcyz2czdxa3-glibc-2.40-36")
+                .unwrap(),
         );
 
-        let store_path = crate::StorePath::from_bytes(b"26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1").unwrap();
+        let store_path =
+            crate::StorePath::from_bytes(b"26xbg1ndr7hbcncrlf9nhx5is2b25d13-hello-2.12.1").unwrap();
         let store_dir = harmonia_store_core::store_path::StoreDir::new("/nix/store").unwrap();
         let fingerprint = fingerprint_path(
             &store_dir,

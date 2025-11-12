@@ -130,15 +130,14 @@ impl StoreDb {
             })
             .db_protocol_context(|| format!("Failed to query references for path '{path_str}'"))?
             .collect::<Result<Vec<_>, _>>()
-            .db_protocol_context(|| {
-                format!("Failed to collect references for path '{path_str}'")
-            })?
+            .db_protocol_context(|| format!("Failed to collect references for path '{path_str}'"))?
             .into_iter()
             .map(|path| parse_store_path_from_full_path(&path))
             .collect::<Result<BTreeSet<_>, _>>()?;
 
         // Parse the hash from database format
-        let parsed_hash = hash.parse::<Any<Hash>>()
+        let parsed_hash = hash
+            .parse::<Any<Hash>>()
             .map_err(|e| ProtocolError::DaemonError {
                 message: format!("Failed to parse hash from database '{hash}': {e}"),
             })?
@@ -146,7 +145,9 @@ impl StoreDb {
 
         // Build ValidPathInfo
         let info = ValidPathInfo {
-            deriver: deriver.map(|s| parse_store_path_from_full_path(&s)).transpose()?,
+            deriver: deriver
+                .map(|s| parse_store_path_from_full_path(&s))
+                .transpose()?,
             hash: parsed_hash,
             references,
             registration_time: registration_time as u64,

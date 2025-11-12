@@ -41,8 +41,9 @@ impl Connection {
             });
         }
 
-        let server_version =
-            ProtocolVersion::from(u64::deserialize(&mut stream, CURRENT_PROTOCOL_VERSION, &store_dir).await?);
+        let server_version = ProtocolVersion::from(
+            u64::deserialize(&mut stream, CURRENT_PROTOCOL_VERSION, &store_dir).await?,
+        );
 
         if server_version < MIN_PROTOCOL_VERSION {
             return Err(ProtocolError::IncompatibleVersion {
@@ -69,7 +70,8 @@ impl Connection {
                 major: 1,
                 minor: 38,
             }) {
-            let server_features = Vec::<Vec<u8>>::deserialize(&mut stream, server_version, &store_dir).await?;
+            let server_features =
+                Vec::<Vec<u8>>::deserialize(&mut stream, server_version, &store_dir).await?;
             Vec::<Vec<u8>>::new()
                 .serialize(&mut stream, server_version, &store_dir)
                 .await?;
@@ -79,7 +81,8 @@ impl Connection {
         };
 
         // Read daemon version string
-        let _daemon_version = <Vec<u8>>::deserialize(&mut stream, server_version, &store_dir).await?;
+        let _daemon_version =
+            <Vec<u8>>::deserialize(&mut stream, server_version, &store_dir).await?;
 
         // Read trust status
         let _is_trusted = bool::deserialize(&mut stream, server_version, &store_dir).await?;
@@ -98,32 +101,67 @@ impl Connection {
 
     pub async fn process_stderr(&mut self) -> Result<(), ProtocolError> {
         loop {
-            let msg_code = u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
+            let msg_code =
+                u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir)
+                    .await?;
             let msg = Msg::try_from(msg_code)?;
 
             match msg {
                 Msg::Error => {
                     let mut err = StderrError {
-                        typ: String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir)
-                            .await?,
-                        level: u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?,
-                        name: String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir)
-                            .await?,
-                        message: String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir)
-                            .await?,
-                        have_pos: u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir)
-                            .await?,
+                        typ: String::deserialize(
+                            &mut self.stream,
+                            CURRENT_PROTOCOL_VERSION,
+                            &self.store_dir,
+                        )
+                        .await?,
+                        level: u64::deserialize(
+                            &mut self.stream,
+                            CURRENT_PROTOCOL_VERSION,
+                            &self.store_dir,
+                        )
+                        .await?,
+                        name: String::deserialize(
+                            &mut self.stream,
+                            CURRENT_PROTOCOL_VERSION,
+                            &self.store_dir,
+                        )
+                        .await?,
+                        message: String::deserialize(
+                            &mut self.stream,
+                            CURRENT_PROTOCOL_VERSION,
+                            &self.store_dir,
+                        )
+                        .await?,
+                        have_pos: u64::deserialize(
+                            &mut self.stream,
+                            CURRENT_PROTOCOL_VERSION,
+                            &self.store_dir,
+                        )
+                        .await?,
                         traces: Vec::new(),
                     };
 
-                    let traces_len =
-                        u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
+                    let traces_len = u64::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
                     for _ in 0..traces_len {
                         err.traces.push(Trace {
-                            have_pos: u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir)
-                                .await?,
-                            trace: String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir)
-                                .await?,
+                            have_pos: u64::deserialize(
+                                &mut self.stream,
+                                CURRENT_PROTOCOL_VERSION,
+                                &self.store_dir,
+                            )
+                            .await?,
+                            trace: String::deserialize(
+                                &mut self.stream,
+                                CURRENT_PROTOCOL_VERSION,
+                                &self.store_dir,
+                            )
+                            .await?,
                         });
                     }
 
@@ -132,28 +170,70 @@ impl Connection {
                     });
                 }
                 Msg::Next => {
-                    let next =
-                        String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
+                    let next = String::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
                     eprintln!("[nix-daemon]: {next}");
                 }
                 Msg::StartActivity => {
-                    let act = u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
-                    let lvl = u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
-                    let typ = u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
-                    let s = String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
-                    let field_type =
-                        u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
+                    let act = u64::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
+                    let lvl = u64::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
+                    let typ = u64::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
+                    let s = String::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
+                    let field_type = u64::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
                     let fields = match field_type {
                         0 => LoggerField::Int(
-                            u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?,
+                            u64::deserialize(
+                                &mut self.stream,
+                                CURRENT_PROTOCOL_VERSION,
+                                &self.store_dir,
+                            )
+                            .await?,
                         ),
                         1 => LoggerField::String(
-                            String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?,
+                            String::deserialize(
+                                &mut self.stream,
+                                CURRENT_PROTOCOL_VERSION,
+                                &self.store_dir,
+                            )
+                            .await?,
                         ),
                         _ => return Err(ProtocolError::InvalidMsgCode(field_type)),
                     };
-                    let parent =
-                        u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
+                    let parent = u64::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
 
                     eprintln!(
                         "[nix-daemon] start activity: {:?}",
@@ -168,17 +248,30 @@ impl Connection {
                     );
                 }
                 Msg::StopActivity => {
-                    let act = u64::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
+                    let act = u64::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
                     eprintln!("[nix-daemon] stop activity: {act:?}");
                 }
                 Msg::Result => {
-                    let res =
-                        String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
+                    let res = String::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
                     eprintln!("[nix-daemon] result: {res:?}");
                 }
                 Msg::Write => {
-                    let write =
-                        String::deserialize(&mut self.stream, CURRENT_PROTOCOL_VERSION, &self.store_dir).await?;
+                    let write = String::deserialize(
+                        &mut self.stream,
+                        CURRENT_PROTOCOL_VERSION,
+                        &self.store_dir,
+                    )
+                    .await?;
                     eprintln!("[nix-daemon] write: {write:?}");
                 }
                 Msg::Last => {

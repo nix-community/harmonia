@@ -82,7 +82,7 @@ async fn query_narinfo(
     // Convert virtual_nix_store bytes to StoreDir
     let store_dir = harmonia_store_core::store_path::StoreDir::new(
         std::str::from_utf8(virtual_nix_store)
-            .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidUtf8(e)))?
+            .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidUtf8(e)))?,
     )
     .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidStoreDir(format!("{}", e))))?;
 
