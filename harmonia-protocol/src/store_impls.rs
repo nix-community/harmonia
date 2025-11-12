@@ -28,40 +28,44 @@ use crate::daemon_wire::logger::RawLogMessageType;
 
 // ========== BasicDerivation ==========
 
-impl NixSerialize for BasicDerivation {
+impl NixSerialize for (StorePath, BasicDerivation) {
     async fn serialize<W>(&self, mut writer: &mut W) -> Result<(), W::Error>
     where
         W: NixWrite,
     {
-        writer.write_value(&self.drv_path).await?;
-        writer.write_value(&self.outputs.len()).await?;
-        for (output_name, output) in self.outputs.iter() {
+        let (drv_path, drv) = self;
+        writer.write_value(drv_path).await?;
+        writer.write_value(&drv.outputs.len()).await?;
+        for (output_name, output) in drv.outputs.iter() {
             writer.write_value(output_name).await?;
-            write_derivation_output(output, self.drv_path.name(), output_name, &mut writer).await?;
+            write_derivation_output(output, &drv.name, output_name, &mut writer).await?;
         }
-        writer.write_value(&self.inputs).await?;
-        writer.write_value(&self.platform).await?;
-        writer.write_value(&self.builder).await?;
-        writer.write_value(&self.args).await?;
-        writer.write_value(&self.env).await?;
+        writer.write_value(&drv.inputs).await?;
+        writer.write_value(&drv.platform).await?;
+        writer.write_value(&drv.builder).await?;
+        writer.write_value(&drv.args).await?;
+        writer.write_value(&drv.env).await?;
         Ok(())
     }
 }
 
-impl NixDeserialize for BasicDerivation {
+impl NixDeserialize for (StorePath, BasicDerivation) {
     async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
     where
         R: ?Sized + NixRead + Send,
     {
         use harmonia_store_core::derivation::DerivationOutputs;
 
+        // Try to read the drv path - if not present, return None
         if let Some(drv_path) = reader.try_read_value::<StorePath>().await? {
+            let name = drv_path.name().clone();
+
             let outputs_len = reader.read_value::<usize>().await?;
             let mut outputs = DerivationOutputs::new();
 
             for _ in 0..outputs_len {
                 let output_name = reader.read_value::<OutputName>().await?;
-                let output = read_derivation_output(reader, drv_path.name(), &output_name).await?;
+                let output = read_derivation_output(reader, &name, &output_name).await?;
                 outputs.insert(output_name, output);
             }
 
@@ -71,15 +75,16 @@ impl NixDeserialize for BasicDerivation {
             let args = reader.read_value().await?;
             let env = reader.read_value().await?;
 
-            Ok(Some(BasicDerivation {
-                drv_path,
+            Ok(Some((drv_path, BasicDerivation {
+                name,
                 outputs,
                 inputs,
                 platform,
                 builder,
                 args,
                 env,
-            }))
+                structured_attrs: None, // TODO: Read from wire protocol if present
+            })))
         } else {
             Ok(None)
         }

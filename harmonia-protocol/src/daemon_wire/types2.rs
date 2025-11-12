@@ -346,7 +346,8 @@ impl Request {
             }
             Request::BuildDerivation(req) => {
                 debug_span!("BuildDerivation",
-                    drv_path=?req.drv.drv_path,
+                    drv_path=?req.drv.0,
+                    drv_name=?req.drv.1.name,
                     mode=?req.mode)
             }
             Request::AddSignatures(req) => {
@@ -562,7 +563,7 @@ pub struct VerifyStoreRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
 pub struct BuildDerivationRequest {
-    pub drv: BasicDerivation,
+    pub drv: (StorePath, BasicDerivation),
     pub mode: BuildMode,
 }
 
