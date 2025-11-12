@@ -1,6 +1,10 @@
 use std::{collections::BTreeMap, fmt};
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use crate::derived_path::OutputName;
+use crate::hash::Hash;
+use crate::store_path::ContentAddressMethod;
 use crate::store_path::ContentAddressMethodAlgorithm;
 use crate::store_path::{ContentAddress, StoreDir, StorePath, StorePathName, StorePathNameError};
 
@@ -27,6 +31,26 @@ pub(crate) fn output_path_name<'s>(
     }
 }
 
+/// Helper struct for JSON serialization/deserialization of DerivationOutput
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawDerivationOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<StorePath>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hash: Option<Hash>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    method: Option<ContentAddressMethod>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hash_algo: Option<crate::hash::Algorithm>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    impure: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum DerivationOutput {
     InputAddressed(StorePath),
@@ -34,6 +58,95 @@ pub enum DerivationOutput {
     Deferred,
     CAFloating(ContentAddressMethodAlgorithm),
     Impure(ContentAddressMethodAlgorithm),
+}
+
+impl Serialize for DerivationOutput {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let raw = match self {
+            DerivationOutput::InputAddressed(path) => RawDerivationOutput {
+                path: Some(path.clone()),
+                hash: None,
+                method: None,
+                hash_algo: None,
+                impure: false,
+            },
+            DerivationOutput::CAFixed(ca) => RawDerivationOutput {
+                path: None,
+                hash: Some(ca.hash()),
+                method: Some(ca.method()),
+                hash_algo: None,
+                impure: false,
+            },
+            DerivationOutput::Deferred => RawDerivationOutput {
+                path: None,
+                hash: None,
+                method: None,
+                hash_algo: None,
+                impure: false,
+            },
+            DerivationOutput::CAFloating(ca_method_algo) => RawDerivationOutput {
+                path: None,
+                hash: None,
+                method: Some(ca_method_algo.method()),
+                hash_algo: Some(ca_method_algo.algorithm()),
+                impure: false,
+            },
+            DerivationOutput::Impure(ca_method_algo) => RawDerivationOutput {
+                path: None,
+                hash: None,
+                method: Some(ca_method_algo.method()),
+                hash_algo: Some(ca_method_algo.algorithm()),
+                impure: true,
+            },
+        };
+        raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DerivationOutput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de;
+
+        let raw = RawDerivationOutput::deserialize(deserializer)?;
+
+        // Determine variant based on which fields are present
+        if let Some(path) = raw.path {
+            // InputAddressed
+            Ok(DerivationOutput::InputAddressed(path))
+        } else if let Some(hash) = raw.hash {
+            // CAFixed
+            let method = raw
+                .method
+                .ok_or_else(|| de::Error::missing_field("method"))?;
+            let ca = ContentAddress::from_hash(method, hash)
+                .map_err(|e| de::Error::custom(format!("invalid content address: {}", e)))?;
+            Ok(DerivationOutput::CAFixed(ca))
+        } else if let Some(method) = raw.method {
+            // CAFloating or Impure
+            let algo = raw
+                .hash_algo
+                .ok_or_else(|| de::Error::missing_field("hashAlgo"))?;
+            let ca_method_algo = match method {
+                ContentAddressMethod::Text => ContentAddressMethodAlgorithm::Text,
+                ContentAddressMethod::Flat => ContentAddressMethodAlgorithm::Flat(algo),
+                ContentAddressMethod::Recursive => ContentAddressMethodAlgorithm::Recursive(algo),
+            };
+            if raw.impure {
+                Ok(DerivationOutput::Impure(ca_method_algo))
+            } else {
+                Ok(DerivationOutput::CAFloating(ca_method_algo))
+            }
+        } else {
+            // Deferred (empty object)
+            Ok(DerivationOutput::Deferred)
+        }
+    }
 }
 
 impl DerivationOutput {

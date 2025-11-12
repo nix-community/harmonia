@@ -34,6 +34,43 @@ pub enum ContentAddressMethodAlgorithm {
     Recursive(Algorithm),
 }
 
+/// Raw representation for JSON serialization/deserialization
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawContentAddressMethodAlgorithm {
+    method: ContentAddressMethod,
+    hash_algo: Algorithm,
+}
+
+impl Serialize for ContentAddressMethodAlgorithm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let raw = RawContentAddressMethodAlgorithm {
+            method: self.method(),
+            hash_algo: self.algorithm(),
+        };
+        raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ContentAddressMethodAlgorithm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RawContentAddressMethodAlgorithm::deserialize(deserializer)?;
+        Ok(match raw.method {
+            ContentAddressMethod::Text => ContentAddressMethodAlgorithm::Text,
+            ContentAddressMethod::Flat => ContentAddressMethodAlgorithm::Flat(raw.hash_algo),
+            ContentAddressMethod::Recursive => {
+                ContentAddressMethodAlgorithm::Recursive(raw.hash_algo)
+            }
+        })
+    }
+}
+
 impl ContentAddressMethodAlgorithm {
     pub fn algorithm(&self) -> Algorithm {
         match self {

@@ -285,3 +285,92 @@ test_upstream_json!(
         &hex!("f6f2ea8f45d8a057c9566a33f99474da2e5c6a6604d736121650e2730c6fb0a3"),
     ))
 );
+
+test_upstream_json!(
+    test_derivation_output_input_addressed,
+    libstore_test_data_path("derivation/output-inputAddressed.json"),
+    {
+        use harmonia_store_core::derivation::DerivationOutput;
+        DerivationOutput::InputAddressed(
+            "c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-drv-name-output-name".parse().unwrap()
+        )
+    }
+);
+
+test_upstream_json!(
+    test_derivation_output_ca_fixed_flat,
+    libstore_test_data_path("derivation/output-caFixedFlat.json"),
+    {
+        use harmonia_store_core::derivation::DerivationOutput;
+        DerivationOutput::CAFixed(
+            ContentAddress::Flat(Hash::new(
+                Algorithm::SHA256,
+                &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
+            ))
+        )
+    }
+);
+
+test_upstream_json!(
+    test_derivation_output_ca_fixed_nar,
+    libstore_test_data_path("derivation/output-caFixedNAR.json"),
+    {
+        use harmonia_store_core::derivation::DerivationOutput;
+        DerivationOutput::CAFixed(
+            ContentAddress::Recursive(Hash::new(
+                Algorithm::SHA256,
+                &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
+            ))
+        )
+    }
+);
+
+test_upstream_json!(
+    test_derivation_output_ca_fixed_text,
+    libstore_test_data_path("derivation/output-caFixedText.json"),
+    {
+        use harmonia_store_core::derivation::DerivationOutput;
+        use harmonia_store_core::hash::Sha256;
+        DerivationOutput::CAFixed(
+            ContentAddress::Text(
+                Hash::new(
+                    Algorithm::SHA256,
+                    &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
+                ).try_into().unwrap()
+            )
+        )
+    }
+);
+
+test_upstream_json!(
+    test_derivation_output_ca_floating,
+    libstore_test_data_path("derivation/output-caFloating.json"),
+    {
+        use harmonia_store_core::derivation::DerivationOutput;
+        use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
+        DerivationOutput::CAFloating(
+            ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256)
+        )
+    }
+);
+
+test_upstream_json!(
+    test_derivation_output_deferred,
+    libstore_test_data_path("derivation/output-deferred.json"),
+    {
+        use harmonia_store_core::derivation::DerivationOutput;
+        DerivationOutput::Deferred
+    }
+);
+
+test_upstream_json!(
+    test_derivation_output_impure,
+    libstore_test_data_path("derivation/output-impure.json"),
+    {
+        use harmonia_store_core::derivation::DerivationOutput;
+        use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
+        DerivationOutput::Impure(
+            ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256)
+        )
+    }
+);
