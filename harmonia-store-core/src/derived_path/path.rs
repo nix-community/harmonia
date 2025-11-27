@@ -1,4 +1,5 @@
 use std::ops::Deref as _;
+use std::sync::Arc;
 
 #[cfg(any(test, feature = "test"))]
 use proptest::prelude::{Arbitrary, BoxedStrategy};
@@ -18,6 +19,20 @@ trait StoreDirDisplaySep {
 }
 
 impl<D> StoreDirDisplaySep for &D
+where
+    D: StoreDirDisplaySep,
+{
+    fn fmt(
+        &self,
+        store_dir: &crate::store_path::StoreDir,
+        sep: char,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        (**self).fmt(store_dir, sep, f)
+    }
+}
+
+impl<D> StoreDirDisplaySep for Arc<D>
 where
     D: StoreDirDisplaySep,
 {
@@ -76,11 +91,32 @@ where
 #[serde(untagged)]
 pub enum SingleDerivedPath {
     Built {
-        #[serde(rename = "drvPath")]
-        drv_path: Box<SingleDerivedPath>,
+        #[serde(rename = "drvPath", with = "serde_arc")]
+        drv_path: Arc<SingleDerivedPath>,
         output: OutputName,
     },
     Opaque(StorePath),
+}
+
+mod serde_arc {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S, T>(value: &Arc<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        (**value).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<Arc<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        T::deserialize(deserializer).map(Arc::new)
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -96,7 +132,7 @@ impl Arbitrary for SingleDerivedPath {
             1 => opaque.prop_recursive(6, 1, 1, |inner| {
                 (any::<OutputName>(), inner).prop_map(|(output, drv_path)| {
                     SingleDerivedPath::Built {
-                        drv_path: Box::new(drv_path),
+                        drv_path: Arc::new(drv_path),
                         output,
                     }
                 })
@@ -158,7 +194,7 @@ impl FromStoreDirStrSep for SingleDerivedPath {
                     ParseStorePathError::new(s, error)
                 })?;
             Ok(SingleDerivedPath::Built {
-                drv_path: Box::new(drv_path),
+                drv_path: Arc::new(drv_path),
                 output,
             })
         } else {
@@ -182,8 +218,8 @@ impl FromStoreDirStr for SingleDerivedPath {
 #[serde(untagged)]
 pub enum DerivedPath {
     Built {
-        #[serde(rename = "drvPath")]
-        drv_path: SingleDerivedPath,
+        #[serde(rename = "drvPath", with = "serde_arc")]
+        drv_path: Arc<SingleDerivedPath>,
         outputs: OutputSpec,
     },
     Opaque(StorePath),
@@ -198,8 +234,12 @@ impl Arbitrary for DerivedPath {
         use proptest::prelude::*;
         prop_oneof![
             any::<StorePath>().prop_map(DerivedPath::Opaque),
-            (any::<SingleDerivedPath>(), any::<OutputSpec>())
-                .prop_map(|(drv_path, outputs)| { DerivedPath::Built { drv_path, outputs } })
+            (any::<SingleDerivedPath>(), any::<OutputSpec>()).prop_map(|(drv_path, outputs)| {
+                DerivedPath::Built {
+                    drv_path: Arc::new(drv_path),
+                    outputs,
+                }
+            })
         ]
         .boxed()
     }
@@ -254,7 +294,10 @@ impl FromStoreDirStrSep for DerivedPath {
             let outputs = path
                 .parse()
                 .map_err(|error| ParseStorePathError::new(s, error))?;
-            Ok(DerivedPath::Built { drv_path, outputs })
+            Ok(DerivedPath::Built {
+                drv_path: Arc::new(drv_path),
+                outputs,
+            })
         } else {
             Ok(DerivedPath::Opaque(store_dir.parse(path)?))
         }
@@ -296,32 +339,32 @@ mod unittests {
     #[rstest]
     #[case("/nix/store/00000000000000000000000000000000-test.drv", Ok(DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "out".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^*", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "*".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^bin,lib", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "bin,lib".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin,lib", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
             output: "out".parse().unwrap(),
-        },
+        }),
         outputs: "bin,lib".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Built {
-                drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Built {
+                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
                 output: "out".parse().unwrap(),
             }),
             output: "bin".parse().unwrap(),
-        },
+        }),
         outputs: "lib".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!out", Err(ParseStorePathError {
@@ -345,32 +388,32 @@ mod unittests {
     #[rstest]
     #[case("/nix/store/00000000000000000000000000000000-test.drv", Ok(DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!out", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "out".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!*", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "*".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!bin,lib", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "bin,lib".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!out!bin,lib", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
             output: "out".parse().unwrap(),
-        },
+        }),
         outputs: "bin,lib".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!out!bin!lib", Ok(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Built {
-                drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Built {
+                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
                 output: "out".parse().unwrap(),
             }),
             output: "bin".parse().unwrap(),
-        },
+        }),
         outputs: "lib".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out", Err(ParseStorePathError {
@@ -397,20 +440,20 @@ mod unittests {
     #[rstest]
     #[case("/nix/store/00000000000000000000000000000000-test.drv", Ok(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^bin", Ok(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         output: "bin".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin", Ok(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
             output: "out".parse().unwrap(),
         }),
         output: "bin".parse().unwrap(),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib", Ok(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Built {
-                drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Built {
+                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
                 output: "out".parse().unwrap(),
             }),
             output: "bin".parse().unwrap(),
@@ -441,32 +484,32 @@ mod unittests {
     #[rstest]
     #[case(DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()), "/nix/store/00000000000000000000000000000000-test.drv")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "out".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv^out")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "*".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv^*")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "bin,lib".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv^bin,lib")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
             output: "out".parse().unwrap(),
-        },
+        }),
         outputs: "bin,lib".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv^out^bin,lib")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Built {
-                drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Built {
+                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
                 output: "out".parse().unwrap(),
             }),
             output: "bin".parse().unwrap(),
-        },
+        }),
         outputs: "lib".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib")]
     fn display_path(#[case] value: DerivedPath, #[case] expected: &str) {
@@ -477,32 +520,32 @@ mod unittests {
     #[rstest]
     #[case(DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()), "/nix/store/00000000000000000000000000000000-test.drv")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "out".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv!out")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "*".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv!*")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         outputs: "bin,lib".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv!bin,lib")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
             output: "out".parse().unwrap(),
-        },
+        }),
         outputs: "bin,lib".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv!out!bin,lib")]
     #[case(DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Built {
-                drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Built {
+                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
                 output: "out".parse().unwrap(),
             }),
             output: "bin".parse().unwrap(),
-        },
+        }),
         outputs: "lib".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv!out!bin!lib")]
     fn display_legacy_path(#[case] value: DerivedPath, #[case] expected: &str) {
@@ -516,20 +559,20 @@ mod unittests {
     #[rstest]
     #[case(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()), "/nix/store/00000000000000000000000000000000-test.drv")]
     #[case(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         output: "bin".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv^bin")]
     #[case(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
             output: "out".parse().unwrap(),
         }),
         output: "bin".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv^out^bin")]
     #[case(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Built {
-                drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Built {
+                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
                 output: "out".parse().unwrap(),
             }),
             output: "bin".parse().unwrap(),
@@ -544,20 +587,20 @@ mod unittests {
     #[rstest]
     #[case(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()), "/nix/store/00000000000000000000000000000000-test.drv")]
     #[case(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
         output: "bin".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv!bin")]
     #[case(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
             output: "out".parse().unwrap(),
         }),
         output: "bin".parse().unwrap(),
     }, "/nix/store/00000000000000000000000000000000-test.drv!out!bin")]
     #[case(SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Built {
-                drv_path: Box::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Built {
+                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
                 output: "out".parse().unwrap(),
             }),
             output: "bin".parse().unwrap(),

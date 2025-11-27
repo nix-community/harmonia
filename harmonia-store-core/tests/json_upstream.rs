@@ -2,6 +2,8 @@
 //!
 //! These tests use JSON test data from the upstream Nix repository.
 
+use std::sync::Arc;
+
 use harmonia_store_core::derived_path::{DerivedPath, OutputSpec, SingleDerivedPath};
 use harmonia_store_core::hash::{Algorithm, Hash};
 use harmonia_store_core::realisation::Realisation;
@@ -105,7 +107,7 @@ test_upstream_json!(
     test_single_derived_path_built,
     libstore_test_data_path("derived-path/single_built.json"),
     SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Opaque(
+        drv_path: Arc::new(SingleDerivedPath::Opaque(
             "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
         )),
         output: "bar".parse().unwrap(),
@@ -116,8 +118,8 @@ test_upstream_json!(
     test_single_derived_path_built_built,
     libstore_test_data_path("derived-path/single_built_built.json"),
     SingleDerivedPath::Built {
-        drv_path: Box::new(SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque(
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque(
                 "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
             )),
             output: "bar".parse().unwrap(),
@@ -136,9 +138,9 @@ test_upstream_json!(
     test_derived_path_built,
     libstore_test_data_path("derived-path/mutli_built.json"),
     DerivedPath::Built {
-        drv_path: SingleDerivedPath::Opaque(
+        drv_path: Arc::new(SingleDerivedPath::Opaque(
             "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
-        ),
+        )),
         outputs: OutputSpec::Named(
             ["bar", "baz"]
                 .into_iter()
@@ -152,12 +154,12 @@ test_upstream_json!(
     test_derived_path_built_built,
     libstore_test_data_path("derived-path/multi_built_built.json"),
     DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque(
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque(
                 "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
             )),
             output: "bar".parse().unwrap(),
-        },
+        }),
         outputs: OutputSpec::Named(
             ["baz", "quux"]
                 .into_iter()
@@ -171,12 +173,12 @@ test_upstream_json!(
     test_derived_path_built_built_wildcard,
     libstore_test_data_path("derived-path/multi_built_built_wildcard.json"),
     DerivedPath::Built {
-        drv_path: SingleDerivedPath::Built {
-            drv_path: Box::new(SingleDerivedPath::Opaque(
+        drv_path: Arc::new(SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque(
                 "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
             )),
             output: "bar".parse().unwrap(),
-        },
+        }),
         outputs: OutputSpec::All,
     }
 );
