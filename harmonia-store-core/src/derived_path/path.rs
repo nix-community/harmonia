@@ -146,6 +146,17 @@ impl SingleDerivedPath {
     pub fn to_legacy_format(&self) -> impl StoreDirDisplay + '_ {
         DisplayPath('!', self)
     }
+
+    /// Returns the root (innermost) store path by recursively traversing Built variants.
+    ///
+    /// For an Opaque path, returns the store path directly.
+    /// For a Built path, recursively follows the drv_path until reaching an Opaque path.
+    pub fn root_path(&self) -> &StorePath {
+        match self {
+            SingleDerivedPath::Opaque(store_path) => store_path,
+            SingleDerivedPath::Built { drv_path, .. } => drv_path.root_path(),
+        }
+    }
 }
 
 impl StoreDirDisplaySep for SingleDerivedPath {
@@ -613,5 +624,37 @@ mod unittests {
             store_dir.display(&value.to_legacy_format()).to_string(),
             expected
         );
+    }
+
+    #[test]
+    fn root_path_opaque() {
+        let store_path: StorePath = "00000000000000000000000000000000-test".parse().unwrap();
+        let path = SingleDerivedPath::Opaque(store_path.clone());
+        assert_eq!(path.root_path(), &store_path);
+    }
+
+    #[test]
+    fn root_path_built() {
+        let store_path: StorePath = "00000000000000000000000000000000-test".parse().unwrap();
+        let path = SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque(store_path.clone())),
+            output: "out".parse().unwrap(),
+        };
+        assert_eq!(path.root_path(), &store_path);
+    }
+
+    #[test]
+    fn root_path_nested() {
+        let store_path: StorePath = "00000000000000000000000000000000-test".parse().unwrap();
+        let inner_path = SingleDerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque(store_path.clone())),
+            output: "inner".parse().unwrap(),
+        };
+        let outer_path = SingleDerivedPath::Built {
+            drv_path: Arc::new(inner_path),
+            output: "outer".parse().unwrap(),
+        };
+        // The root_path should resolve to the innermost store path
+        assert_eq!(outer_path.root_path(), &store_path);
     }
 }

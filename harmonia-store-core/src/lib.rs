@@ -69,6 +69,7 @@ pub mod derived_path;
 pub mod hash;
 pub mod io;
 pub mod log;
+pub mod placeholder;
 pub mod realisation;
 pub mod signature;
 pub mod store_path;

@@ -230,3 +230,20 @@ impl<'de> Deserialize<'de> for Derivation {
         })
     }
 }
+
+impl Derivation {
+    /// Create a new derivation with the given name, platform, and builder, which are the minimal
+    /// fields for a derivation.
+    pub fn new(name: StorePathName, platform: ByteString, builder: ByteString) -> Self {
+        Self {
+            name,
+            outputs: DerivationOutputs::new(),
+            inputs: BTreeSet::new(),
+            platform,
+            builder,
+            args: Vec::new(),
+            env: Default::default(),
+            structured_attrs: None,
+        }
+    }
+}

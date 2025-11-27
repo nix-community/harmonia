@@ -4,6 +4,7 @@ Copyright (c) 2022 Helsinki Systems GmbH
 Copyright (c) 2024 Brian Olsen (Nix.rs portions)
 Copyright (c) 2025 Jörg Thalheim
 Copyright (c) 2025 Obsidian Systems LLC
+Copyright (c) 2025 PDT Partners, LLC.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -36,5 +37,9 @@ Specifically, the following crates contain code derived from Nix.rs:
 - harmonia-protocol-derive (from nixrs-derive)
 - harmonia-daemon (from nixrs daemon)
 
-Individual source files from Nix.rs contain SPDX headers referencing the upstream
-commit hash for provenance tracking.
+This also contains code from PDT Partner's Nix-Ninja
+(https://github.com/pdtpartners/nix-ninja) which is also licensed under the MIT
+license.
+
+Individual source files from each project contain SPDX headers referencing the
+upstream commit hash for provenance tracking.

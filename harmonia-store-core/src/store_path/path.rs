@@ -111,6 +111,11 @@ impl StorePath {
         let s = String::deserialize(deserializer)?;
         Self::from_base_path(&s).map_err(serde::de::Error::custom)
     }
+
+    /// Check if this store path points to a derivation (ends with .drv)
+    pub fn is_derivation(&self) -> bool {
+        self.name.as_ref().ends_with(".drv")
+    }
 }
 
 impl fmt::Debug for StorePath {
