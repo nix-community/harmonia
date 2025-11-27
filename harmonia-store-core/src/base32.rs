@@ -65,9 +65,7 @@ pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartia
 }
 
 #[cfg(test)]
-#[allow(unsafe_code)]
 mod unittests {
-    use data_encoding::{BitOrder, Specification};
     use hex_literal::hex;
     use rstest::rstest;
 
@@ -136,15 +134,11 @@ mod unittests {
     #[case::nix1("2gs8k559z4rlahfx0y688s49m2vvszylcikrfinm30ly9rak69236nkam5ydvly1ai7xac99vxfc4ii84hawjbk876blyk1jfhkbbyx", &hex!("ddaf 35a1 9361 7aba cc41 7349 ae20 4131 12e6 fa4e 89a9 7ea2 0a9e eee6 4b55 d39a 2192 992a 274f c1a8 36ba 3c23 a3fe ebbd 454d 4423 643c e80e 2a9a c94f a54c a49f"))]
     #[case::nix1("x0xf8v9fxf3jk8zln1cwlsrmhqvp0f88", &hex!("0839 7037 8635 6bca 59b0 f4a3 2987 eb2e 6de4 3ae8"))]
     fn test_encode_bytes(#[case] expected: &str, #[case] data: &[u8]) {
-        let mut spec = Specification::new();
-        spec.symbols.push_str("0123456789abcdfghijklmnpqrsvwxyz");
-        spec.bit_order = BitOrder::LeastSignificantFirst;
-        //spec.padding = Some('=');
-        let encoding = spec.encoding().unwrap();
-        let mut actual = encoding.encode(data);
-        unsafe { actual.as_bytes_mut() }.reverse();
+        // Test encode_string
+        let actual = encode_string(data);
         assert_eq!(&actual[..], expected);
 
+        // Test encode_mut
         let mut output = vec![0u8; encode_len(data.len())];
         encode_mut(data, &mut output);
         let actual2 = String::from_utf8(output).unwrap();
