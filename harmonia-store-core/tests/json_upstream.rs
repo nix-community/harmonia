@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use harmonia_store_core::derived_path::{DerivedPath, OutputSpec, SingleDerivedPath};
 use harmonia_store_core::hash::{Algorithm, Hash};
+use harmonia_store_core::placeholder::Placeholder;
 use harmonia_store_core::realisation::Realisation;
 use harmonia_store_core::store_path::{ContentAddress, StorePath};
 use hex_literal::hex;
@@ -481,9 +482,21 @@ test_upstream_json!(
             args: vec![bytes::Bytes::from("-c"), bytes::Bytes::from("echo hello > $out")],
             env: {
                 let mut map = BTreeMap::new();
-                map.insert(bytes::Bytes::from("out"), bytes::Bytes::from("/1rz4g4znpzjwh1xymhjpm42vipw92pr73vdgl6xs1hycac8kf2n9"));
-                map.insert(bytes::Bytes::from("bin"), bytes::Bytes::from("/04f3da1kmbr67m3gzxikmsl4vjz5zf777sv6m14ahv22r65aac9m"));
-                map.insert(bytes::Bytes::from("dev"), bytes::Bytes::from("/02qcpld1y6xhs5gz9bchpxaw0xdhmsp5dv88lh25r2ss44kh8dxz"));
+                let out_placeholder = Placeholder::standard_output("out").render();
+                let bin_placeholder = Placeholder::standard_output("bin").render();
+                let dev_placeholder = Placeholder::standard_output("dev").render();
+                map.insert(
+                    bytes::Bytes::from("out"),
+                    bytes::Bytes::from(out_placeholder.to_string_lossy().to_string()),
+                );
+                map.insert(
+                    bytes::Bytes::from("bin"),
+                    bytes::Bytes::from(bin_placeholder.to_string_lossy().to_string()),
+                );
+                map.insert(
+                    bytes::Bytes::from("dev"),
+                    bytes::Bytes::from(dev_placeholder.to_string_lossy().to_string()),
+                );
                 map
             },
             structured_attrs: Some(StructuredAttrs {
@@ -563,13 +576,15 @@ test_upstream_json!(
             ],
             env: {
                 let mut map = BTreeMap::new();
+                let out_placeholder = Placeholder::standard_output("out").render();
+                let dev_placeholder = Placeholder::standard_output("dev").render();
                 map.insert(
                     bytes::Bytes::from("out"),
-                    bytes::Bytes::from("/1rz4g4znpzjwh1xymhjpm42vipw92pr73vdgl6xs1hycac8kf2n9"),
+                    bytes::Bytes::from(out_placeholder.to_string_lossy().to_string()),
                 );
                 map.insert(
                     bytes::Bytes::from("dev"),
-                    bytes::Bytes::from("/02qcpld1y6xhs5gz9bchpxaw0xdhmsp5dv88lh25r2ss44kh8dxz"),
+                    bytes::Bytes::from(dev_placeholder.to_string_lossy().to_string()),
                 );
                 map
             },
