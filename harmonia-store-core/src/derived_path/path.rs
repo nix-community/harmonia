@@ -3,8 +3,6 @@ use std::ops::Deref as _;
 #[cfg(any(test, feature = "test"))]
 use proptest::prelude::{Arbitrary, BoxedStrategy};
 use serde::{Deserialize, Serialize};
-#[cfg(any(test, feature = "test"))]
-use test_strategy::Arbitrary;
 
 use crate::store_path::{FromStoreDirStr, ParseStorePathError, StoreDirDisplay, StorePath};
 

@@ -1,4 +1,6 @@
-use data_encoding::{BitOrder, DecodeError, DecodeKind, DecodePartial, Encoding, Specification};
+#[cfg(test)]
+use data_encoding::DecodeKind;
+use data_encoding::{BitOrder, DecodeError, DecodePartial, Encoding, Specification};
 use std::sync::LazyLock;
 
 /// Nix base32 encoding (lowercase, without padding, LSB first, reversed)
