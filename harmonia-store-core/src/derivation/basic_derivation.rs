@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(test)]
 use proptest::prelude::{Arbitrary, BoxedStrategy};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ByteString;
+use crate::derived_path::SingleDerivedPath;
 use crate::store_path::{StorePathName, StorePathSet};
 
 use super::{DerivationInputs, DerivationOutputs};
@@ -50,7 +51,7 @@ fn default_version() -> u32 {
 }
 
 pub type BasicDerivation = DerivationT<StorePathSet>;
-pub type Derivation = DerivationT<DerivationInputs>;
+pub type Derivation = DerivationT<BTreeSet<SingleDerivedPath>>;
 
 #[cfg(test)]
 pub mod arbitrary {
@@ -119,50 +120,76 @@ pub mod arbitrary {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DerivationHelper {
+    name: String,
+    outputs: DerivationOutputs,
+    inputs: DerivationInputs,
+    #[serde(rename = "system")]
+    platform: String,
+    builder: String,
+    args: Vec<String>,
+    env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    structured_attrs: Option<StructuredAttrs>,
+    #[serde(default = "default_version")]
+    version: u32,
+}
+
 impl Serialize for Derivation {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("Derivation", 9)?;
-        state.serialize_field("name", &self.name.to_string())?;
-        state.serialize_field("outputs", &self.outputs)?;
-        state.serialize_field("inputs", &self.inputs)?;
+        // Convert BTreeSet<SingleDerivedPath> to DerivationInputs for serialization
+        let inputs = DerivationInputs::from(&self.inputs);
 
         // Serialize ByteString fields as strings
         let platform_str = std::str::from_utf8(&self.platform)
             .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in platform: {}", e)))?;
-        state.serialize_field("system", &platform_str)?;
 
         let builder_str = std::str::from_utf8(&self.builder)
             .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in builder: {}", e)))?;
-        state.serialize_field("builder", &builder_str)?;
 
-        let args_strs: Result<Vec<&str>, _> =
-            self.args.iter().map(|b| std::str::from_utf8(b)).collect();
-        let args_strs = args_strs
-            .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in args: {}", e)))?;
-        state.serialize_field("args", &args_strs)?;
+        let args_strs: Result<Vec<String>, _> = self
+            .args
+            .iter()
+            .map(|b| {
+                std::str::from_utf8(b)
+                    .map(|s| s.to_string())
+                    .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in args: {}", e)))
+            })
+            .collect();
+        let args_strs = args_strs?;
 
         // Serialize env map
-        let env_map: Result<BTreeMap<&str, &str>, _> = self
+        let env_map: Result<BTreeMap<String, String>, _> = self
             .env
             .iter()
-            .map(|(k, v)| Ok((std::str::from_utf8(k)?, std::str::from_utf8(v)?)))
-            .collect();
-        let env_map = env_map.map_err(|e: std::str::Utf8Error| {
-            serde::ser::Error::custom(format!("invalid UTF-8 in env: {}", e))
-        })?;
-        state.serialize_field("env", &env_map)?;
+            .map(|(k, v)| {
+                Ok((
+                    std::str::from_utf8(k)?.to_string(),
+                    std::str::from_utf8(v)?.to_string(),
+                ))
+            })
+            .collect::<Result<_, std::str::Utf8Error>>()
+            .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in env: {}", e)));
+        let env_map = env_map?;
 
-        if let Some(ref attrs) = self.structured_attrs {
-            state.serialize_field("structuredAttrs", attrs)?;
-        } else {
-            state.skip_field("structuredAttrs")?;
-        }
-        state.serialize_field("version", &default_version())?;
-        state.end()
+        let helper = DerivationHelper {
+            name: self.name.to_string(),
+            outputs: self.outputs.clone(),
+            inputs,
+            platform: platform_str.to_string(),
+            builder: builder_str.to_string(),
+            args: args_strs,
+            env: env_map,
+            structured_attrs: self.structured_attrs.clone(),
+            version: default_version(),
+        };
+
+        helper.serialize(serializer)
     }
 }
 
@@ -171,23 +198,6 @@ impl<'de> Deserialize<'de> for Derivation {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct DerivationHelper {
-            name: String,
-            outputs: DerivationOutputs,
-            inputs: DerivationInputs,
-            #[serde(rename = "system")]
-            platform: String,
-            builder: String,
-            args: Vec<String>,
-            env: BTreeMap<String, String>,
-            #[serde(default)]
-            structured_attrs: Option<StructuredAttrs>,
-            #[serde(default = "default_version")]
-            version: u32,
-        }
-
         let helper = DerivationHelper::deserialize(deserializer)?;
 
         // Assert version is 4
@@ -198,13 +208,16 @@ impl<'de> Deserialize<'de> for Derivation {
             )));
         }
 
+        // Convert DerivationInputs to BTreeSet<SingleDerivedPath>
+        let inputs = BTreeSet::from(&helper.inputs);
+
         Ok(Derivation {
             name: helper
                 .name
                 .parse()
                 .map_err(|e| serde::de::Error::custom(format!("invalid derivation name: {}", e)))?,
             outputs: helper.outputs,
-            inputs: helper.inputs,
+            inputs,
             platform: ByteString::from(helper.platform),
             builder: ByteString::from(helper.builder),
             args: helper.args.into_iter().map(ByteString::from).collect(),

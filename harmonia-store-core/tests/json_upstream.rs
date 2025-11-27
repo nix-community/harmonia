@@ -374,28 +374,34 @@ test_upstream_json!(
     test_derivation_simple,
     libstore_test_data_path("derivation/simple-derivation.json"),
     {
-        use harmonia_store_core::derivation::{Derivation, DerivationInputs, OutputInputs};
-        use std::collections::BTreeMap;
+        use harmonia_store_core::derivation::Derivation;
+        use std::collections::{BTreeMap, BTreeSet};
+
         Derivation {
             name: "simple-derivation".parse().unwrap(),
             outputs: BTreeMap::new(),
-            inputs: DerivationInputs {
-                drvs: {
-                    let mut map = BTreeMap::new();
-                    map.insert(
-                        "c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-dep2.drv".parse().unwrap(),
-                        OutputInputs {
-                            outputs: ["cat".parse().unwrap(), "dog".parse().unwrap()]
-                                .into_iter()
-                                .collect(),
-                            dynamic_outputs: BTreeMap::new(),
-                        },
-                    );
-                    map
-                },
-                srcs: ["c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-dep1".parse().unwrap()]
-                    .into_iter()
-                    .collect(),
+            inputs: {
+                let dep2_drv = Arc::new(SingleDerivedPath::Opaque(
+                    "c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-dep2.drv".parse().unwrap(),
+                ));
+
+                [
+                    // Source path
+                    SingleDerivedPath::Opaque(
+                        "c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-dep1".parse().unwrap(),
+                    ),
+                    // Built derivation outputs
+                    SingleDerivedPath::Built {
+                        drv_path: dep2_drv.clone(),
+                        output: "cat".parse().unwrap(),
+                    },
+                    SingleDerivedPath::Built {
+                        drv_path: dep2_drv,
+                        output: "dog".parse().unwrap(),
+                    },
+                ]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
             },
             platform: bytes::Bytes::from("wasm-sel4"),
             builder: bytes::Bytes::from("foo"),
@@ -414,12 +420,11 @@ test_upstream_json!(
     test_derivation_ca_structured_attrs,
     libstore_test_data_path("derivation/ca/advanced-attributes-structured-attrs.json"),
     {
-        use harmonia_store_core::derivation::{
-            Derivation, DerivationInputs, DerivationOutput, OutputInputs, StructuredAttrs,
-        };
+        use harmonia_store_core::derivation::{Derivation, DerivationOutput, StructuredAttrs};
         use harmonia_store_core::hash::Algorithm;
         use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
-        use std::collections::BTreeMap;
+        use std::collections::{BTreeMap, BTreeSet};
+
         Derivation {
             name: "advanced-attributes-structured-attrs".parse().unwrap(),
             outputs: {
@@ -438,28 +443,38 @@ test_upstream_json!(
                 );
                 map
             },
-            inputs: DerivationInputs {
-                drvs: {
-                    let mut map = BTreeMap::new();
-                    map.insert(
-                        "j56sf12rxpcv5swr14vsjn5cwm6bj03h-foo.drv".parse().unwrap(),
-                        OutputInputs {
-                            outputs: ["dev".parse().unwrap(), "out".parse().unwrap()].into_iter().collect(),
-                            dynamic_outputs: BTreeMap::new(),
-                        },
-                    );
-                    map.insert(
-                        "qnml92yh97a6fbrs2m5qg5cqlc8vni58-bar.drv".parse().unwrap(),
-                        OutputInputs {
-                            outputs: ["dev".parse().unwrap(), "out".parse().unwrap()].into_iter().collect(),
-                            dynamic_outputs: BTreeMap::new(),
-                        },
-                    );
-                    map
-                },
-                srcs: ["qnml92yh97a6fbrs2m5qg5cqlc8vni58-bar.drv".parse().unwrap()]
-                    .into_iter()
-                    .collect(),
+            inputs: {
+                let foo_drv = Arc::new(SingleDerivedPath::Opaque(
+                    "j56sf12rxpcv5swr14vsjn5cwm6bj03h-foo.drv".parse().unwrap(),
+                ));
+                let bar_drv = Arc::new(SingleDerivedPath::Opaque(
+                    "qnml92yh97a6fbrs2m5qg5cqlc8vni58-bar.drv".parse().unwrap(),
+                ));
+
+                [
+                    // Source path
+                    SingleDerivedPath::Opaque("qnml92yh97a6fbrs2m5qg5cqlc8vni58-bar.drv".parse().unwrap()),
+                    // Built derivation outputs from foo.drv
+                    SingleDerivedPath::Built {
+                        drv_path: foo_drv.clone(),
+                        output: "dev".parse().unwrap(),
+                    },
+                    SingleDerivedPath::Built {
+                        drv_path: foo_drv,
+                        output: "out".parse().unwrap(),
+                    },
+                    // Built derivation outputs from bar.drv
+                    SingleDerivedPath::Built {
+                        drv_path: bar_drv.clone(),
+                        output: "dev".parse().unwrap(),
+                    },
+                    SingleDerivedPath::Built {
+                        drv_path: bar_drv,
+                        output: "out".parse().unwrap(),
+                    },
+                ]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
             },
             platform: bytes::Bytes::from("my-system"),
             builder: bytes::Bytes::from("/bin/bash"),
@@ -515,12 +530,10 @@ test_upstream_json!(
     test_derivation_ca_structured_attrs_defaults,
     libstore_test_data_path("derivation/ca/advanced-attributes-structured-attrs-defaults.json"),
     {
-        use harmonia_store_core::derivation::{
-            Derivation, DerivationInputs, DerivationOutput, StructuredAttrs,
-        };
+        use harmonia_store_core::derivation::{Derivation, DerivationOutput, StructuredAttrs};
         use harmonia_store_core::hash::Algorithm;
         use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
-        use std::collections::BTreeMap;
+        use std::collections::{BTreeMap, BTreeSet};
         Derivation {
             name: "advanced-attributes-structured-attrs-defaults"
                 .parse()
@@ -541,10 +554,7 @@ test_upstream_json!(
                 );
                 map
             },
-            inputs: DerivationInputs {
-                drvs: BTreeMap::new(),
-                srcs: Default::default(),
-            },
+            inputs: BTreeSet::new(),
             platform: bytes::Bytes::from("my-system"),
             builder: bytes::Bytes::from("/bin/bash"),
             args: vec![
@@ -584,10 +594,8 @@ test_upstream_json!(
     test_derivation_ia_structured_attrs,
     libstore_test_data_path("derivation/ia/advanced-attributes-structured-attrs.json"),
     {
-        use harmonia_store_core::derivation::{
-            Derivation, DerivationInputs, DerivationOutput, OutputInputs, StructuredAttrs,
-        };
-        use std::collections::BTreeMap;
+        use harmonia_store_core::derivation::{Derivation, DerivationOutput, StructuredAttrs};
+        use std::collections::{BTreeMap, BTreeSet};
         Derivation {
             name: "advanced-attributes-structured-attrs".parse().unwrap(),
             outputs: {
@@ -606,28 +614,38 @@ test_upstream_json!(
                 );
                 map
             },
-            inputs: DerivationInputs {
-                drvs: {
-                    let mut map = BTreeMap::new();
-                    map.insert(
-                        "afc3vbjbzql750v2lp8gxgaxsajphzih-foo.drv".parse().unwrap(),
-                        OutputInputs {
-                            outputs: ["dev".parse().unwrap(), "out".parse().unwrap()].into_iter().collect(),
-                            dynamic_outputs: BTreeMap::new(),
-                        },
-                    );
-                    map.insert(
-                        "vj2i49jm2868j2fmqvxm70vlzmzvgv14-bar.drv".parse().unwrap(),
-                        OutputInputs {
-                            outputs: ["dev".parse().unwrap(), "out".parse().unwrap()].into_iter().collect(),
-                            dynamic_outputs: BTreeMap::new(),
-                        },
-                    );
-                    map
-                },
-                srcs: ["vj2i49jm2868j2fmqvxm70vlzmzvgv14-bar.drv".parse().unwrap()]
-                    .into_iter()
-                    .collect(),
+            inputs: {
+                let foo_drv = Arc::new(SingleDerivedPath::Opaque(
+                    "afc3vbjbzql750v2lp8gxgaxsajphzih-foo.drv".parse().unwrap(),
+                ));
+                let bar_drv = Arc::new(SingleDerivedPath::Opaque(
+                    "vj2i49jm2868j2fmqvxm70vlzmzvgv14-bar.drv".parse().unwrap(),
+                ));
+
+                [
+                    // Source path
+                    SingleDerivedPath::Opaque("vj2i49jm2868j2fmqvxm70vlzmzvgv14-bar.drv".parse().unwrap()),
+                    // Built derivation outputs from foo.drv
+                    SingleDerivedPath::Built {
+                        drv_path: foo_drv.clone(),
+                        output: "dev".parse().unwrap(),
+                    },
+                    SingleDerivedPath::Built {
+                        drv_path: foo_drv,
+                        output: "out".parse().unwrap(),
+                    },
+                    // Built derivation outputs from bar.drv
+                    SingleDerivedPath::Built {
+                        drv_path: bar_drv.clone(),
+                        output: "dev".parse().unwrap(),
+                    },
+                    SingleDerivedPath::Built {
+                        drv_path: bar_drv,
+                        output: "out".parse().unwrap(),
+                    },
+                ]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
             },
             platform: bytes::Bytes::from("my-system"),
             builder: bytes::Bytes::from("/bin/bash"),
@@ -681,10 +699,8 @@ test_upstream_json!(
     test_derivation_ia_structured_attrs_defaults,
     libstore_test_data_path("derivation/ia/advanced-attributes-structured-attrs-defaults.json"),
     {
-        use harmonia_store_core::derivation::{
-            Derivation, DerivationInputs, DerivationOutput, StructuredAttrs,
-        };
-        use std::collections::BTreeMap;
+        use harmonia_store_core::derivation::{Derivation, DerivationOutput, StructuredAttrs};
+        use std::collections::{BTreeMap, BTreeSet};
         Derivation {
             name: "advanced-attributes-structured-attrs-defaults"
                 .parse()
@@ -701,10 +717,7 @@ test_upstream_json!(
                 );
                 map
             },
-            inputs: DerivationInputs {
-                drvs: BTreeMap::new(),
-                srcs: Default::default(),
-            },
+            inputs: BTreeSet::new(),
             platform: bytes::Bytes::from("my-system"),
             builder: bytes::Bytes::from("/bin/bash"),
             args: vec![
