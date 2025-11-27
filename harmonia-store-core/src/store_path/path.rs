@@ -320,6 +320,12 @@ impl AsRef<[u8]> for StorePathHash {
     }
 }
 
+impl AsRef<[u8; STORE_PATH_HASH_SIZE]> for StorePathHash {
+    fn as_ref(&self) -> &[u8; STORE_PATH_HASH_SIZE] {
+        &self.0
+    }
+}
+
 impl Deref for StorePathHash {
     type Target = [u8];
 
