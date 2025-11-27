@@ -367,6 +367,13 @@ response.send_stream(nar_stream).await?;                   // harmonia-cache
 3. **Format-focused**: Only concerned with archive structure
 4. **No store semantics**: Don't know about derivations, signatures, etc.
 
+### Database Layer Rules
+
+1. **Schema-compatible**: Match Nix's db.sqlite schema exactly
+2. **Read-only default**: System database opens in immutable mode
+3. **In-memory testing**: Support `:memory:` for fast tests
+4. **No async**: SQLite operations are synchronous (wrap in spawn_blocking)
+
 ### Protocol Layer Rules
 
 1. **Versioned**: Support protocol version negotiation
@@ -397,6 +404,12 @@ When reviewing code, ensure:
 - [ ] Streaming-friendly (bounded memory usage)
 - [ ] Independent of store semantics
 - [ ] Tests use in-memory buffers
+
+**Database layer** (harmonia-store-db):
+- [ ] Schema matches Nix's schema.sql exactly
+- [ ] System DB opens read-only with immutable flag
+- [ ] Tests use in-memory database
+- [ ] No async in public API (callers wrap in spawn_blocking)
 
 **Protocol layer** (harmonia-protocol):
 - [ ] Protocol messages well-documented
