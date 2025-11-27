@@ -117,6 +117,14 @@ impl fmt::Display for StoreDir {
     }
 }
 
+impl std::str::FromStr for StoreDir {
+    type Err = StoreDirError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        StoreDir::new(s)
+    }
+}
+
 pub trait FromStoreDirStr: Sized {
     type Error: std::error::Error;
     fn from_store_dir_str(store_dir: &StoreDir, s: &str) -> Result<Self, Self::Error>;
