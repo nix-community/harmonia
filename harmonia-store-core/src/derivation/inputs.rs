@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::derived_path::OutputName;
 use crate::store_path::{StorePath, StorePathSet};
 
 /// A single derivation input specifying which outputs are needed
@@ -9,10 +10,10 @@ use crate::store_path::{StorePath, StorePathSet};
 #[serde(rename_all = "camelCase")]
 pub struct OutputInputs {
     /// The specific outputs needed from this derivation
-    pub outputs: BTreeSet<String>,
+    pub outputs: BTreeSet<OutputName>,
     /// Dynamic outputs (experimental feature)
     #[serde(default)]
-    pub dynamic_outputs: BTreeMap<String, OutputInputs>,
+    pub dynamic_outputs: BTreeMap<OutputName, OutputInputs>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

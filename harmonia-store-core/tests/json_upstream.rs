@@ -383,7 +383,7 @@ test_upstream_json!(
                     map.insert(
                         "c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-dep2.drv".parse().unwrap(),
                         OutputInputs {
-                            outputs: ["cat".to_string(), "dog".to_string()].into_iter().collect(),
+                            outputs: ["cat".parse().unwrap(), "dog".parse().unwrap()].into_iter().collect(),
                             dynamic_outputs: BTreeMap::new(),
                         },
                     );
@@ -440,14 +440,14 @@ test_upstream_json!(
                     map.insert(
                         "j56sf12rxpcv5swr14vsjn5cwm6bj03h-foo.drv".parse().unwrap(),
                         OutputInputs {
-                            outputs: ["dev".to_string(), "out".to_string()].into_iter().collect(),
+                            outputs: ["dev".parse().unwrap(), "out".parse().unwrap()].into_iter().collect(),
                             dynamic_outputs: BTreeMap::new(),
                         },
                     );
                     map.insert(
                         "qnml92yh97a6fbrs2m5qg5cqlc8vni58-bar.drv".parse().unwrap(),
                         OutputInputs {
-                            outputs: ["dev".to_string(), "out".to_string()].into_iter().collect(),
+                            outputs: ["dev".parse().unwrap(), "out".parse().unwrap()].into_iter().collect(),
                             dynamic_outputs: BTreeMap::new(),
                         },
                     );
@@ -608,14 +608,14 @@ test_upstream_json!(
                     map.insert(
                         "afc3vbjbzql750v2lp8gxgaxsajphzih-foo.drv".parse().unwrap(),
                         OutputInputs {
-                            outputs: ["dev".to_string(), "out".to_string()].into_iter().collect(),
+                            outputs: ["dev".parse().unwrap(), "out".parse().unwrap()].into_iter().collect(),
                             dynamic_outputs: BTreeMap::new(),
                         },
                     );
                     map.insert(
                         "vj2i49jm2868j2fmqvxm70vlzmzvgv14-bar.drv".parse().unwrap(),
                         OutputInputs {
-                            outputs: ["dev".to_string(), "out".to_string()].into_iter().collect(),
+                            outputs: ["dev".parse().unwrap(), "out".parse().unwrap()].into_iter().collect(),
                             dynamic_outputs: BTreeMap::new(),
                         },
                     );
