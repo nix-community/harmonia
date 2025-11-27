@@ -1084,9 +1084,9 @@ dependencies = [
  "env_logger",
  "harmonia-store-core",
  "harmonia-store-core-legacy",
+ "harmonia-store-db",
  "harmonia-store-remote-legacy",
  "log",
- "rusqlite",
  "serde",
  "tempfile",
  "thiserror",
@@ -1228,6 +1228,21 @@ dependencies = [
  "rusqlite",
  "tempfile",
  "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "harmonia-store-remote"
+version = "2.1.0"
+dependencies = [
+ "async-stream",
+ "futures",
+ "harmonia-nar",
+ "harmonia-protocol",
+ "harmonia-store-core",
+ "tempfile",
+ "thiserror",
+ "tokio",
  "tracing",
 ]
 

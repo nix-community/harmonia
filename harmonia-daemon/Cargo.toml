@@ -12,13 +12,13 @@ repository.workspace = true
 harmonia-store-core = { path = "../harmonia-store-core" }
 harmonia-store-core-legacy = { path = "../harmonia-store-core-legacy" }  # Legacy
 harmonia-store-remote-legacy = { path = "../harmonia-store-remote-legacy" }  # Legacy
+harmonia-store-db = { path = "../harmonia-store-db" }
 tokio = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
-rusqlite = { version = "0.37", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"

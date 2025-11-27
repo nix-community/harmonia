@@ -362,9 +362,11 @@ pub trait DaemonStore: Send {
 
     fn build_derivation<'a>(
         &'a mut self,
+        drv_path: &'a StorePath,
         drv: &'a BasicDerivation,
         mode: BuildMode,
     ) -> impl ResultLog<Output = DaemonResult<BuildResult>> + Send + 'a {
+        let _ = (drv_path, drv, mode);
         ready(Err(DaemonError::unimplemented(Operation::BuildDerivation))).empty_logs()
     }
 
@@ -664,10 +666,11 @@ where
 
     fn build_derivation<'a>(
         &'a mut self,
+        drv_path: &'a StorePath,
         drv: &'a BasicDerivation,
         mode: BuildMode,
     ) -> impl ResultLog<Output = DaemonResult<BuildResult>> + 'a {
-        (**self).build_derivation(drv, mode)
+        (**self).build_derivation(drv_path, drv, mode)
     }
 
     fn query_missing<'a>(

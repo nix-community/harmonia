@@ -1,13 +1,15 @@
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-License-Identifier: MIT
+
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum DaemonError {
-    #[error("Database error: {message}")]
-    Database {
-        message: String,
-        #[source]
-        source: rusqlite::Error,
-    },
+    #[error("Database error: {0}")]
+    Database(String),
+
+    #[error("Store database error: {0}")]
+    StoreDb(#[from] harmonia_store_db::Error),
 
     #[error("IO error: {message}")]
     Io {
@@ -27,11 +29,8 @@ pub enum DaemonError {
 }
 
 impl DaemonError {
-    pub fn database(message: impl Into<String>, source: rusqlite::Error) -> Self {
-        Self::Database {
-            message: message.into(),
-            source,
-        }
+    pub fn database(message: impl Into<String>) -> Self {
+        Self::Database(message.into())
     }
 
     pub fn io(message: impl Into<String>, source: std::io::Error) -> Self {
@@ -65,11 +64,14 @@ pub trait DbContext<T> {
         F: FnOnce() -> String;
 }
 
-impl<T> DbContext<T> for Result<T, rusqlite::Error> {
+impl<T> DbContext<T> for Result<T, harmonia_store_db::Error> {
     fn db_context<F>(self, f: F) -> Result<T, DaemonError>
     where
         F: FnOnce() -> String,
     {
-        self.map_err(|e| DaemonError::database(f(), e))
+        self.map_err(|e| {
+            let msg = f();
+            DaemonError::Database(format!("{msg}: {e}"))
+        })
     }
 }

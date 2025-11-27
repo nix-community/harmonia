@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2024 griff
+# SPDX-FileCopyrightText: 2025 Jörg Thalheim
+# SPDX-License-Identifier: EUPL-1.2 OR MIT
+#
+# This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
+# Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
+
+[package]
+name = "harmonia-store-remote"
+description = "Nix daemon client library for remote store access"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Harmonia crates
+harmonia-store-core = { path = "../harmonia-store-core" }
+harmonia-protocol = { path = "../harmonia-protocol" }
+harmonia-nar = { path = "../harmonia-nar" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-stream = "0.3"
+
+# Utilities
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

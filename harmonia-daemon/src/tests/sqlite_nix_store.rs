@@ -1,5 +1,8 @@
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-License-Identifier: MIT
+
 use crate::handler::LocalStoreHandler;
-use crate::sqlite::StoreDb;
+use harmonia_store_db::StoreDb;
 use harmonia_store_remote_legacy::protocol::StorePath;
 use harmonia_store_remote_legacy::server::RequestHandler;
 use std::process::Command;
@@ -42,7 +45,8 @@ fn test_sqlite_with_nix_initialized_store() {
     );
 
     // Now test our SQLite module can open and query the database
-    let db = StoreDb::open(&db_path).expect("Failed to open database");
+    let db = StoreDb::open(&db_path, harmonia_store_db::OpenMode::ReadOnly)
+        .expect("Failed to open database");
 
     // Copy something small to the store
     let hello_drv = Command::new("nix")
@@ -92,18 +96,16 @@ fn test_sqlite_with_nix_initialized_store() {
                 .next()
                 .and_then(|line| line.split_whitespace().next())
             {
-                // The path should now be in our test store directory
-                let store_path = std::path::Path::new(path);
-
-                // Test is_valid_path
-                let is_valid = db.is_valid_path(store_path).unwrap();
+                // Test is_valid_path - use full path string
+                let is_valid = db.is_valid_path(path).unwrap();
                 assert!(is_valid, "Path {path} should be valid");
 
-                // Test query_path_info
-                let info = db.query_path_info(store_path).unwrap();
+                // Test query_path_info - use full path string
+                let info = db.query_path_info(path).unwrap();
                 assert!(info.is_some(), "Should get path info for {path}");
 
                 // Extract hash part (first 32 chars of the base name)
+                let store_path = std::path::Path::new(path);
                 if let Some(hash_part) = store_path
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -111,7 +113,9 @@ fn test_sqlite_with_nix_initialized_store() {
                     .map(|name| &name[..32])
                 {
                     // Test query_path_from_hash_part
-                    let found_path = db.query_path_from_hash_part(&store_dir, hash_part).unwrap();
+                    let found_path = db
+                        .query_path_from_hash_part(&store_dir.to_string_lossy(), hash_part)
+                        .unwrap();
                     assert!(
                         found_path.is_some(),
                         "Should find path by hash part {hash_part}"
@@ -123,7 +127,7 @@ fn test_sqlite_with_nix_initialized_store() {
 
     // Even if we couldn't copy anything, at least verify the empty database works
     let is_valid = db
-        .is_valid_path(&store_dir.join("non-existent-path"))
+        .is_valid_path(&store_dir.join("non-existent-path").to_string_lossy())
         .unwrap();
     assert!(!is_valid, "Non-existent path should not be valid");
 }

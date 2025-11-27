@@ -469,7 +469,7 @@ pub struct BuildResult {
 }
 
 pub type KeyedBuildResults = Vec<KeyedBuildResult>;
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 #[cfg_attr(test, arbitrary(args = ProtocolVersion))]
 pub struct KeyedBuildResult {
@@ -528,7 +528,7 @@ pub struct CollectGarbageRequest {
     _removed3: IgnoredZero,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, NixDeserialize, NixSerialize)]
 pub struct CollectGarbageResponse {
     pub paths_deleted: Vec<DaemonString>,
     pub bytes_freed: u64,
@@ -575,7 +575,7 @@ pub struct AddToStoreNarRequest {
     pub dont_check_sigs: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct QueryMissingResult {
     pub will_build: StorePathSet,
