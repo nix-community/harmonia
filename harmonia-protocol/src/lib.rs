@@ -27,7 +27,7 @@
 //! 3. **Well-specified**: Document wire format
 //! 4. **Type-safe**: Use strong types for protocol messages
 
-// TODO T012b: Re-export types from store-core for use in protocol code
+// Re-export types from store-core for use in protocol code
 pub use harmonia_store_core::{
     ByteString, derivation, derived_path, hash, io, log, realisation, signature, store_path,
 };
@@ -39,7 +39,6 @@ pub mod de;
 pub mod ser;
 pub mod types;
 pub mod version;
-pub mod wire;
 
 // Re-export commonly used types to crate root for internal use
 pub use version::ProtocolVersion;

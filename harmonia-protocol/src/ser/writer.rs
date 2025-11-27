@@ -14,7 +14,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 use crate::daemon::ProtocolVersion;
 use crate::io::{DEFAULT_BUF_SIZE, RESERVED_BUF_SIZE};
 use crate::store_path::StoreDir;
-use crate::wire::{ZEROS, calc_padding};
+use harmonia_store_core::wire::{ZEROS, calc_padding};
 
 use super::{Error, NixWrite};
 
