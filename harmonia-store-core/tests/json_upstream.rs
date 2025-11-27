@@ -383,7 +383,9 @@ test_upstream_json!(
                     map.insert(
                         "c015dhfh5l0lp6wxyvdn7bmwhbbr6hr9-dep2.drv".parse().unwrap(),
                         OutputInputs {
-                            outputs: ["cat".parse().unwrap(), "dog".parse().unwrap()].into_iter().collect(),
+                            outputs: ["cat".parse().unwrap(), "dog".parse().unwrap()]
+                                .into_iter()
+                                .collect(),
                             dynamic_outputs: BTreeMap::new(),
                         },
                     );

@@ -215,7 +215,9 @@ impl StoreDirDisplay for StorePath {
 const STORE_PATH_HASH_SIZE: usize = 20;
 const STORE_PATH_HASH_ENCODED_SIZE: usize = base32::encode_len(STORE_PATH_HASH_SIZE);
 
-#[derive(Clone, Copy, PartialEq, Eq, zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable,
+)]
 #[repr(transparent)]
 pub struct StorePathHash([u8; STORE_PATH_HASH_SIZE]);
 
