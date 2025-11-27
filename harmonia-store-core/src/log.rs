@@ -127,9 +127,9 @@ impl LogMessage {
 }
 
 #[cfg(test)]
-impl Arbitrary for LogMessage {
+impl proptest::arbitrary::Arbitrary for LogMessage {
     type Parameters = ProtocolVersion;
-    type Strategy = BoxedStrategy<Self>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
