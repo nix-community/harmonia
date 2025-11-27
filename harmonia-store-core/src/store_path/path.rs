@@ -326,6 +326,18 @@ impl AsRef<[u8; STORE_PATH_HASH_SIZE]> for StorePathHash {
     }
 }
 
+impl AsMut<[u8]> for StorePathHash {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
+
+impl AsMut<[u8; STORE_PATH_HASH_SIZE]> for StorePathHash {
+    fn as_mut(&mut self) -> &mut [u8; STORE_PATH_HASH_SIZE] {
+        &mut self.0
+    }
+}
+
 impl Deref for StorePathHash {
     type Target = [u8];
 
