@@ -32,6 +32,7 @@ test-strategy = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "sync"] }
 tracing = { workspace = true }
+zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 proptest = { workspace = true }
