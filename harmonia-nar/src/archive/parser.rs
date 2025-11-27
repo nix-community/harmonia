@@ -8,9 +8,11 @@ use pin_project_lite::pin_project;
 use tokio::io::AsyncRead;
 use tracing::trace;
 
-use crate::ByteString;
-use crate::io::{AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending, LentReader};
-use crate::wire::PaddedReader;
+use crate::padded_reader::PaddedReader;
+use harmonia_store_core::ByteString;
+use harmonia_store_core::io::{
+    AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending, LentReader,
+};
 
 use super::NarEvent;
 use super::read_nar::{Inner, InnerState, NodeType};

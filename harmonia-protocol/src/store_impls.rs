@@ -12,8 +12,10 @@
 
 use std::str::FromStr;
 
+use crate::daemon_wire::logger::RawLogMessageType;
+use crate::de::{NixDeserialize, NixRead};
+use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
-
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput};
 use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
 use harmonia_store_core::log::{Activity, ActivityResult, LogMessage, StopActivity};
@@ -21,10 +23,6 @@ use harmonia_store_core::realisation::Realisation;
 use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathName,
 };
-
-use crate::daemon::de::{NixDeserialize, NixRead};
-use crate::daemon::ser::{NixSerialize, NixWrite};
-use crate::daemon_wire::logger::RawLogMessageType;
 
 // ========== BasicDerivation ==========
 
@@ -112,7 +110,7 @@ async fn read_derivation_output<R>(
 where
     R: ?Sized + NixRead + Send,
 {
-    use crate::daemon::de::Error;
+    use crate::de::Error;
     use harmonia_store_core::hash::fmt::Base32;
 
     let store_path_str = reader.read_value::<String>().await?;
@@ -154,7 +152,7 @@ async fn write_derivation_output<W>(
 where
     W: NixWrite,
 {
-    use crate::daemon::ser::Error;
+    use crate::ser::Error;
 
     match output {
         DerivationOutput::InputAddressed(store_path) => {
@@ -210,7 +208,7 @@ impl NixDeserialize for DerivedPath {
     where
         R: ?Sized + NixRead + Send,
     {
-        use crate::daemon::de::Error;
+        use crate::de::Error;
         if let Some(s) = reader.try_read_value::<String>().await? {
             let legacy = reader
                 .store_dir()
@@ -345,7 +343,7 @@ impl NixSerialize for Realisation {
     where
         W: NixWrite,
     {
-        use crate::daemon::ser::Error;
+        use crate::ser::Error;
         let s = serde_json::to_string(&self).map_err(W::Error::custom)?;
         writer.write_slice(s.as_bytes()).await
     }
@@ -356,7 +354,7 @@ impl NixDeserialize for Realisation {
     where
         R: ?Sized + NixRead + Send,
     {
-        use crate::daemon::de::Error;
+        use crate::de::Error;
         if let Some(buf) = reader.try_read_bytes().await? {
             Ok(Some(
                 serde_json::from_slice(&buf).map_err(R::Error::custom)?,

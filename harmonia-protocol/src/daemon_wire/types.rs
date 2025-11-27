@@ -1,15 +1,11 @@
 use derive_more::Display;
+use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use crate::daemon::de::NixRead;
-use crate::daemon::ser::NixWrite;
-// Import traits for impl blocks
-use crate::daemon::de::NixDeserialize as NixDeserializeTrait;
-use crate::daemon::ser::NixSerialize as NixSerializeTrait;
-// Import derive macros for derives
-use crate::daemon::version::ProtocolRange;
-use crate::store_path::StorePath;
-use crate::{NixDeserialize, NixSerialize};
+use crate::de::{NixDeserialize as NixDeserializeTrait, NixRead};
+use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
+use crate::version::ProtocolRange;
+use harmonia_store_core::store_path::StorePath;
 
 #[derive(
     Debug,
@@ -152,8 +148,8 @@ macro_rules! optional_from_store_dir_str {
             where
                 R: ?Sized + NixRead + Send,
             {
-                use crate::daemon::de::Error;
-                use crate::store_path::FromStoreDirStr;
+                use crate::de::Error;
+                use harmonia_store_core::store_path::FromStoreDirStr;
                 if let Some(buf) = reader.try_read_bytes().await? {
                     let s = ::std::str::from_utf8(&buf).map_err(Error::invalid_data)?;
                     if s == "" {

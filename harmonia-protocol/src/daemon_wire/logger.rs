@@ -17,18 +17,17 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWrite
 use tokio::sync::oneshot;
 use tracing::trace;
 
-use crate::daemon::DaemonString;
-use crate::daemon::de::NixRead;
-use crate::daemon::ser::{NixWrite, NixWriter};
-// Import traits for impl blocks
-use crate::daemon::de::NixDeserialize as NixDeserializeTrait;
-use crate::daemon::ser::NixSerialize as NixSerializeTrait;
-// Import derive macros for derives
-use crate::daemon::wire::IgnoredZero;
-use crate::daemon::{DaemonError, DaemonErrorKind, DaemonInt, DaemonResult, RemoteError};
+use crate::daemon_wire::IgnoredZero;
 use crate::daemon_wire::types::Operation;
-use crate::log::{Activity, ActivityResult, LogMessage, Message, StopActivity, Verbosity};
-use crate::{NixDeserialize, NixSerialize};
+use crate::de::{NixDeserialize as NixDeserializeTrait, NixRead};
+use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite, NixWriter};
+use crate::types::{
+    DaemonError, DaemonErrorKind, DaemonInt, DaemonResult, DaemonString, RemoteError,
+};
+use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
+use harmonia_store_core::log::{
+    Activity, ActivityResult, LogMessage, Message, StopActivity, Verbosity,
+};
 
 pub const STDERR_LAST: u64 = 0x616c7473; // 'alts' in ASCII
 pub const STDERR_ERROR: u64 = 0x63787470; // 'cxtp' in ASCII

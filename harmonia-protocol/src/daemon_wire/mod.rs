@@ -1,4 +1,4 @@
-use crate::{NixDeserialize, NixSerialize};
+use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 

@@ -2,9 +2,8 @@ use std::error::Error as StdError;
 use std::future::Future;
 use std::{fmt, io};
 
-use crate::store_path::StoreDir;
-
 use super::ProtocolVersion;
+use harmonia_store_core::store_path::StoreDir;
 
 mod bytes;
 mod collections;

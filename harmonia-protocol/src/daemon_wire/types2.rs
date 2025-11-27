@@ -13,26 +13,21 @@ use test_strategy::Arbitrary;
 use tracing::{Span, debug_span};
 
 #[cfg(test)]
-use crate::daemon::ProtocolVersion;
-use crate::daemon::{
+use crate::ProtocolVersion;
+use crate::de::{Error as _, NixDeserialize as NixDeserializeTrait, NixRead};
+use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
+use crate::types::{
     ClientOptions, DaemonInt, DaemonPath, DaemonString, DaemonTime, UnkeyedValidPathInfo,
 };
-use crate::derivation::BasicDerivation;
-use crate::derived_path::DerivedPath;
-use crate::hash;
-use crate::realisation::{DrvOutput, Realisation};
-use crate::signature::Signature;
-use crate::store_path::{
+use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
+use harmonia_store_core::derivation::BasicDerivation;
+use harmonia_store_core::derived_path::DerivedPath;
+use harmonia_store_core::hash;
+use harmonia_store_core::realisation::{DrvOutput, Realisation};
+use harmonia_store_core::signature::Signature;
+use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
-
-use crate::daemon::de::{Error as _, NixRead};
-use crate::daemon::ser::NixWrite;
-// Import traits for impl blocks
-use crate::daemon::de::NixDeserialize as NixDeserializeTrait;
-use crate::daemon::ser::NixSerialize as NixSerializeTrait;
-// Import derive macros for derives
-use crate::{NixDeserialize, NixSerialize};
 
 use super::IgnoredZero;
 use super::types::Operation;

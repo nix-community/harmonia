@@ -27,54 +27,27 @@
 //! 3. **Well-specified**: Document wire format
 //! 4. **Type-safe**: Use strong types for protocol messages
 
-// Re-export types from store-core for use in protocol code
-pub use harmonia_store_core::{
-    ByteString, derivation, derived_path, hash, io, log, realisation, signature, store_path,
-};
-
-// Re-export archive module from nar
-pub use harmonia_nar::archive;
-
+pub mod daemon_wire;
 pub mod de;
 pub mod ser;
 pub mod types;
 pub mod version;
 
-// Re-export commonly used types to crate root for internal use
 pub use version::ProtocolVersion;
 
-// Daemon wire protocol (from daemon/wire)
-pub mod daemon_wire;
+// Re-exports required by derive macros (harmonia_protocol_derive generates code using crate::store_path, etc.)
+pub use harmonia_store_core::store_path;
 
-// Hand-written serialization impls for harmonia-store-core types (T012e)
-// These have custom logic that can't be expressed with derives
+// Hand-written serialization impls for harmonia-store-core types
 mod store_impls;
 
-// Daemon module structure (for code that references crate::daemon::...)
-// TODO T012b: Review this entire re-export structure and simplify
+// Re-export structure for code that references harmonia_protocol::daemon::...
 pub mod daemon {
+    pub use crate::daemon_wire::logger::{FutureResultExt, ResultLog, ResultLogExt};
     pub use crate::daemon_wire::{self as wire, logger};
+    pub use crate::daemon_wire::{IgnoredTrue, IgnoredZero};
     pub use crate::de;
     pub use crate::ser;
     pub use crate::types::*;
     pub use crate::version::*;
-
-    // Re-export commonly used wire types and logger traits
-    // TODO T012b: Review if these should be re-exported at daemon:: level
-    pub use crate::daemon_wire::logger::{FutureResultExt, ResultLog, ResultLogExt};
-    pub use crate::daemon_wire::{IgnoredTrue, IgnoredZero};
-
-    // TODO T012b: These submodule re-exports are temporary workarounds
-    // Re-export submodules for code that uses crate::daemon::types::*, crate::daemon::version::*
-    pub mod types {
-        pub use crate::types::*;
-    }
-    pub mod version {
-        pub use crate::version::*;
-    }
 }
-
-// TODO T012b: Re-export derive macros and remote macros
-pub use harmonia_protocol_derive::{
-    NixDeserialize, NixSerialize, nix_deserialize_remote, nix_serialize_remote,
-};

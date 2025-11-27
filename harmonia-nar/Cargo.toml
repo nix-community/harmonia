@@ -24,10 +24,7 @@ tokio-util = { workspace = true, features = ["io", "io-util"] }
 tracing = { workspace = true }
 walkdir = "2.5"
 
-# Depend on store-core for types (hash, store path)
 harmonia-store-core = { path = "../harmonia-store-core" }
-
-# Note: PaddedReader moved here from protocol to break circular dependency (TODO T012b)
 
 [dev-dependencies]
 harmonia-store-core = { path = "../harmonia-store-core", features = ["test"] }

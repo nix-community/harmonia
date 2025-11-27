@@ -9,7 +9,7 @@ use std::{
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
-use crate::{NixDeserialize, NixSerialize};
+use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 
 pub const NIX_VERSION: &str = "Harmonia 2.1.0";
 const PROTOCOL_VERSION_MAJOR: u8 = 1;

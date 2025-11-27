@@ -6,8 +6,8 @@ use std::thread;
 use bytes::Bytes;
 use thiserror::Error;
 
-use crate::daemon::ProtocolVersion;
-use crate::store_path::StoreDir;
+use crate::ProtocolVersion;
+use harmonia_store_core::store_path::StoreDir;
 
 use super::NixRead;
 

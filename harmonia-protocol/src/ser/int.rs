@@ -1,4 +1,4 @@
-use crate::nix_serialize_remote;
+use harmonia_protocol_derive::nix_serialize_remote;
 
 use super::{Error, NixSerialize, NixWrite};
 

@@ -9,12 +9,12 @@ use bytes::Bytes;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, ReadBuf};
 
-use crate::daemon::ProtocolVersion;
-use crate::io::{
+use crate::ProtocolVersion;
+use harmonia_store_core::io::{
     AsyncBytesRead, BytesReader, DEFAULT_MAX_BUF_SIZE, DEFAULT_RESERVED_BUF_SIZE,
     TryReadBytesLimited, TryReadU64,
 };
-use crate::store_path::StoreDir;
+use harmonia_store_core::store_path::StoreDir;
 
 use super::NixRead;
 
@@ -216,15 +216,13 @@ mod unittests {
     use tokio_test::io::Builder;
 
     use super::*;
-    use crate::{
-        daemon::{
-            de::NixRead,
-            ser::{NixWrite, NixWriter},
-        },
-        hash::NarHash,
-        io::BytesReader,
+    use crate::daemon::{
+        de::NixRead,
+        ser::{NixWrite, NixWriter},
     };
     use harmonia_store_core::btree_set;
+    use harmonia_store_core::hash::NarHash;
+    use harmonia_store_core::io::BytesReader;
 
     #[tokio::test]
     async fn test_read_u64() {

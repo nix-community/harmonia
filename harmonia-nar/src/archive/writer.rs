@@ -8,7 +8,8 @@ use futures::{FutureExt as _, Sink, SinkExt as _, StreamExt as _, stream::iter};
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncWrite};
 
-use crate::{io::DEFAULT_RESERVED_BUF_SIZE, wire::calc_padding};
+use harmonia_store_core::io::DEFAULT_RESERVED_BUF_SIZE;
+use harmonia_store_core::wire::calc_padding;
 
 use super::{
     NarEvent,
@@ -242,7 +243,7 @@ mod unittests {
     use tokio::fs::File;
 
     use crate::archive::{read_nar, test_data};
-    use crate::io::BytesReader;
+    use harmonia_store_core::io::BytesReader;
 
     use super::NarWriter;
 

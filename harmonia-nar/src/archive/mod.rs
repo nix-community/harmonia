@@ -1,4 +1,4 @@
-use crate::ByteString;
+use harmonia_store_core::ByteString;
 
 mod dumper;
 mod parser;

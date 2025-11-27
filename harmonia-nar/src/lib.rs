@@ -27,23 +27,9 @@
 //! 3. **Format-focused**: Only concerned with archive structure
 //! 4. **Composable**: Can be used independently of daemon
 
-// TODO T012b: Re-export ByteString from store-core for internal use
 pub use harmonia_store_core::ByteString;
 
-// PaddedReader module (moved from harmonia-protocol to break circular dependency - TODO T012b)
-mod padded_reader;
-
-// TODO T012b: Re-export wire utilities needed by archive code
-// Note: Temporarily public until we clean up the architecture
-pub mod wire {
-    pub use crate::padded_reader::PaddedReader;
-    pub use harmonia_store_core::wire::*;
-}
-
-// TODO T012b: Re-export io utilities from store-core
-pub mod io {
-    pub use harmonia_store_core::io::*;
-}
+pub mod padded_reader;
 
 pub mod archive;
 

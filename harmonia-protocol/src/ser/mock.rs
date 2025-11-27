@@ -7,8 +7,8 @@ use std::thread;
 use ::proptest::prelude::TestCaseError;
 use thiserror::Error;
 
-use crate::daemon::ProtocolVersion;
-use crate::store_path::StoreDir;
+use crate::ProtocolVersion;
+use harmonia_store_core::store_path::StoreDir;
 
 use super::NixWrite;
 

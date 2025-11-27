@@ -5,9 +5,8 @@ use std::{fmt, io};
 
 use ::bytes::Bytes;
 
-use crate::store_path::StoreDir;
-
 use super::ProtocolVersion;
+use harmonia_store_core::store_path::StoreDir;
 
 mod bytes;
 mod collections;
