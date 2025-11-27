@@ -50,7 +50,7 @@ impl Placeholder {
 
         let clear_text = format!(
             "nix-upstream-output:{}:{}",
-            drv_path.hash().to_string(),
+            drv_path.hash(),
             output_path_name
         );
 
@@ -133,7 +133,7 @@ fn compute_built_placeholder_recursive(drv_path: &SingleDerivedPath, output: &st
         } => {
             // Recursive case: create dynamic_output placeholder
             let inner_placeholder =
-                compute_built_placeholder_recursive(inner_drv_path, &inner_output.to_string());
+                compute_built_placeholder_recursive(inner_drv_path, inner_output.as_ref());
             Placeholder::dynamic_output(&inner_placeholder, output)
         }
     }

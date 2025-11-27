@@ -1,6 +1,4 @@
 use num_enum::{FromPrimitive, IntoPrimitive, TryFromPrimitive};
-#[cfg(any(test, feature = "test"))]
-use proptest::prelude::{Arbitrary, BoxedStrategy};
 use serde::{Deserialize, Serialize};
 #[cfg(any(test, feature = "test"))]
 use test_strategy::Arbitrary;
