@@ -3,6 +3,7 @@ members = [
   "harmonia-client",
   # New crates from Nix.rs import (spec 001-nixrs-base)
   "harmonia-store-core",          # Core store semantics from nixrs (renamed from harmonia-store-engine)
+  "harmonia-store-db",            # SQLite database for store metadata
   "harmonia-nar",                 # NAR archive handling from nixrs
   "harmonia-protocol",            # Daemon wire protocol from nixrs + nixrs-derive
   "harmonia-protocol-derive",     # Proc macros for protocol
@@ -67,6 +68,9 @@ rstest = "0.25"
 tempfile = "3.10"
 test-strategy = "0.4"
 pretty_assertions = "1.4"
+
+# Database
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

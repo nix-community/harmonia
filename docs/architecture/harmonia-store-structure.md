@@ -58,19 +58,19 @@ Pure core layer enables:
 │  Role: Define how store operations are communicated  │
 └──────────────────────────────────────────────────────┘
                          ↓
-┌──────────────────────────────────────────────────────┐
-│  Format Layer                                         │
-│  - harmonia-nar                                       │
-│    · NAR archive packing/unpacking                   │
-│    · NAR header parsing                              │
-│    · Streaming NAR operations                        │
-│                                                       │
-│  Role: Handle archive format independently of store  │
-└──────────────────────────────────────────────────────┘
+┌────────────────────────────┬─────────────────────────────┐
+│  Format Layer              │  Database Layer              │
+│  - harmonia-nar            │  - harmonia-store-db         │
+│    · NAR packing/unpacking │    · SQLite store metadata   │
+│    · NAR header parsing    │    · ValidPaths, Refs        │
+│    · Streaming NAR ops     │    · DerivationOutputs       │
+│                            │    · Realisations (CA)       │
+│  Role: Archive format      │  Role: Store metadata access │
+└────────────────────────────┴─────────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────┐
 │  Core Layer (Pure Semantics)                         │
-│  - harmonia-store-core                             │
+│  - harmonia-store-core                               │
 │    · Store path types and validation                 │
 │    · Content addressing (hashes, hash types)         │
 │    · Derivation parsing and building                 │
@@ -105,6 +105,36 @@ Pure core layer enables:
 pub fn parse_store_path(path: &str) -> Result<StorePath, ParseError>;
 pub fn compute_hash(content: &[u8], hash_type: HashType) -> Hash;
 pub fn verify_signature(path: &StorePath, sig: &Signature) -> bool;
+```
+
+### harmonia-store-db (Database)
+
+**Purpose**: SQLite database interface for Nix store metadata
+
+**Contents**: New implementation (inspired by hnix-store-db)
+- Full Nix schema support (ValidPaths, Refs, DerivationOutputs, Realisations)
+- Read-only system database access (immutable mode)
+- In-memory database for testing
+- Write operations for testing and local store management
+
+**Key Characteristic**: Direct metadata access
+- Bypasses daemon for metadata queries
+- Useful for direct store inspection
+- Schema matches Nix's db.sqlite exactly
+
+**Example API**:
+```rust
+// Open system database (read-only)
+let db = StoreDb::open_system()?;
+
+// Query path info with references
+let info = db.query_path_info("/nix/store/...")?;
+let refs = db.query_references("/nix/store/...")?;
+let derivers = db.query_valid_derivers("/nix/store/...")?;
+
+// In-memory for testing
+let db = StoreDb::open_memory()?;
+db.register_valid_path(&params)?;
 ```
 
 ### harmonia-nar (Format)
@@ -315,7 +345,7 @@ response.send_stream(nar_stream).await?;                   // harmonia-cache
 | hnix-store-nar | harmonia-nar | Archive format |
 | hnix-store-json | harmonia-protocol | Wire protocol (not just JSON) |
 | hnix-store-remote | harmonia-client | Daemon client |
-| hnix-store-db | (not imported) | SQLite DB (Nix.rs doesn't have this) |
+| hnix-store-db | harmonia-store-db | SQLite DB for store metadata |
 | hnix-store-readonly | (future) | Could add as separate crate |
 
 **Key Difference**: Harmonia has a separate `harmonia-daemon` server implementation, whereas hnix-store focuses on client-side store abstractions.
