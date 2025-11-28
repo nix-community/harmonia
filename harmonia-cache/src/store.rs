@@ -61,27 +61,11 @@ impl Store {
         store_path.clone()
     }
 
-    /// Acquire a connection from the pool.
-    ///
-    /// Returns an RAII guard that automatically returns the connection
-    /// when dropped.
     pub async fn acquire(&self) -> Result<PooledConnectionGuard> {
         self.pool
             .acquire()
             .await
             .map_err(|e| StoreError::Remote(e).into())
-    }
-
-    /// Get current pool statistics.
-    ///
-    /// Returns (idle_count, active_count, capacity).
-    pub async fn pool_stats(&self) -> (usize, usize, usize) {
-        self.pool.stats().await
-    }
-
-    /// Get a reference to the underlying pool for metrics configuration.
-    pub fn pool(&self) -> &ConnectionPool {
-        &self.pool
     }
 }
 

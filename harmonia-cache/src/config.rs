@@ -1,6 +1,6 @@
 use crate::error::{CacheError, ConfigError, Result};
 use crate::store::Store;
-use harmonia_store_core_legacy::SigningKey;
+use harmonia_store_core::signature::SecretKey;
 use harmonia_store_remote::{PoolMetrics, pool::PoolConfig};
 use serde::Deserialize;
 use std::fs::read_to_string;
@@ -70,7 +70,7 @@ pub(crate) struct Config {
     pub(crate) daemon_socket: PathBuf,
 
     #[serde(skip, default)]
-    pub(crate) secret_keys: Vec<SigningKey>,
+    pub(crate) secret_keys: Vec<SecretKey>,
     #[serde(skip)]
     pub(crate) store: Store,
 }
@@ -122,17 +122,26 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
         }
     }
     for sign_key_path in &settings.sign_key_paths {
-        settings
-            .secret_keys
-            .push(SigningKey::from_file(sign_key_path).map_err(|e| {
-                ConfigError::InvalidSigningKey {
+        let key_content =
+            read_to_string(sign_key_path).map_err(|e| ConfigError::InvalidSigningKey {
+                reason: format!(
+                    "Couldn't read secret key from '{}': {}",
+                    sign_key_path.display(),
+                    e
+                ),
+            })?;
+        let key: SecretKey =
+            key_content
+                .trim()
+                .parse()
+                .map_err(|e| ConfigError::InvalidSigningKey {
                     reason: format!(
                         "Couldn't parse secret key from '{}': {}",
                         sign_key_path.display(),
                         e
                     ),
-                }
-            })?);
+                })?;
+        settings.secret_keys.push(key);
     }
     let store_dir = std::env::var_os("NIX_STORE_DIR")
         .map(|s| s.into_encoded_bytes())

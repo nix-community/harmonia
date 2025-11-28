@@ -1,19 +1,15 @@
 [workspace]
 members = [
   "harmonia-client",
-  # New crates from Nix.rs import (spec 001-nixrs-base)
-  "harmonia-store-core",          # Core store semantics from nixrs (renamed from harmonia-store-engine)
-  "harmonia-store-db",            # SQLite database for store metadata
-  "harmonia-store-remote",        # Daemon client library from nixrs
-  "harmonia-nar",                 # NAR archive handling from nixrs
-  "harmonia-protocol",            # Daemon wire protocol from nixrs + nixrs-derive
-  "harmonia-protocol-derive",     # Proc macros for protocol
-  "harmonia-ssh-store",           # SSH store (optional, pending Phase 3 assessment)
-  # Legacy/pending crates
-  "harmonia-store-core-legacy", # (original minimal store types)
-  "harmonia-store-remote-legacy", # (original daemon client - will inform harmonia-cache/daemon updates)
-  "harmonia-cache", # (will be updated in Phase 3 to use new protocol)
-  "harmonia-daemon", # (will be updated in Phase 3 to use new protocol)
+  "harmonia-store-core",
+  "harmonia-store-db",
+  "harmonia-store-remote",
+  "harmonia-nar",
+  "harmonia-protocol",
+  "harmonia-protocol-derive",
+  "harmonia-ssh-store",
+  "harmonia-cache",
+  "harmonia-daemon",
 ]
 resolver = "2"
 

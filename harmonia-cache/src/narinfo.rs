@@ -1,16 +1,12 @@
-use std::path::Path;
-
 use crate::error::{CacheError, NarInfoError, Result, StoreError};
 use actix_web::{HttpResponse, http, web};
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::DaemonStore;
 use serde::{Deserialize, Serialize};
-use std::os::unix::ffi::OsStrExt;
 
 use crate::config::Config;
 use crate::{cache_control_max_age_1d, nixhash, some_or_404};
-use harmonia_store_core_legacy::SigningKey;
-use harmonia_store_core_legacy::fingerprint_path;
+use harmonia_store_core::signature::{SecretKey, fingerprint_path};
 
 #[derive(Debug, Deserialize)]
 pub struct Param {
@@ -30,17 +26,11 @@ struct NarInfo {
     ca: Option<Vec<u8>>,
 }
 
-fn extract_filename(path: &[u8]) -> Option<Vec<u8>> {
-    Path::new(std::ffi::OsStr::from_bytes(path))
-        .file_name()
-        .map(|v| v.as_bytes().to_vec())
-}
-
 async fn query_narinfo(
     virtual_nix_store: &[u8],
     store_path: &StorePath,
     hash: &str,
-    sign_keys: &Vec<SigningKey>,
+    sign_keys: &[SecretKey],
     settings: &web::Data<Config>,
 ) -> Result<Option<NarInfo>> {
     let mut guard = settings.store.acquire().await?;
@@ -94,12 +84,9 @@ async fn query_narinfo(
         res.nar_size,
         &path_info.references,
     )?;
-    let fingerprint = Some(fingerprint);
     for sk in sign_keys {
-        if let Some(ref fp) = fingerprint {
-            let signature = sk.sign_string(fp);
-            res.sigs.push(signature.into_bytes());
-        }
+        let signature = sk.sign(&fingerprint);
+        res.sigs.push(signature.to_string().into_bytes());
     }
 
     if res.sigs.is_empty() {

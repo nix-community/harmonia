@@ -37,8 +37,6 @@ tokio-util = "0.7.17"
 # Nix.rs-based crates
 harmonia-store-core = { path = "../harmonia-store-core" }
 harmonia-store-remote = { path = "../harmonia-store-remote" }
-# Legacy crate for signing (to be migrated later)
-harmonia-store-core-legacy = { path = "../harmonia-store-core-legacy" }
 prometheus = { workspace = true }
 
 [build-dependencies]

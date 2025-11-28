@@ -22,10 +22,10 @@ pub enum CacheError {
     Nar(#[from] NarError),
 
     #[error("Signing error: {0}")]
-    Signing(#[from] harmonia_store_core_legacy::SigningError),
+    Signing(#[from] harmonia_store_core::signature::ParseKeyError),
 
     #[error("Fingerprint error: {0}")]
-    Fingerprint(#[from] harmonia_store_core_legacy::FingerprintError),
+    Fingerprint(#[from] harmonia_store_core::signature::FingerprintError),
 
     #[error("NARInfo error: {0}")]
     NarInfo(#[from] NarInfoError),
@@ -69,9 +69,6 @@ pub enum ServerError {
 pub enum StoreError {
     #[error("Failed to query path for hash {hash}: {reason}")]
     PathQuery { hash: String, reason: String },
-
-    #[error("Store operation failed: {reason}")]
-    Operation { reason: String },
 
     #[error("Remote store error: {0}")]
     Remote(#[from] harmonia_store_remote::DaemonError),
