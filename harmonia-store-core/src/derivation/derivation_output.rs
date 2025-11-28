@@ -244,12 +244,6 @@ pub mod arbitrary {
         any::<StorePath>().prop_map(DerivationOutput::InputAddressed)
     }
 
-    #[cfg(feature = "xp-dynamic-derivations")]
-    pub fn arb_derivation_output_fixed() -> impl Strategy<Value = DerivationOutput> {
-        any::<ContentAddress>().prop_map(DerivationOutput::CAFixed)
-    }
-
-    #[cfg(not(feature = "xp-dynamic-derivations"))]
     pub fn arb_derivation_output_fixed() -> impl Strategy<Value = DerivationOutput> {
         prop_oneof![
             any::<hash::Hash>().prop_map(|h| DerivationOutput::CAFixed(ContentAddress::Flat(h))),

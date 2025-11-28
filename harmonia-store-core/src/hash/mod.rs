@@ -504,8 +504,8 @@ mod unittests {
     }
 
     #[rstest]
-    #[cfg_attr(feature = "md5", case::md5_empty(&MD5_EMPTY, ""))]
-    #[cfg_attr(feature = "md5", case::abc(&MD5_ABC, "abc"))]
+    #[case::md5_empty(&MD5_EMPTY, "")]
+    #[case::md5_abc(&MD5_ABC, "abc")]
     #[case::sha1_abc(&SHA1_ABC, "abc")]
     #[case::sha1_long(&SHA1_LONG, "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")]
     #[case::sha256_abc(&SHA256_ABC, "abc")]
