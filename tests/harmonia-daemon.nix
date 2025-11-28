@@ -1,6 +1,7 @@
 { pkgs, self }:
 pkgs.nixosTest {
   name = "harmonia-daemon";
+  globalTimeout = 120;
   nodes = {
     server = {
       imports = [ self.outputs.nixosModules.harmonia ];

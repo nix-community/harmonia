@@ -1317,6 +1317,15 @@ where
         }
 
         let listener = UnixListener::bind(&self.socket_path)?;
+
+        // Make socket world-accessible so other users can connect
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o666);
+            std::fs::set_permissions(&self.socket_path, perms)?;
+        }
+
         info!("Listening on {:?}", self.socket_path);
 
         loop {

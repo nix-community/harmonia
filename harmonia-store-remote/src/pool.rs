@@ -322,6 +322,10 @@ impl ConnectionPool {
     /// Create a new connection to the daemon.
     async fn create_connection(&self) -> DaemonResult<PooledConnection> {
         let connect_fut = async {
+            debug!(
+                "Connecting to daemon socket at {}",
+                self.socket_path.display(),
+            );
             let handshake_client = DaemonClientBuilder::new()
                 .set_store_dir(&self.store_dir)
                 .build_unix(&self.socket_path)
