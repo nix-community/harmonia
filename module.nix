@@ -1,4 +1,4 @@
-{ crane }:
+{ crane, nix-src }:
 {
   config,
   pkgs,
@@ -46,7 +46,7 @@ in
     services.harmonia-dev = {
       package = lib.mkOption {
         type = lib.types.package;
-        default = (pkgs.callPackage ./packages.nix { inherit crane; }).harmonia;
+        default = (pkgs.callPackage ./packages.nix { inherit crane nix-src; }).harmonia;
         defaultText = lib.literalExpression "pkgs.harmonia";
         description = "The harmonia package";
       };

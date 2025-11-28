@@ -37,6 +37,7 @@
             let
               packageSet = pkgs.callPackages ./packages.nix {
                 crane = inputs.crane;
+                nix-src = inputs.nix;
               };
             in
             {
@@ -79,7 +80,10 @@
         { lib, ... }:
         {
           imports = [
-            (lib.modules.importApply ./module.nix { crane = inputs.crane; })
+            (lib.modules.importApply ./module.nix {
+              crane = inputs.crane;
+              nix-src = inputs.nix;
+            })
           ];
         };
     };
