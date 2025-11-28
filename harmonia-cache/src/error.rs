@@ -70,7 +70,7 @@ pub enum StoreError {
     #[error("Failed to query path for hash {hash}: {reason}")]
     PathQuery { hash: String, reason: String },
 
-    #[error("Remote store error: {0}")]
+    #[error("Daemon communication error: {0}")]
     Remote(#[from] harmonia_store_remote::DaemonError),
 }
 

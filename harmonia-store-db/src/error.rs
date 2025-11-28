@@ -17,6 +17,14 @@ pub enum Error {
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
+    /// Failed to open database with context
+    #[error("Failed to open database at '{path}': {source}")]
+    DatabaseOpen {
+        path: PathBuf,
+        #[source]
+        source: rusqlite::Error,
+    },
+
     /// Invalid store path
     #[error("Invalid store path: {0}")]
     InvalidStorePath(String),

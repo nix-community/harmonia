@@ -47,7 +47,11 @@ impl StoreDb {
         let conn = Connection::open_with_flags(
             &uri,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-        )?;
+        )
+        .map_err(|e| Error::DatabaseOpen {
+            path: path.to_owned(),
+            source: e,
+        })?;
 
         debug!("Opened system database at {}", path.display());
         Ok(Self { conn })
@@ -72,7 +76,10 @@ impl StoreDb {
             OpenMode::Create => OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
         };
 
-        let conn = Connection::open_with_flags(path, flags)?;
+        let conn = Connection::open_with_flags(path, flags).map_err(|e| Error::DatabaseOpen {
+            path: path.to_owned(),
+            source: e,
+        })?;
         let db = Self { conn };
 
         if mode == OpenMode::Create {
