@@ -1242,6 +1242,7 @@ dependencies = [
  "harmonia-nar",
  "harmonia-protocol",
  "harmonia-store-core",
+ "prometheus",
  "tempfile",
  "thiserror",
  "tokio",

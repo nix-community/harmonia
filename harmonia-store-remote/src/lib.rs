@@ -13,7 +13,7 @@
 //! **Architecture**: This is the Remote Store Layer in Harmonia's store architecture.
 //! See `docs/architecture/harmonia-store-structure.md` for details.
 //!
-//! # Example
+//! # Basic Example
 //!
 //! ```ignore
 //! use harmonia_store_remote::DaemonClientBuilder;
@@ -32,10 +32,36 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! # Connection Pool Example
+//!
+//! For applications that need to make many concurrent requests, use the connection pool:
+//!
+//! ```ignore
+//! use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let pool = ConnectionPool::new(
+//!         "/nix/var/nix/daemon-socket/socket",
+//!         PoolConfig::default(),
+//!     );
+//!
+//!     // Acquire a connection from the pool
+//!     let mut guard = pool.acquire().await?;
+//!     let is_valid = guard.client().is_valid_path(&path).await?;
+//!     // Connection automatically returned when guard is dropped
+//!     Ok(())
+//! }
+//! ```
 
 mod client;
+pub mod metrics;
+pub mod pool;
 
 pub use client::{DaemonClient, DaemonClientBuilder, DaemonHandshakeClient};
+pub use metrics::PoolMetrics;
+pub use pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 
 // Re-export commonly used types from harmonia-protocol
 pub use harmonia_protocol::ProtocolVersion;

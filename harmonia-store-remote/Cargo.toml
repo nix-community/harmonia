@@ -30,6 +30,9 @@ async-stream = "0.3"
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
+# Metrics (optional but commonly used)
+prometheus = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 
