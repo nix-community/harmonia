@@ -34,12 +34,10 @@ pub struct LocalStoreHandler {
 impl LocalStoreHandler {
     /// Create a new handler with the given store directory and database path.
     pub async fn new(store_dir: PathBuf, db_path: PathBuf) -> Result<Self, DaemonError> {
-        log::debug!(
-            "Opening database at {}",
-            db_path.display(),
-        );
-        let db = StoreDb::open(&db_path, harmonia_store_db::OpenMode::ReadOnly)
-            .map_err(|e| DaemonError::Database(format!("Failed to open {}: {e}", db_path.display())))?;
+        log::debug!("Opening database at {}", db_path.display(),);
+        let db = StoreDb::open(&db_path, harmonia_store_db::OpenMode::ReadOnly).map_err(|e| {
+            DaemonError::Database(format!("Failed to open {}: {e}", db_path.display()))
+        })?;
         Ok(Self {
             store_dir,
             db: Arc::new(Mutex::new(db)),

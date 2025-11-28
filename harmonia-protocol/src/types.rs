@@ -168,8 +168,7 @@ pub struct DaemonError {
 impl std::fmt::Display for DaemonError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Only show context if it has meaningful content
-        let has_context =
-            self.context.operation.is_some() || !self.context.fields.is_empty();
+        let has_context = self.context.operation.is_some() || !self.context.fields.is_empty();
         if has_context {
             write!(f, "{}: {}", self.context, self.kind)
         } else {
