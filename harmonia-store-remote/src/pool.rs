@@ -111,7 +111,7 @@ impl PoolState {
 /// Result of an acquire attempt
 enum AcquireResult {
     /// Successfully acquired a connection
-    Success(PooledConnection),
+    Success(Box<PooledConnection>),
     /// Must wait for a connection to become available
     WaitRequired,
 }
@@ -183,7 +183,7 @@ impl ConnectionPool {
             match result {
                 AcquireResult::Success(conn) => {
                     return Ok(PooledConnectionGuard {
-                        conn: Some(conn),
+                        conn: Some(*conn),
                         pool: Arc::clone(&self.state),
                         metrics: self.config.metrics.clone(),
                         notify: Arc::clone(&self.available_notify),
@@ -256,7 +256,7 @@ impl ConnectionPool {
             }
 
             trace!("Reusing idle connection");
-            return Ok(AcquireResult::Success(conn));
+            return Ok(AcquireResult::Success(Box::new(conn)));
         }
 
         // Try to create a new connection if under capacity
@@ -284,7 +284,7 @@ impl ConnectionPool {
                             .observe(start_time.elapsed().as_secs_f64());
                     }
                     debug!("Created new connection");
-                    return Ok(AcquireResult::Success(conn));
+                    return Ok(AcquireResult::Success(Box::new(conn)));
                 }
                 Err(e) => {
                     // Decrement active count on failure

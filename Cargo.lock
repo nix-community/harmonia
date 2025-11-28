@@ -970,6 +970,8 @@ dependencies = [
  "async-compression",
  "base64",
  "env_logger",
+ "futures",
+ "harmonia-nar",
  "harmonia-store-core",
  "harmonia-store-remote",
  "http-range",

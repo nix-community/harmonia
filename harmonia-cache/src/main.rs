@@ -121,7 +121,6 @@ impl actix_web::error::ResponseError for ServerError {
             CacheError::Store(StoreError::PathQuery { .. }) => StatusCode::NOT_FOUND,
             CacheError::Signing(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CacheError::Serve(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            CacheError::Nar(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CacheError::BuildLog(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CacheError::NarInfo(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::INTERNAL_SERVER_ERROR,

@@ -69,6 +69,8 @@ where
         self.1.fmt(store_dir, self.0, f)
     }
 }
+// Used indirectly through FromStoreDirStr trait implementation
+#[allow(dead_code)]
 struct ParsePath<const C: char, D>(pub D);
 impl<const C: char, D> FromStoreDirStr for ParsePath<C, D>
 where

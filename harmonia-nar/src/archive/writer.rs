@@ -1,10 +1,10 @@
 use std::{
-    io::{self, Cursor},
+    io::{self},
     task::{Poll, ready},
 };
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::{FutureExt as _, Sink, SinkExt as _, StreamExt as _, stream::iter};
+use bytes::{Buf, BufMut, BytesMut};
+use futures::Sink;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncWrite};
 
@@ -14,7 +14,6 @@ use harmonia_store_core::wire::calc_padding;
 use super::{
     NarEvent,
     read_nar::{TOK_DIR, TOK_ENTRY, TOK_FILE, TOK_FILE_E, TOK_NODE, TOK_PAR, TOK_ROOT, TOK_SYM},
-    test_data,
 };
 
 enum State {
@@ -214,10 +213,14 @@ where
     }
 }
 
-pub fn write_nar<'e, E>(events: E) -> Bytes
+#[cfg(any(test, feature = "test"))]
+pub fn write_nar<'e, E>(events: E) -> bytes::Bytes
 where
-    E: IntoIterator<Item = &'e test_data::TestNarEvent>,
+    E: IntoIterator<Item = &'e super::test_data::TestNarEvent>,
 {
+    use futures::{FutureExt as _, SinkExt as _, stream::iter};
+    use std::io::Cursor;
+
     let mut buf = Vec::new();
     let mut writer = NarWriter::new(Cursor::new(&mut buf));
     let mut stream = iter(events).map(Clone::clone).map(Ok);

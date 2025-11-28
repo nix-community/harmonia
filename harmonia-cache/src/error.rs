@@ -18,9 +18,6 @@ pub enum CacheError {
     #[error("Store error: {0}")]
     Store(#[from] StoreError),
 
-    #[error("NAR processing error: {0}")]
-    Nar(#[from] NarError),
-
     #[error("Signing error: {0}")]
     Signing(#[from] harmonia_store_core::signature::ParseKeyError),
 
@@ -72,29 +69,6 @@ pub enum StoreError {
 
     #[error("Daemon communication error: {0}")]
     Remote(#[from] harmonia_store_remote::DaemonError),
-}
-
-#[derive(Error, Debug)]
-pub enum NarError {
-    #[error("Failed to read NAR file {path}: {source}")]
-    ReadFile {
-        path: String,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("Failed to read symlink target for {path}: {source}")]
-    SymlinkRead {
-        path: String,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("Failed to stream NAR: {reason}")]
-    Streaming { reason: String },
-
-    #[error("Channel send failed: {reason}")]
-    ChannelSend { reason: String },
 }
 
 #[derive(Error, Debug)]
