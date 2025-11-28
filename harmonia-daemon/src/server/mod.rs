@@ -90,6 +90,7 @@ where
 /// Builder for daemon server connections.
 pub struct Builder {
     store_trust: TrustLevel,
+    store_dir: harmonia_store_core::store_path::StoreDir,
     min_version: ProtocolVersion,
     max_version: ProtocolVersion,
     nix_version: Option<String>,
@@ -98,6 +99,11 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Builder {
         Default::default()
+    }
+
+    pub fn set_store_dir(mut self, store_dir: harmonia_store_core::store_path::StoreDir) -> Self {
+        self.store_dir = store_dir;
+        self
     }
 
     pub fn set_min_version<V: Into<ProtocolVersion>>(&mut self, version: V) -> &mut Self {
@@ -133,8 +139,12 @@ impl Builder {
         W: AsyncWrite + Debug + Send + Unpin + 's,
         S: HandshakeDaemonStore + Send + 's,
     {
-        let reader = NixReader::new(reader);
-        let writer = NixWriter::new(writer);
+        let reader = NixReader::builder()
+            .set_store_dir(&self.store_dir)
+            .build_buffered(reader);
+        let writer = NixWriter::builder()
+            .set_store_dir(&self.store_dir)
+            .build(writer);
         let mut conn = DaemonConnection {
             store_trust: self.store_trust,
             reader,
@@ -161,6 +171,7 @@ impl Default for Builder {
     fn default() -> Self {
         Self {
             store_trust: TrustLevel::NotTrusted,
+            store_dir: Default::default(),
             min_version: ProtocolVersion::min(),
             max_version: ProtocolVersion::max(),
             nix_version: None,
@@ -1275,16 +1286,22 @@ where
 pub struct DaemonServer<H> {
     handler: H,
     socket_path: std::path::PathBuf,
+    store_dir: harmonia_store_core::store_path::StoreDir,
 }
 
 impl<H> DaemonServer<H>
 where
     H: HandshakeDaemonStore + Clone + Send + Sync + 'static,
 {
-    pub fn new(handler: H, socket_path: std::path::PathBuf) -> Self {
+    pub fn new(
+        handler: H,
+        socket_path: std::path::PathBuf,
+        store_dir: harmonia_store_core::store_path::StoreDir,
+    ) -> Self {
         Self {
             handler,
             socket_path,
+            store_dir,
         }
     }
 
@@ -1305,10 +1322,11 @@ where
         loop {
             let (stream, _addr) = listener.accept().await?;
             let handler = self.handler.clone();
+            let store_dir = self.store_dir.clone();
 
             tokio::spawn(async move {
                 let (reader, writer) = stream.into_split();
-                let builder = Builder::new();
+                let builder = Builder::new().set_store_dir(store_dir);
                 if let Err(e) = builder.serve_connection(reader, writer, handler).await {
                     error!("Connection error: {:?}", e);
                 }

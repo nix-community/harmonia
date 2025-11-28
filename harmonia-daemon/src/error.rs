@@ -33,6 +33,10 @@ impl DaemonError {
         Self::Database(message.into())
     }
 
+    pub fn config(message: impl Into<String>) -> Self {
+        Self::Config(message.into())
+    }
+
     pub fn io(message: impl Into<String>, source: std::io::Error) -> Self {
         Self::Io {
             message: message.into(),
