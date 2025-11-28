@@ -74,7 +74,7 @@ pub enum StoreError {
     Operation { reason: String },
 
     #[error("Remote store error: {0}")]
-    Remote(#[from] harmonia_store_remote_legacy::ProtocolError),
+    Remote(#[from] harmonia_store_remote::DaemonError),
 }
 
 #[derive(Error, Debug)]

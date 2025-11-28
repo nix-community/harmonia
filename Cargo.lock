@@ -1051,7 +1051,7 @@ dependencies = [
  "env_logger",
  "harmonia-store-core",
  "harmonia-store-core-legacy",
- "harmonia-store-remote-legacy",
+ "harmonia-store-remote",
  "http-range",
  "log",
  "mime",

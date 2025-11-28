@@ -160,7 +160,11 @@ impl ConnectionPool {
     }
 
     /// Create a new connection pool with a custom store directory.
-    pub fn with_store_dir<P: AsRef<Path>>(socket_path: P, store_dir: StoreDir, config: PoolConfig) -> Self {
+    pub fn with_store_dir<P: AsRef<Path>>(
+        socket_path: P,
+        store_dir: StoreDir,
+        config: PoolConfig,
+    ) -> Self {
         let mut pool = Self::new(socket_path, config);
         pool.store_dir = store_dir;
         pool
@@ -310,8 +314,7 @@ impl ConnectionPool {
         state.waiting_count += 1;
         trace!(
             "Pool at capacity ({}/{}), waiting",
-            state.active_count,
-            state.capacity
+            state.active_count, state.capacity
         );
         Ok(AcquireResult::WaitRequired)
     }

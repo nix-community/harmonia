@@ -4,6 +4,8 @@ use std::mem::size_of;
 use crate::error::{CacheError, IoErrorContext, NarError, Result, StoreError};
 use actix_web::web::Bytes;
 use actix_web::{HttpRequest, HttpResponse, http, web};
+use harmonia_store_core::store_path::StorePathHash;
+use harmonia_store_remote::DaemonStore;
 use serde::Deserialize;
 use std::fs::{self, Metadata};
 use std::os::unix::ffi::OsStrExt;
@@ -363,18 +365,23 @@ pub(crate) async fn get(
     };
     let store_path = match outhash {
         Some(outhash) => {
-            let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
-                CacheError::from(StoreError::Operation {
-                    reason: format!("Failed to get daemon connection: {e}"),
-                })
-            })?;
-            let daemon = daemon_guard.as_mut().unwrap();
-            daemon
-                .query_path_from_hash_part(outhash.as_bytes())
+            // Parse outhash to StorePathHash
+            let store_path_hash =
+                StorePathHash::decode_digest(outhash.as_bytes()).map_err(|e| {
+                    CacheError::from(StoreError::PathQuery {
+                        hash: outhash.to_string(),
+                        reason: format!("Invalid hash format: {e}"),
+                    })
+                })?;
+
+            let mut guard = settings.store.acquire().await?;
+            guard
+                .client()
+                .query_path_from_hash_part(&store_path_hash)
                 .await
                 .map_err(|e| {
                     CacheError::from(StoreError::PathQuery {
-                        hash: String::from_utf8_lossy(outhash.as_bytes()).to_string(),
+                        hash: outhash.to_string(),
                         reason: e.to_string(),
                     })
                 })?
@@ -396,14 +403,10 @@ pub(crate) async fn get(
 
     // lookup the path info.
     let info = {
-        let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
-            CacheError::from(StoreError::Operation {
-                reason: format!("Failed to get daemon connection: {e}"),
-            })
-        })?;
-        let daemon = daemon_guard.as_mut().unwrap();
+        let mut guard = settings.store.acquire().await?;
 
-        match daemon
+        match guard
+            .client()
             .query_path_info(&store_path)
             .await
             .map_err(|e| CacheError::from(StoreError::Remote(e)))?
@@ -415,9 +418,9 @@ pub(crate) async fn get(
                     .body("path info not found"));
             }
         }
-    }; // daemon_guard is dropped here
+    }; // guard is dropped here
 
-    if narhash.as_bytes() != format!("{:#}", info.hash.as_base32()).as_bytes() {
+    if narhash.as_bytes() != format!("{}", info.nar_hash.as_base32()).as_bytes() {
         return Ok(HttpResponse::NotFound()
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));

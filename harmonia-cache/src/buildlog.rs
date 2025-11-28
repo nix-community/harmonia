@@ -1,10 +1,11 @@
-use crate::error::{BuildLogError, CacheError, IoErrorContext, Result, StoreError};
+use crate::error::{BuildLogError, CacheError, IoErrorContext, Result};
 use actix_files::NamedFile;
 use actix_web::Responder;
 use actix_web::http::header::HeaderValue;
 use actix_web::{HttpRequest, HttpResponse, http, web};
 use async_compression::tokio::bufread::BzDecoder;
-use harmonia_store_remote_legacy::protocol::StorePath;
+use harmonia_store_core::store_path::StorePath;
+use harmonia_store_remote::DaemonStore;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -55,14 +56,9 @@ pub(crate) async fn get(
                 reason: format!("Could not query nar hash in database for {drv}: {e}"),
             }))?
     );
-    let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
-        CacheError::from(StoreError::Operation {
-            reason: format!("Failed to get daemon connection: {e}"),
-        })
-    })?;
-    let daemon = daemon_guard.as_mut().unwrap();
+    let mut guard = settings.store.acquire().await?;
 
-    match daemon.is_valid_path(&drv_path).await {
+    match guard.client().is_valid_path(&drv_path).await {
         Ok(true) => (),
         Ok(false) => {
             return Ok(HttpResponse::NotFound()

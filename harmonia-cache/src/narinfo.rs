@@ -2,7 +2,8 @@ use std::path::Path;
 
 use crate::error::{CacheError, NarInfoError, Result, StoreError};
 use actix_web::{HttpResponse, http, web};
-use harmonia_store_remote_legacy::protocol::StorePath;
+use harmonia_store_core::store_path::StorePath;
+use harmonia_store_remote::DaemonStore;
 use serde::{Deserialize, Serialize};
 use std::os::unix::ffi::OsStrExt;
 
@@ -42,10 +43,10 @@ async fn query_narinfo(
     sign_keys: &Vec<SigningKey>,
     settings: &web::Data<Config>,
 ) -> Result<Option<NarInfo>> {
-    let mut daemon_guard = settings.store.get_daemon().await?;
-    let daemon = daemon_guard.as_mut().unwrap();
+    let mut guard = settings.store.acquire().await?;
 
-    let path_info = match daemon
+    let path_info = match guard
+        .client()
         .query_path_info(store_path)
         .await
         .map_err(|e| CacheError::from(StoreError::Remote(e)))?
@@ -55,7 +56,7 @@ async fn query_narinfo(
             return Ok(None);
         }
     };
-    let nar_hash = format!("{:#}", path_info.hash.as_base32()).into_bytes();
+    let nar_hash = format!("{}", path_info.nar_hash.as_base32()).into_bytes();
     let mut res = NarInfo {
         store_path: store_path.to_string().as_bytes().to_vec(),
         url: crate::build_bytes!(b"nar/", &nar_hash, b".nar?hash=", hash.as_bytes(),),
@@ -68,7 +69,7 @@ async fn query_narinfo(
             .as_ref()
             .map(|d| d.to_string().as_bytes().to_vec()),
         sigs: vec![],
-        ca: path_info.content_address.clone(),
+        ca: path_info.ca.as_ref().map(|ca| ca.to_string().into_bytes()),
     };
 
     if !path_info.references.is_empty() {
@@ -102,7 +103,12 @@ async fn query_narinfo(
     }
 
     if res.sigs.is_empty() {
-        res.sigs = path_info.signatures.clone();
+        // Convert Signature objects to their string representation
+        res.sigs = path_info
+            .signatures
+            .iter()
+            .map(|sig| sig.to_string().into_bytes())
+            .collect();
     }
 
     Ok(Some(res))
