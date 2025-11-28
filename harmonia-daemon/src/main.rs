@@ -1,7 +1,7 @@
 use harmonia_daemon::config::Config;
 use harmonia_daemon::error::{DaemonError, IoContext};
 use harmonia_daemon::handler::LocalStoreHandler;
-use harmonia_store_remote_legacy::server::DaemonServer;
+use harmonia_daemon::server::DaemonServer;
 use log::{error, info};
 use std::path::PathBuf;
 use tokio::signal;
@@ -36,7 +36,7 @@ async fn main() -> Result<(), DaemonError> {
         result = server.serve() => {
             if let Err(e) = result {
                 error!("Server error: {e}");
-                return Err(DaemonError::Protocol(e));
+                return Err(DaemonError::io("Server error", e));
             }
         }
         _ = shutdown => {

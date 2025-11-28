@@ -1082,16 +1082,18 @@ name = "harmonia-daemon"
 version = "2.1.0"
 dependencies = [
  "env_logger",
+ "futures",
+ "harmonia-nar",
+ "harmonia-protocol",
  "harmonia-store-core",
- "harmonia-store-core-legacy",
  "harmonia-store-db",
- "harmonia-store-remote-legacy",
  "log",
  "serde",
  "tempfile",
  "thiserror",
  "tokio",
  "toml",
+ "tracing",
 ]
 
 [[package]]

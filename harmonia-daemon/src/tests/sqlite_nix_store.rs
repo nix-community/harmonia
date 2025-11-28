@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 use crate::handler::LocalStoreHandler;
+use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
+use harmonia_store_core::store_path::StorePath;
 use harmonia_store_db::StoreDb;
-use harmonia_store_remote_legacy::protocol::StorePath;
-use harmonia_store_remote_legacy::server::RequestHandler;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -163,20 +163,22 @@ async fn test_handler_with_nix_store() {
         .await
         .expect("Failed to create handler");
 
+    // Complete handshake to get a DaemonStore
+    let mut store = handler.handshake().await.expect("Handshake failed");
+
     // Test with a non-existent path
-    let fake_path = StorePath::from_bytes(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test").unwrap();
-    let is_valid = handler.handle_is_valid_path(&fake_path).await.unwrap();
+    let fake_path = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test").unwrap();
+    let is_valid = store.is_valid_path(&fake_path).await.unwrap();
     assert!(!is_valid, "Non-existent path should not be valid");
 
     // Test query_path_info on non-existent path
-    let info = handler.handle_query_path_info(&fake_path).await.unwrap();
+    let info = store.query_path_info(&fake_path).await.unwrap();
     assert!(info.is_none(), "Should return None for non-existent path");
 
     // Test query_path_from_hash_part with non-existent hash
-    let result = handler
-        .handle_query_path_from_hash_part(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        .await
-        .unwrap();
+    // Create a fake hash with arbitrary bytes (20 bytes for store path hash)
+    let fake_hash = harmonia_store_core::store_path::StorePathHash::copy_from_slice(&[0u8; 20]);
+    let result = store.query_path_from_hash_part(&fake_hash).await.unwrap();
     assert!(
         result.is_none(),
         "Should return None for non-existent hash part"
