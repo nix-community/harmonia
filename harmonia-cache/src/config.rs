@@ -143,7 +143,7 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
                 })?;
         settings.secret_keys.push(key);
     }
-    let store_dir = std::env::var_os("NIX_STORE_DIR")
+    let virtual_store_dir = std::env::var_os("NIX_STORE_DIR")
         .map(|s| s.into_encoded_bytes())
         .unwrap_or_else(|| {
             settings
@@ -152,8 +152,16 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
                 .as_encoded_bytes()
                 .to_vec()
         });
+    // For daemon communication, use real_nix_store if set (chroot mode),
+    // otherwise use the virtual store path
+    let daemon_store_dir = settings
+        .real_nix_store
+        .as_ref()
+        .map(|p| p.as_os_str().as_encoded_bytes().to_vec())
+        .unwrap_or_else(|| virtual_store_dir.clone());
     settings.store = Store::new(
-        store_dir,
+        virtual_store_dir,
+        daemon_store_dir,
         settings
             .real_nix_store
             .clone()

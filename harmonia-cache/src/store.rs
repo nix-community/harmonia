@@ -16,12 +16,13 @@ pub struct Store {
 impl Store {
     pub fn new(
         virtual_store: Vec<u8>,
+        daemon_store: Vec<u8>,
         real_store: Option<Vec<u8>>,
         daemon_socket: PathBuf,
         pool_config: PoolConfig,
     ) -> Self {
-        // Parse store_dir from virtual_store bytes
-        let store_dir_str = std::str::from_utf8(&virtual_store).unwrap_or("/nix/store");
+        // Use daemon_store for the pool - this is the store the daemon actually uses
+        let store_dir_str = std::str::from_utf8(&daemon_store).unwrap_or("/nix/store");
         let store_dir = StoreDir::new(store_dir_str).unwrap_or_default();
 
         let pool = ConnectionPool::with_store_dir(&daemon_socket, store_dir, pool_config);
@@ -72,6 +73,7 @@ impl Store {
 impl Default for Store {
     fn default() -> Self {
         Self::new(
+            b"/nix/store".to_vec(),
             b"/nix/store".to_vec(),
             None,
             PathBuf::from("/nix/var/nix/daemon-socket/socket"),

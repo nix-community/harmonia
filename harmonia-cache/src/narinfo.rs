@@ -46,14 +46,21 @@ async fn query_narinfo(
             return Ok(None);
         }
     };
+    // as_base32() already includes the "sha256:" prefix
     let nar_hash = format!("{}", path_info.nar_hash.as_base32()).into_bytes();
+    // For URL, we need just the bare hash (without sha256: prefix)
+    let nar_hash_bare = format!("{}", path_info.nar_hash.as_base32().as_bare()).into_bytes();
+    // Build full store path with virtual store prefix
+    let store_path_str = store_path.to_string();
+    let full_store_path = crate::build_bytes!(virtual_nix_store, b"/", store_path_str.as_bytes(),);
     let mut res = NarInfo {
-        store_path: store_path.to_string().as_bytes().to_vec(),
-        url: crate::build_bytes!(b"nar/", &nar_hash, b".nar?hash=", hash.as_bytes(),),
+        store_path: full_store_path,
+        url: crate::build_bytes!(b"nar/", &nar_hash_bare, b".nar?hash=", hash.as_bytes(),),
         compression: b"none".to_vec(),
-        nar_hash: crate::build_bytes!(b"sha256:", &nar_hash,),
+        nar_hash: nar_hash.clone(),
         nar_size: path_info.nar_size,
         references: vec![],
+        // Deriver and References use just the basename (hash-name), not full paths
         deriver: path_info
             .deriver
             .as_ref()

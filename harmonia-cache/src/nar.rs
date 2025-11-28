@@ -420,7 +420,9 @@ pub(crate) async fn get(
         }
     }; // guard is dropped here
 
-    if narhash.as_bytes() != format!("{}", info.nar_hash.as_base32()).as_bytes() {
+    // URL narhash is bare (no sha256: prefix), so use as_bare() for comparison
+    let expected_hash = info.nar_hash.as_base32().as_bare().to_string();
+    if narhash != expected_hash {
         return Ok(HttpResponse::NotFound()
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));
