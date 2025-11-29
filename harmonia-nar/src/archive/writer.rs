@@ -218,7 +218,7 @@ pub fn write_nar<'e, E>(events: E) -> bytes::Bytes
 where
     E: IntoIterator<Item = &'e super::test_data::TestNarEvent>,
 {
-    use futures::{FutureExt as _, SinkExt as _, stream::iter};
+    use futures::{FutureExt as _, SinkExt as _, StreamExt as _, stream::iter};
     use std::io::Cursor;
 
     let mut buf = Vec::new();
