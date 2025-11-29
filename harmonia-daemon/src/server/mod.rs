@@ -17,25 +17,19 @@ use std::pin::{Pin, pin};
 
 use futures::future::TryFutureExt;
 use futures::{FutureExt, Stream, StreamExt as _};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, copy_buf};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt, copy_buf};
 use tokio::net::UnixListener;
-use tokio::select;
 use tracing::{Instrument, debug, error, info, instrument, trace};
 
-use harmonia_nar::NarReader;
 use harmonia_protocol::ProtocolVersion;
 use harmonia_protocol::daemon::{
     DaemonError, DaemonErrorKind, DaemonResult, DaemonResultExt, DaemonStore, HandshakeDaemonStore,
     ResultLog, TrustLevel,
     wire::{
-        CLIENT_MAGIC, FramedReader, IgnoredOne, SERVER_MAGIC, StderrReader,
+        CLIENT_MAGIC, FramedReader, IgnoredOne, SERVER_MAGIC,
         logger::RawLogMessage,
         parse_add_multiple_to_store,
-        types::Operation,
-        types2::{
-            AddToStoreRequest, BaseStorePath, CollectGarbageResponse, GCAction, Request,
-            ValidPathInfo,
-        },
+        types2::{BaseStorePath, CollectGarbageResponse, GCAction, Request, ValidPathInfo},
     },
 };
 use harmonia_protocol::de::{NixRead, NixReader};
@@ -554,33 +548,6 @@ where
         ret
     }
 
-    fn sync_with_gc(&mut self) -> impl ResultLog<Output = DaemonResult<()>> + Send + '_ {
-        let ret = Box::pin(self.0.sync_with_gc());
-        trace!("SyncWithGC Size {}", size_of_val(ret.deref()));
-        ret
-    }
-
-    fn query_derivation_outputs<'a>(
-        &'a mut self,
-        path: &'a StorePath,
-    ) -> impl ResultLog<Output = DaemonResult<StorePathSet>> + Send + 'a {
-        let ret = Box::pin(self.0.query_derivation_outputs(path));
-        trace!("QueryDerivationOutputs Size {}", size_of_val(ret.deref()));
-        ret
-    }
-
-    fn query_derivation_output_names<'a>(
-        &'a mut self,
-        path: &'a StorePath,
-    ) -> impl ResultLog<Output = DaemonResult<BTreeSet<OutputName>>> + Send + 'a {
-        let ret = Box::pin(self.0.query_derivation_output_names(path));
-        trace!(
-            "QueryDerivationOutputNames Size {}",
-            size_of_val(ret.deref())
-        );
-        ret
-    }
-
     fn add_ca_to_store<'a, 'r, R>(
         &'a mut self,
         name: &'a str,
@@ -624,8 +591,8 @@ where
         nix_version: &'s str,
     ) -> Result<ProtocolVersion, DaemonError> {
         assert!(
-            min_version.major() == 1 && min_version.minor() >= 21,
-            "Only Nix 2.3 and later is supported"
+            min_version.major() == 1 && min_version.minor() >= 37,
+            "Only Nix 2.24 and later is supported (protocol 1.37+)"
         );
         assert!(
             max_version <= PROTOCOL_VERSION,
@@ -664,31 +631,25 @@ where
             client_version
         );
 
-        if version.minor() >= 14 {
-            // Obsolete CPU Affinity
-            if self.reader.read_value().await.with_field("sendCpu")? {
-                let _cpu_affinity = self.reader.read_number().await.with_field("cpuAffinity")?;
-            }
+        // Obsolete CPU Affinity (protocol >= 14)
+        if self.reader.read_value().await.with_field("sendCpu")? {
+            let _cpu_affinity = self.reader.read_number().await.with_field("cpuAffinity")?;
         }
 
-        if version.minor() >= 11 {
-            // Obsolete reserved space
-            let _reserve_space: bool = self.reader.read_value().await.with_field("reserveSpace")?;
-        }
+        // Obsolete reserved space (protocol >= 11)
+        let _reserve_space: bool = self.reader.read_value().await.with_field("reserveSpace")?;
 
-        if version.minor() >= 33 {
-            self.writer
-                .write_value(nix_version)
-                .await
-                .with_field("nixVersion")?;
-        }
+        // Send nix version (protocol >= 33)
+        self.writer
+            .write_value(nix_version)
+            .await
+            .with_field("nixVersion")?;
 
-        if version.minor() >= 35 {
-            self.writer
-                .write_value(&self.store_trust)
-                .await
-                .with_field("trusted")?;
-        }
+        // Send trust level (protocol >= 35)
+        self.writer
+            .write_value(&self.store_trust)
+            .await
+            .with_field("trusted")?;
 
         self.writer.flush().await?;
         Ok(version)
@@ -858,7 +819,6 @@ where
         S: DaemonStore + 's,
     {
         use Request::*;
-        let op = request.operation();
         match request {
             SetOptions(options) => {
                 let logs = store.set_options(&options);
@@ -887,7 +847,7 @@ where
                 let value = self.process_logs(logs).await?;
                 self.writer.write_value(&value).await?;
             }
-            AddToStore(AddToStoreRequest::Protocol25(req)) => {
+            AddToStore(req) => {
                 let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
                 let mut framed = FramedReader::new(buf_reader);
                 let logs = Self::add_ca_to_store(
@@ -904,12 +864,6 @@ where
                 err?;
                 self.writer.write_value(&RawLogMessage::Last).await?;
                 self.writer.write_value(&value).await?;
-            }
-            AddToStore(AddToStoreRequest::ProtocolPre25(_req)) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::AddToStore,
-                ))
-                .with_operation(op)?;
             }
             BuildPaths(req) => {
                 let logs = store.build_paths(&req.paths, req.mode);
@@ -988,118 +942,36 @@ where
                 self.writer.write_value(&IgnoredOne).await?;
             }
             AddToStoreNar(req) => {
-                if self.reader.version().minor() >= 23 {
-                    trace!("DaemonConnection: Add to store");
-                    let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
-                    let mut framed = FramedReader::new(buf_reader);
-                    trace!("DaemonConnection: Add to store: Framed");
-                    let logs = Self::add_to_store_nar(
-                        &mut store,
-                        &req.path_info,
-                        &mut framed,
-                        req.repair,
-                        req.dont_check_sigs,
-                    );
-                    trace!("DaemonConnection: Add to store: Logs");
-                    let res: Result<(), RecoverableError> = async {
-                        let mut logs = pin!(logs);
-                        trace!("DaemonConnection: Add to store: get log");
-                        while let Some(msg) = logs.next().await {
-                            trace!("DaemonConnection: Add to store: got log");
-                            write_log(&mut self.writer, msg).await?;
-                        }
-                        trace!("DaemonConnection: Add to store: get result");
-                        logs.await.recover()?;
-                        Ok(())
+                trace!("DaemonConnection: Add to store");
+                let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
+                let mut framed = FramedReader::new(buf_reader);
+                trace!("DaemonConnection: Add to store: Framed");
+                let logs = Self::add_to_store_nar(
+                    &mut store,
+                    &req.path_info,
+                    &mut framed,
+                    req.repair,
+                    req.dont_check_sigs,
+                );
+                trace!("DaemonConnection: Add to store: Logs");
+                let res: Result<(), RecoverableError> = async {
+                    let mut logs = pin!(logs);
+                    trace!("DaemonConnection: Add to store: get log");
+                    while let Some(msg) = logs.next().await {
+                        trace!("DaemonConnection: Add to store: got log");
+                        write_log(&mut self.writer, msg).await?;
                     }
-                    .await;
-                    trace!("DaemonConnection: Add to store: drain reader");
-                    let err = framed.drain_all().await;
-                    trace!("DaemonConnection: Add to store: done");
-                    res?;
-                    err?;
-                    self.writer.write_value(&RawLogMessage::Last).await?;
-                } else if self.reader.version().minor() >= 21 {
-                    let (mut receiver, reader) = StderrReader::new(&mut self.reader);
-                    let mut reader = NarReader::new(reader);
-                    let logs = Self::add_to_store_nar(
-                        &mut store,
-                        &req.path_info,
-                        &mut reader,
-                        req.repair,
-                        req.dont_check_sigs,
-                    );
-                    let res: Result<(), RecoverableError> = async {
-                        let mut logs = pin!(logs);
-                        loop {
-                            select! {
-                                log = logs.next() => {
-                                    if let Some(msg) = log {
-                                        write_log(&mut self.writer, msg).await?;
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                read_msg = receiver.recv() => {
-                                    if let Some(read) = read_msg {
-                                        self.writer.write_value(&RawLogMessage::Read(read)).await?;
-                                        self.writer.flush().await?;
-                                    }
-                                }
-                            }
-                        }
-                        logs.await.recover()?;
-                        self.writer.write_value(&RawLogMessage::Last).await?;
-                        Ok(())
-                    }
-                    .await;
-                    let err: DaemonResult<()> = async {
-                        loop {
-                            let len = reader.fill_buf().await?.len();
-                            if len == 0 {
-                                break;
-                            }
-                            reader.consume(len);
-                        }
-                        Ok(())
-                    }
-                    .await;
-                    res?;
-                    err?;
-                } else {
-                    let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
-                    let mut reader = NarReader::new(buf_reader);
-                    let logs = Self::add_to_store_nar(
-                        &mut store,
-                        &req.path_info,
-                        &mut reader,
-                        req.repair,
-                        req.dont_check_sigs,
-                    );
-                    let res: Result<(), RecoverableError> = async {
-                        let mut logs = pin!(logs);
-                        while let Some(msg) = logs.next().await {
-                            write_log(&mut self.writer, msg).await?
-                        }
-                        logs.await.recover()?;
-                        self.writer.write_value(&RawLogMessage::Last).await?;
-                        Ok(())
-                    }
-                    .await;
-                    let err: DaemonResult<()> = async {
-                        loop {
-                            let len = reader.fill_buf().await?.len();
-                            if len == 0 {
-                                break;
-                            }
-                            reader.consume(len);
-                        }
-                        Ok(())
-                    }
-                    .await;
-                    res?;
-                    err?;
+                    trace!("DaemonConnection: Add to store: get result");
+                    logs.await.recover()?;
+                    Ok(())
                 }
+                .await;
+                trace!("DaemonConnection: Add to store: drain reader");
+                let err = framed.drain_all().await;
+                trace!("DaemonConnection: Add to store: done");
+                res?;
+                err?;
+                self.writer.write_value(&RawLogMessage::Last).await?;
             }
             QueryMissing(paths) => {
                 let logs = store.query_missing(&paths);
@@ -1111,39 +983,14 @@ where
                 let value = self.process_logs(logs).await?;
                 self.writer.write_value(&value).await?;
             }
-            RegisterDrvOutput(
-                harmonia_protocol::daemon::wire::types2::RegisterDrvOutputRequest::Post31(
-                    realisation,
-                ),
-            ) => {
-                let logs = store.register_drv_output(&realisation);
-                self.process_logs(logs).await?;
-            }
-            RegisterDrvOutput(
-                harmonia_protocol::daemon::wire::types2::RegisterDrvOutputRequest::Pre31 {
-                    output_id,
-                    output_path,
-                },
-            ) => {
-                let realisation = Realisation {
-                    id: output_id,
-                    out_path: output_path,
-                    signatures: BTreeSet::new(),
-                    dependent_realisations: BTreeMap::new(),
-                };
+            RegisterDrvOutput(realisation) => {
                 let logs = store.register_drv_output(&realisation);
                 self.process_logs(logs).await?;
             }
             QueryRealisation(output_id) => {
                 let logs = store.query_realisation(&output_id);
                 let value = self.process_logs(logs).await?;
-                if self.reader.version().minor() >= 31 {
-                    self.writer.write_value(&value).await?;
-                } else {
-                    let out_paths: BTreeSet<StorePath> =
-                        value.into_iter().map(|r| r.out_path).collect();
-                    self.writer.write_value(&out_paths).await?;
-                }
+                self.writer.write_value(&value).await?;
             }
             AddMultipleToStore(req) => {
                 let builder = NixReader::builder().set_version(self.reader.version());
@@ -1199,83 +1046,6 @@ where
                 let logs = store.add_perm_root(&req.store_path, &req.gc_root);
                 let value = self.process_logs(logs).await?;
                 self.writer.write_value(&value).await?;
-            }
-            // Obsolete operations
-            SyncWithGC => {
-                let logs = store.sync_with_gc();
-                self.process_logs(logs).await?;
-            }
-            AddTextToStore(_req) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::AddTextToStore,
-                ))
-                .with_operation(op)
-                .recover()?;
-            }
-            QueryDerivationOutputs(path) => {
-                let logs = store.query_derivation_outputs(&path);
-                let value = self.process_logs(logs).await?;
-                self.writer.write_value(&value).await?;
-            }
-            QueryDerivationOutputNames(path) => {
-                let logs = store.query_derivation_output_names(&path);
-                let value = self.process_logs(logs).await?;
-                self.writer.write_value(&value).await?;
-            }
-            QuerySubstitutablePathInfos(_req) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::QuerySubstitutablePathInfos,
-                ))
-                .with_operation(op)
-                .recover()?;
-            }
-            ExportPath(_path) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::ExportPath,
-                ))
-                .with_operation(op)
-                .recover()?;
-            }
-            ImportPaths => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::ImportPaths,
-                ))
-                .with_operation(op)?;
-            }
-            QueryPathHash(_path) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::QueryPathHash,
-                ))
-                .with_operation(op)
-                .recover()?;
-            }
-            QueryReferences(_path) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::QueryReferences,
-                ))
-                .with_operation(op)
-                .recover()?;
-            }
-            QueryDeriver(_path) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::QueryDeriver,
-                ))
-                .with_operation(op)
-                .recover()?;
-            }
-            HasSubstitutes(_paths) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::HasSubstitutes,
-                ))
-                .with_operation(op)
-                .recover()?;
-            }
-            QuerySubstitutablePathInfo(_path) => {
-                Err(DaemonErrorKind::UnimplementedOperation(
-                    Operation::QuerySubstitutablePathInfo,
-                ))
-                .with_operation(op)
-                .recover()?;
             }
         }
         Ok(())

@@ -1,15 +1,14 @@
 use std::process::Command;
-use tempfile::TempDir;
 
 mod daemon;
 
-use daemon::{Daemon, DaemonConfig, HarmoniaDaemon, start_harmonia_cache};
+use daemon::{CanonicalTempDir, Daemon, DaemonConfig, HarmoniaDaemon, start_harmonia_cache};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::test]
 async fn test_unix_socket() -> Result<()> {
-    let temp_dir = TempDir::new()?;
+    let temp_dir = CanonicalTempDir::new()?;
 
     // Set up daemon
     let daemon_config = DaemonConfig {

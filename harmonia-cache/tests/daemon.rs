@@ -7,6 +7,8 @@ use std::time::Duration;
 use tempfile::NamedTempFile;
 use tokio::time::{sleep, timeout};
 
+pub use harmonia_utils_test::CanonicalTempDir;
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// Configuration for a daemon instance

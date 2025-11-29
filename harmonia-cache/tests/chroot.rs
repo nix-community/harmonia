@@ -1,16 +1,17 @@
 use std::fs;
 use std::process::Command;
-use tempfile::TempDir;
 
 mod daemon;
 
-use daemon::{Daemon, DaemonConfig, NixDaemon, pick_unused_port, start_harmonia_cache};
+use daemon::{
+    CanonicalTempDir, Daemon, DaemonConfig, NixDaemon, pick_unused_port, start_harmonia_cache,
+};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::test]
 async fn test_chroot() -> Result<()> {
-    let temp_dir = TempDir::new()?;
+    let temp_dir = CanonicalTempDir::new()?;
 
     // Set up paths for guest store
     let guest_dir = temp_dir.path().join("guest");

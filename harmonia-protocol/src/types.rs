@@ -584,30 +584,6 @@ pub trait DaemonStore: Send {
         ready(Err(DaemonError::unimplemented(Operation::AddPermRoot))).empty_logs()
     }
 
-    fn sync_with_gc(&mut self) -> impl ResultLog<Output = DaemonResult<()>> + Send + '_ {
-        ready(Err(DaemonError::unimplemented(Operation::SyncWithGC))).empty_logs()
-    }
-
-    fn query_derivation_outputs<'a>(
-        &'a mut self,
-        path: &'a StorePath,
-    ) -> impl ResultLog<Output = DaemonResult<StorePathSet>> + Send + 'a {
-        ready(Err(DaemonError::unimplemented(
-            Operation::QueryDerivationOutputs,
-        )))
-        .empty_logs()
-    }
-
-    fn query_derivation_output_names<'a>(
-        &'a mut self,
-        path: &'a StorePath,
-    ) -> impl ResultLog<Output = DaemonResult<BTreeSet<OutputName>>> + Send + 'a {
-        ready(Err(DaemonError::unimplemented(
-            Operation::QueryDerivationOutputNames,
-        )))
-        .empty_logs()
-    }
-
     fn add_ca_to_store<'a, 'r, R>(
         &'a mut self,
         name: &'a str,
@@ -867,24 +843,6 @@ where
         gc_root: &'a DaemonPath,
     ) -> impl ResultLog<Output = DaemonResult<DaemonPath>> + Send + 'a {
         (**self).add_perm_root(path, gc_root)
-    }
-
-    fn sync_with_gc(&mut self) -> impl ResultLog<Output = DaemonResult<()>> + Send + '_ {
-        (**self).sync_with_gc()
-    }
-
-    fn query_derivation_outputs<'a>(
-        &'a mut self,
-        path: &'a StorePath,
-    ) -> impl ResultLog<Output = DaemonResult<StorePathSet>> + Send + 'a {
-        (**self).query_derivation_outputs(path)
-    }
-
-    fn query_derivation_output_names<'a>(
-        &'a mut self,
-        path: &'a StorePath,
-    ) -> impl ResultLog<Output = DaemonResult<BTreeSet<OutputName>>> + Send + 'a {
-        (**self).query_derivation_output_names(path)
     }
 
     fn add_ca_to_store<'a, 'r, R>(

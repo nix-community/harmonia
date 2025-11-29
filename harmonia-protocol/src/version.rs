@@ -16,7 +16,7 @@ const PROTOCOL_VERSION_MAJOR: u8 = 1;
 pub const PROTOCOL_VERSION: ProtocolVersion =
     ProtocolVersion::from_parts(PROTOCOL_VERSION_MAJOR, 37);
 pub const PROTOCOL_VERSION_MIN: ProtocolVersion =
-    ProtocolVersion::from_parts(PROTOCOL_VERSION_MAJOR, 21);
+    ProtocolVersion::from_parts(PROTOCOL_VERSION_MAJOR, 37);
 
 #[derive(
     Debug,

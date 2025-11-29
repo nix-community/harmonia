@@ -922,6 +922,7 @@ dependencies = [
  "harmonia-nar",
  "harmonia-store-core",
  "harmonia-store-remote",
+ "harmonia-utils-test",
  "http-range",
  "log",
  "mime",
@@ -959,6 +960,7 @@ dependencies = [
  "harmonia-store-db",
  "harmonia-utils-hash",
  "harmonia-utils-io",
+ "harmonia-utils-test",
  "log",
  "serde",
  "tempfile",
@@ -1176,6 +1178,7 @@ dependencies = [
  "bytes",
  "pretty_assertions",
  "proptest",
+ "tempfile",
 ]
 
 [[package]]
