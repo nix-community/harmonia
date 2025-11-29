@@ -17,10 +17,16 @@
       onPush.default.outputs.effects = withSystem "x86_64-linux" (
         { pkgs, ... }:
         let
-          # Get test outputs for all systems
-          testOutputs = builtins.mapAttrs (
-            system: _: withSystem system ({ self', ... }: self'.checks.tests)
-          ) config.systems;
+          # config.systems is a list in flake-parts
+          systems = config.systems;
+
+          # Get test outputs for all systems (list -> attrset)
+          testOutputs = builtins.listToAttrs (
+            builtins.map (system: {
+              name = system;
+              value = withSystem system ({ self', ... }: self'.checks.tests);
+            }) systems
+          );
         in
         {
           uploadCodecov = {
@@ -62,7 +68,7 @@
                         else
                           echo "No coverage file found for ${system}"
                         fi
-                      '') (builtins.attrNames config.systems)
+                      '') systems
                     )}
                   '';
                   installPhase = "touch $out";
