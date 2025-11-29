@@ -1,5 +1,6 @@
 {
   config,
+  inputs,
   withSystem,
   ...
 }:
@@ -20,6 +21,9 @@
           inherit (pkgs) lib;
           # Skip x86_64-darwin for now - rustc builds are slow and often not cached
           systems = builtins.filter (s: s != "x86_64-darwin") config.systems;
+
+          # Source directory for codecov to discover network files via git
+          src = inputs.self;
 
           # codecov-cli depends on test-results-parser which has an unfree license
           # Override just the license instead of using allowUnfree (expensive)
@@ -54,13 +58,20 @@
                     pkgs.jq
                     codecov-cli
                   ];
-                  # codecov.yml in repo has disable_default_path_fixes: true
-                  # This means codecov accepts paths as-is without needing network files
+                  # Run from source directory so codecov-cli can discover network files via git
                   buildPhase = ''
                     set -euo pipefail
 
                     # Set HOME for codecov-cli (runs in sandbox without it)
                     export HOME=/tmp
+
+                    # Copy source and initialize git repo for network file discovery
+                    # (inputs.self doesn't include .git directory)
+                    cp -r ${src} src
+                    chmod -R u+w src
+                    cd src
+                    git init
+                    git add .
 
                     # Read codecov token from secrets
                     CODECOV_TOKEN=$(jq -r '.codecov.data.token // empty' "$HERCULES_CI_SECRETS_JSON")
@@ -89,7 +100,8 @@
                       --sha "${args.rev}"
 
                     # Upload coverage for each system
-                    # --disable-search: don't search for coverage files, we specify them explicitly
+                    # --disable-search: don't auto-search for coverage files, we specify them explicitly
+                    # Network files are still discovered via git ls-files since we're in the source directory
                     ${builtins.concatStringsSep "\n" (
                       builtins.map (system: ''
                         echo "Uploading coverage for ${system}..."
@@ -99,7 +111,6 @@
                             --slug "nix-community/harmonia" \
                             --git-service github \
                             --file "${testOutputs.${system}}/${system}.json" \
-                            --disable-search \
                             --sha "${args.rev}" \
                             --branch "${args.branch}" \
                             --flag "${system}"
