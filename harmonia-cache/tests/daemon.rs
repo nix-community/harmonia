@@ -127,19 +127,11 @@ log_level = "debug"
         let config_file = write_toml_config(&daemon_config)?;
         let config_path = config_file.path().to_path_buf();
 
-        // Start harmonia-daemon
-        // Check if we have a built binary in the environment (from Nix build)
-        // Otherwise fall back to cargo run for local development
-        let child = if let Ok(harmonia_bin) = std::env::var("HARMONIA_BIN") {
-            Command::new(format!("{harmonia_bin}/harmonia-daemon"))
-                .env("HARMONIA_DAEMON_CONFIG", &config_path)
-                .spawn()?
-        } else {
-            Command::new("cargo")
-                .args(["run", "-p", "harmonia-daemon", "--"])
-                .env("HARMONIA_DAEMON_CONFIG", &config_path)
-                .spawn()?
-        };
+        // Start harmonia-daemon - use cargo run since it's a different package
+        let child = Command::new("cargo")
+            .args(["run", "-p", "harmonia-daemon", "--"])
+            .env("HARMONIA_DAEMON_CONFIG", &config_path)
+            .spawn()?;
 
         let pid = child.id();
         println!(
@@ -186,20 +178,11 @@ pub async fn start_harmonia_cache(config: &str, port: u16) -> Result<Box<dyn Sen
     let config_file = write_toml_config(config)?;
     let config_path = config_file.path().to_path_buf();
 
-    // Check if we have a built binary in the environment (from Nix build)
-    // Otherwise fall back to cargo run for local development
-    let cache_process = if let Ok(harmonia_bin) = std::env::var("HARMONIA_BIN") {
-        Command::new(format!("{harmonia_bin}/harmonia-cache"))
-            .env("CONFIG_FILE", &config_path)
-            .env("RUST_LOG", "debug")
-            .spawn()?
-    } else {
-        Command::new("cargo")
-            .args(["run", "-p", "harmonia-cache", "--"])
-            .env("CONFIG_FILE", &config_path)
-            .env("RUST_LOG", "debug")
-            .spawn()?
-    };
+    // Start harmonia-cache using cargo's built-in binary path (same package)
+    let cache_process = Command::new(env!("CARGO_BIN_EXE_harmonia-cache"))
+        .env("CONFIG_FILE", &config_path)
+        .env("RUST_LOG", "debug")
+        .spawn()?;
 
     let pid = cache_process.id();
     println!("Started harmonia-cache process with PID: {pid}");
