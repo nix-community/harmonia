@@ -24,7 +24,7 @@ num_enum = { workspace = true }
 pin-project-lite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_with = "3.11"
+serde_with = "3.16"
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util"] }
 tokio-util = { workspace = true, features = ["io"] }
