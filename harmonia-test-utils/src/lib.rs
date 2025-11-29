@@ -1,20 +1,27 @@
+// SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+// SPDX-License-Identifier: EUPL-1.2 OR MIT
+//
+// This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
+// Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
+
+//! Test utilities for Harmonia.
+//!
+//! This crate provides proptest strategies and macros for testing Harmonia crates.
+
 use std::{path::PathBuf, time::Duration};
 
-use ::proptest::prelude::*;
+use proptest::prelude::*;
 
-use crate::ByteString;
+/// Byte string type alias.
+pub type ByteString = bytes::Bytes;
 
 pub mod helpers;
 
 pub fn arb_filename() -> impl Strategy<Value = String> {
     "[a-zA-Z 0-9.?=+]+".prop_filter("Not cur and parent dir", |s| s != "." && s != "..")
 }
-/*
-pub fn arb_filename() -> impl Strategy<Value=String> {
-    "[^!/\\r\\n\u{0}\\pC]+"
-        .prop_filter("Not cur and parent dir", |s| s != "." && s != ".." )
-}
-*/
+
 pub fn arb_file_component() -> impl Strategy<Value = String> {
     "[a-zA-Z 0-9.?=+]+"
 }
@@ -42,7 +49,7 @@ prop_compose! {
 }
 
 prop_compose! {
-    pub fn arb_duration()(secs in ::proptest::num::i32::ANY) -> Duration
+    pub fn arb_duration()(secs in proptest::num::i32::ANY) -> Duration
     {
         Duration::from_secs((secs as i64).unsigned_abs())
     }

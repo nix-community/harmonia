@@ -1,4 +1,4 @@
-pub mod arbitrary;
+pub use harmonia_test_utils as arbitrary;
 pub mod derived_path;
 
 #[macro_export]

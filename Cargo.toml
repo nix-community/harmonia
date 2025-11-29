@@ -11,6 +11,7 @@ members = [
   "harmonia-ssh-store",
   "harmonia-cache",
   "harmonia-daemon",
+  "harmonia-test-utils",
 ]
 resolver = "2"
 

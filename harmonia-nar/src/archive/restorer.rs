@@ -415,8 +415,8 @@ mod proptests {
     use tempfile::tempdir;
 
     use crate::archive::{NarEvent, NarWriteError, dump, restore, test_data};
-    use crate::pretty_prop_assert_eq;
     use crate::test::arbitrary::archive::arb_nar_events;
+    use harmonia_test_utils::pretty_prop_assert_eq;
 
     #[test]
     fn proptest_restore_dump() {

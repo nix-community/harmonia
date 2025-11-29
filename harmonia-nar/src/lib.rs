@@ -46,6 +46,3 @@ pub use archive::{
 #[cfg(test)]
 pub mod test;
 
-// Re-export pretty_prop_assert_eq macro from store-core for test use
-#[cfg(test)]
-pub use harmonia_store_core::pretty_prop_assert_eq;

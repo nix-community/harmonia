@@ -26,7 +26,7 @@ tracing = { workspace = true }
 walkdir = "2.5"
 
 [dev-dependencies]
-harmonia-store-core = { path = "../harmonia-store-core", features = ["test"] }
+harmonia-test-utils = { path = "../harmonia-test-utils" }
 proptest = { workspace = true }
 rstest = { workspace = true }
 tempfile = { workspace = true }

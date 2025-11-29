@@ -1046,7 +1046,7 @@ dependencies = [
  "derive_more",
  "futures",
  "harmonia-io",
- "harmonia-store-core",
+ "harmonia-test-utils",
  "pin-project-lite",
  "pretty_assertions",
  "proptest",
@@ -1127,6 +1127,7 @@ dependencies = [
  "derive_more",
  "futures",
  "harmonia-protocol",
+ "harmonia-test-utils",
  "hex-literal",
  "md5",
  "num_enum",
@@ -1180,6 +1181,15 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "harmonia-test-utils"
+version = "2.1.0"
+dependencies = [
+ "bytes",
+ "pretty_assertions",
+ "proptest",
 ]
 
 [[package]]
