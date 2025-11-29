@@ -48,7 +48,9 @@ impl Algorithm {
             Algorithm::SHA1 => &digest::SHA1_FOR_LEGACY_USE_ONLY,
             Algorithm::SHA256 => &digest::SHA256,
             Algorithm::SHA512 => &digest::SHA512,
-            _ => panic!("Unsupported digest algorithm {self:?}"),
+            Algorithm::MD5 => unreachable!(
+                "MD5 is not supported by ring's digest::Algorithm; use md5 crate directly"
+            ),
         }
     }
 

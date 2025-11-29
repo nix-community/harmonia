@@ -366,7 +366,7 @@ pub struct PooledConnectionGuard {
 impl PooledConnectionGuard {
     /// Get a reference to the underlying client.
     pub fn client(&mut self) -> &mut UnixDaemonClient {
-        &mut self.conn.as_mut().expect("Connection already taken").client
+        &mut self.conn.as_mut().expect("connection guard used after mark_broken() or invalid state - this indicates a bug in the caller").client
     }
 
     /// Mark the connection as broken.

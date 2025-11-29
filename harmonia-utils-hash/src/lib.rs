@@ -338,7 +338,12 @@ impl tokio::io::AsyncWrite for HashSink {
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
         match self.0.as_mut() {
-            None => panic!("write after completion"),
+            None => {
+                return std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "cannot write to HashSink after calling finish()",
+                )));
+            }
             Some((read, ctx)) => {
                 *read += buf.len() as u64;
                 ctx.update(buf)

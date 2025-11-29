@@ -25,7 +25,12 @@ pub fn load_tls_config(cert_path: &Path, key_path: &Path) -> Result<ServerConfig
         .collect();
 
     let key = if !pkcs8_keys.is_empty() {
-        PrivateKeyDer::Pkcs8(pkcs8_keys.into_iter().next().unwrap())
+        PrivateKeyDer::Pkcs8(
+            pkcs8_keys
+                .into_iter()
+                .next()
+                .expect("failed to extract first PKCS8 private key from non-empty key collection"),
+        )
     } else {
         // Try RSA format
         let key_file = File::open(key_path).io_context("Failed to reopen private key file")?;
@@ -42,7 +47,12 @@ pub fn load_tls_config(cert_path: &Path, key_path: &Path) -> Result<ServerConfig
             .into());
         }
 
-        PrivateKeyDer::Pkcs1(rsa_keys.into_iter().next().unwrap())
+        PrivateKeyDer::Pkcs1(
+            rsa_keys
+                .into_iter()
+                .next()
+                .expect("rsa keys vector is not empty but iterator returned None"),
+        )
     };
 
     // Create rustls config
