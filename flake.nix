@@ -15,7 +15,6 @@
     # We just need some test data, we're not building upstream nix.
     flake = false;
   };
-
   outputs =
     inputs@{ flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -25,7 +24,10 @@
         "aarch64-darwin"
         "x86_64-darwin"
       ];
-      imports = [ inputs.treefmt-nix.flakeModule ];
+      imports = [
+        inputs.treefmt-nix.flakeModule
+        ./herculesCI.nix
+      ];
       perSystem =
         {
           lib,
