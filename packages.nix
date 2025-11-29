@@ -115,13 +115,22 @@ let
         cargo llvm-cov --no-report --workspace
 
         # Generate coverage report in codecov JSON format
-        mkdir -p $out
         cargo llvm-cov report --codecov --output-path coverage-raw.json
 
         # Fix paths: strip build directory prefix to get repo-relative paths
         # e.g., /nix/var/nix/builds/.../source/harmonia-cache/src/foo.rs -> harmonia-cache/src/foo.rs
-        jq '.coverage |= with_entries(.key |= (capture(".*/source/(?<path>.*)") // {path: .}).path)' \
-          coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
+        # Also filter out stdlib paths (rustc-*/library/...) that leak into coverage
+        mkdir -p $out
+        jq '
+          .coverage |= (
+            # First filter out stdlib and other non-project paths
+            with_entries(select(.key | test("rustc-.*-src") | not))
+            # Then fix paths by extracting repo-relative portion
+            | with_entries(.key |= (capture(".*/source/(?<path>.*)") // {path: .}).path)
+            # Finally keep only harmonia-* paths (our crates)
+            | with_entries(select(.key | startswith("harmonia-")))
+          )
+        ' coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
       '';
 
       installPhaseCommand = "";

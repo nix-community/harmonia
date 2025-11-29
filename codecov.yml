@@ -1,8 +1,8 @@
 # Codecov configuration
 # https://docs.codecov.com/docs/codecov-yaml
 
+# Don't fail status checks for missing coverage
 coverage:
-  # Don't fail status checks for missing coverage
   status:
     project:
       default:
