@@ -14,12 +14,12 @@ path = "src/main.rs"
 
 [dependencies]
 actix-web = { version = "4", default-features = false, features = ["macros", "compress-zstd", "cookies", "rustls-0_23"] }
-rustls = { version = "0.23" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2"
 rustls-pki-types = "1"
 actix-files = "0.6.8"
 log = { workspace = true }
-env_logger = "0.11"
+env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = "0.9"
