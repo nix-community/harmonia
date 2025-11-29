@@ -45,14 +45,18 @@
           uploadCodecov = {
             run =
               if isMain then
-                pkgs.writeShellApplication {
+                pkgs.stdenv.mkDerivation {
                   name = "upload-codecov-effect";
-                  runtimeInputs = [
+                  # Only run buildPhase - skip unpack/install which don't work in effects
+                  phases = [ "buildPhase" ];
+                  nativeBuildInputs = [
                     pkgs.git
                     pkgs.jq
                     codecov-cli
                   ];
-                  text = ''
+                  buildPhase = ''
+                    set -euo pipefail
+
                     # Set HOME for codecov-cli (runs in sandbox without it)
                     export HOME=/tmp
 
