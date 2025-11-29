@@ -119,9 +119,18 @@ let
 
         # Fix paths: strip build directory prefix to get repo-relative paths
         # e.g., /nix/var/nix/builds/.../source/harmonia-cache/src/foo.rs -> harmonia-cache/src/foo.rs
+        # Also filter out stdlib paths (rustc-*/library/...) that leak into coverage
         mkdir -p $out
-        jq '.coverage |= with_entries(.key |= (capture(".*/source/(?<path>.*)") // {path: .}).path)' \
-          coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
+        jq '
+          .coverage |= (
+            # First filter out stdlib and other non-project paths
+            with_entries(select(.key | test("rustc-.*-src") | not))
+            # Then fix paths by extracting repo-relative portion
+            | with_entries(.key |= (capture(".*/source/(?<path>.*)") // {path: .}).path)
+            # Finally keep only harmonia-* paths (our crates)
+            | with_entries(select(.key | startswith("harmonia-")))
+          )
+        ' coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
       '';
 
       installPhaseCommand = "";
