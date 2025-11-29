@@ -23,3 +23,19 @@ proptest! {
     }
 }
 ```
+
+**Strategies**:
+
+| Strategy | Generates |
+|----------|-----------|
+| `arb_filename()` | Valid filenames (no `.` or `..`) |
+| `arb_path()` | Valid relative paths |
+| `arb_file_component()` | Single path component |
+| `arb_byte_string()` | Arbitrary `bytes::Bytes` |
+| `arb_duration()` | `std::time::Duration` values |
+| `arb_system_time()` | System time as duration |
+
+**Key Characteristics**:
+- Dev-dependency only (not needed at runtime)
+- Generates valid data that satisfies invariants
+- Pretty diff output on assertion failure

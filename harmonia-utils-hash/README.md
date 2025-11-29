@@ -25,3 +25,17 @@ let hash = ctx.finish();
 let base32 = hash.as_base32().to_string();  // "1b8m03r63zqh..."
 let sri = hash.sri().to_string();           // "sha256-ungWv48B..."
 ```
+
+**Supported Algorithms**:
+
+| Algorithm | Size (bytes) | Base16 | Base32 | Base64 |
+|-----------|--------------|--------|--------|--------|
+| MD5       | 16           | 32     | 26     | 24     |
+| SHA1      | 20           | 40     | 32     | 28     |
+| SHA256    | 32           | 64     | 52     | 44     |
+| SHA512    | 64           | 128    | 103    | 88     |
+
+**Key Characteristics**:
+- Pure functions (hash computation is deterministic)
+- Multiple output formats: Base16 (hex), Nix Base32, Base64, SRI
+- Only depends on harmonia-utils-base-encoding

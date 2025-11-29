@@ -25,3 +25,8 @@ pub mod wire {
     pub const fn calc_aligned(len: u64) -> u64;
 }
 ```
+
+**Key Characteristics**:
+- Async-first design with tokio
+- Bounded memory usage with configurable buffer sizes
+- Zero-copy where possible using `bytes::Bytes`
