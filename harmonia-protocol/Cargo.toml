@@ -46,7 +46,7 @@ rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 test-strategy = { workspace = true }
 tokio-test = "0.4"
-hex-literal = "0.4"
+hex-literal = "1.1"
 test-log = "0.2"
 
 [features]

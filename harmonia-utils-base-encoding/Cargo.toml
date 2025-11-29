@@ -19,7 +19,7 @@ derive_more = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
-hex-literal = "0.4"
+hex-literal = "1.1"
 proptest = { workspace = true }
 rstest = { workspace = true }
 serde_json = { workspace = true }

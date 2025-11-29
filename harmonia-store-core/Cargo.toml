@@ -46,7 +46,7 @@ tempfile = { workspace = true }
 test-strategy = { workspace = true }
 pretty_assertions = { workspace = true }
 tokio-test = "0.4"
-hex-literal = "0.4"
+hex-literal = "1.1"
 harmonia-protocol = { path = "../harmonia-protocol", features = ["test"] }
 harmonia-utils-test = { path = "../harmonia-utils-test" }
 test-log = "0.2"
