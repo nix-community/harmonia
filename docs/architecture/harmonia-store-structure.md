@@ -68,18 +68,31 @@ Pure core layer enables:
 │  Role: Archive format      │  Role: Store metadata access │
 └────────────────────────────┴──────────────────────────────┘
                          ↓
-┌───────────────────────────────────────┬──────────────────────────────────────┐
-│  Core Layer (Pure Semantics)          │  I/O Primitives Layer                │
-│  - harmonia-store-core                │  - harmonia-io                       │
-│    · Store path types and validation  │    · Async byte stream reading       │
-│    · Content addressing (hashes)      │    · Buffer management (BytesReader) │
-│    · Derivation parsing and building  │    · Wire protocol primitives        │
-│    · Reference graph computation      │    · Streaming utilities             │
-│    · Signature verification           │                                      │
-│                                       │                                      │
-│  Role: WHAT operations mean           │  Role: Reusable async I/O blocks     │
-│  (no IO, no async, pure functions)    │  (no store semantics)                │
-└───────────────────────────────────────┴──────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Core Layer (Pure Semantics)                                                 │
+│  - harmonia-store-core                                                       │
+│    · Store path types and validation                                         │
+│    · Derivation parsing and building                                         │
+│    · Reference graph computation                                             │
+│    · Signature verification                                                  │
+│                                                                              │
+│  Role: WHAT operations mean (no IO, no async, pure functions)                │
+└──────────────────────────────────────────────────────────────────────────────┘
+                         ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Utilities Layer (harmonia-utils-*)                                          │
+│  ┌─────────────────┬──────────────────────┬─────────────────┬──────────────┐ │
+│  │ harmonia-utils- │ harmonia-utils-      │ harmonia-utils- │ harmonia-    │ │
+│  │ io              │ base-encoding        │ hash            │ utils-test   │ │
+│  │                 │                      │                 │              │ │
+│  │ · Async byte    │ · Nix base32         │ · Hash types    │ · Proptest   │ │
+│  │   streams       │ · Hex, Base64        │ · Algorithms    │   strategies │ │
+│  │ · BytesReader   │ · Base enum          │ · HashSink      │ · Test       │ │
+│  │ · Wire padding  │                      │ · Formatting    │   macros     │ │
+│  └─────────────────┴──────────────────────┴─────────────────┴──────────────┘ │
+│                                                                              │
+│  Role: Reusable building blocks (protocol-specific, not Nix-specific)        │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Crate Responsibilities
@@ -112,14 +125,17 @@ pub fn compute_hash(content: &[u8], hash_type: HashType) -> Hash;
 pub fn verify_signature(path: &StorePath, sig: &Signature) -> bool;
 ```
 
-### harmonia-io (I/O Primitives)
+### harmonia-utils-*
 
 **Purpose**:
-Somewhat the opposite of harmonia-store-core
-Reusable async I/O building blocks, very much geared towards specific protocols that nix happens to use today (e.g. NAR).
-But on the flip side, while it is implementation-specific, it is somewhat purpose-/interface-agnostic --- nothing in here is really "Nix-specific", nothing in here is "business logic".
+Somewhat the opposite of harmonia-store-core.
+Reusable building blocks, very much geared towards specific protocols that Nix happens to use today (e.g. NAR).
+It is easy to imagine other versions of Nix not making these specific choices (e.g. different protocols, different hash algorithms, etc.)
+Also while these crates are implementation-specific, they are somewhat purpose-/interface-agnostic --- nothing in here is really "Nix-specific", nothing in here is "business logic", except for in the most mundane ways (like choices of hash algorithms, and nixbase32 having a different alphabet).
 
-`harmonia-store-core` and `harmonia-io` are jointly used together to support the other crates, which actually make a Nix implementation / various applications.
+#### harmonia-utils-io
+
+Reusable async I/O building blocks for streaming protocols.
 
 **Contents** (from Nix.rs):
 - `AsyncBytesRead` - Async trait for reading byte streams with buffering
@@ -128,11 +144,6 @@ But on the flip side, while it is implementation-specific, it is somewhat purpos
 - `DrainInto` - Drain remaining bytes from a reader
 - `TeeWriter` - Write to two destinations simultaneously
 - `wire` - Wire protocol primitives (padding, alignment, zero bytes)
-
-**Key Characteristic**: Foundation for streaming I/O
-- Provides building blocks used by harmonia-nar, harmonia-protocol, and higher layers
-- Independent of harmonia-store-core (no store semantics)
-- Async-first design with bounded memory usage
 
 **Example API**:
 ```rust
@@ -149,6 +160,89 @@ pub mod wire {
     pub const fn calc_aligned(len: u64) -> u64;
 }
 ```
+
+#### harmonia-utils-base-encoding
+
+Base encoding/decoding utilities for the various encodings Nix uses.
+
+**Contents**:
+- `base32` - Nix base32 encoding (special 32-character alphabet, LSB first, reversed)
+- `Base` - Enum for selecting encoding format (Hex, NixBase32, Base64)
+- `decode_for_base` / `encode_for_base` - Get encode/decode functions for a given base
+- `base64_len` - Calculate base64 encoded length
+
+**Example API**:
+```rust
+// Nix base32 encoding
+pub mod base32 {
+    pub fn encode_string(input: &[u8]) -> String;
+    pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartial>;
+}
+
+// Base encoding selection
+pub enum Base { Hex, NixBase32, Base64 }
+pub fn decode_for_base(base: Base) -> impl Fn(&[u8], &mut [u8]) -> Result<usize, DecodePartial>;
+```
+
+#### harmonia-utils-hash
+
+Cryptographic hash utilities for content addressing.
+
+**Contents** (from Nix.rs):
+- `Hash` - Generic hash type supporting MD5, SHA1, SHA256, SHA512
+- `Algorithm` - Hash algorithm enum with size and digest operations
+- `Sha256` / `NarHash` - Specialized hash types for common use cases
+- `Context` - Multi-step (Init-Update-Finish) digest calculation
+- `HashSink` - Async writer that computes hash of written data
+- `fmt` - Hash formatting (Base16, Base32, Base64, SRI)
+
+**Example API**:
+```rust
+// Hash computation
+let hash = Algorithm::SHA256.digest(b"hello, world");
+
+// Multi-step hashing
+let mut ctx = Context::new(Algorithm::SHA256);
+ctx.update("hello");
+ctx.update(", world");
+let hash = ctx.finish();
+
+// Hash formatting
+let base32 = hash.as_base32().to_string();  // "1b8m03r63zqh..."
+let sri = hash.sri().to_string();           // "sha256-ungWv48B..."
+```
+
+#### harmonia-utils-test
+
+Proptest strategies and test macros for property-based testing.
+
+**Contents**:
+- `arb_filename` / `arb_path` - Strategies for generating valid filenames and paths
+- `arb_byte_string` - Strategy for generating arbitrary byte strings
+- `arb_duration` / `arb_system_time` - Strategies for time values
+- `pretty_prop_assert_eq!` - Assertion macro with pretty diff output
+- `helpers::Union` - Weighted union of proptest strategies
+
+**Example API**:
+```rust
+use harmonia_utils_test::{arb_path, pretty_prop_assert_eq};
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn roundtrip(path in arb_path()) {
+        let encoded = encode(&path);
+        let decoded = decode(&encoded)?;
+        pretty_prop_assert_eq!(path, decoded);
+    }
+}
+```
+
+**Key Characteristics** (all utils crates):
+- Foundation for higher-level crates
+- Independent of harmonia-store-core (no store semantics)
+- Async-first design with bounded memory usage (for I/O crates)
+- Pure functions, no I/O (for encoding/hash crates)
 
 ### harmonia-store-db (Database)
 
@@ -340,24 +434,41 @@ response.send_stream(nar_stream).await?;
 ### 3. Clear Dependency Graph
 
 ```
-    harmonia-io              harmonia-store-core
-    (no harmonia deps)       (no harmonia deps)
-         ↑                         ↑
-         │                         │
-         ├─────────────────────────┤
-         │                         │
-    harmonia-nar              harmonia-store-db
-    (depends on: io)          (depends on: store-core)
-         ↑
-         │
- harmonia-protocol (depends on: io, store-core, nar)
-         ↑
-         ├────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Utilities Layer (no harmonia deps, except within utils)                     │
+│                                                                              │
+│  harmonia-utils-io          harmonia-utils-base-encoding                     │
+│  (no deps)                  (no deps)                                        │
+│       ↑                            ↑                                         │
+│       │                            │                                         │
+│       │                     harmonia-utils-hash                              │
+│       │                     (depends on: base-encoding)                      │
+│       │                            ↑                                         │
+│       │                            │                                         │
+│  harmonia-utils-test (dev only, depends on: proptest)                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+         ↑                            ↑
          │                            │
-  harmonia-daemon             harmonia-store-remote
-  (depends on:                (depends on:
-   io, store-core,            io, store-core,
-   nar, protocol)             protocol, nar)
+         ├────────────────────────────┤
+         │                            │
+    harmonia-store-core          harmonia-nar
+    (depends on:                 (depends on: io)
+     base-encoding, hash)
+         ↑                            ↑
+         │                            │
+         ├────────────────────────────┤
+         │                            │
+    harmonia-store-db         harmonia-protocol
+    (depends on:              (depends on: io, hash,
+     store-core)               store-core, nar)
+                                      ↑
+                                      │
+         ┌────────────────────────────┼────────────────────────────┐
+         │                            │                            │
+  harmonia-daemon             harmonia-store-remote         harmonia-ssh-store
+  (depends on:                (depends on:                  (depends on:
+   io, hash, store-core,       io, store-core,               store-remote)
+   nar, protocol, db)          protocol, nar)
          │                            │
          └────────────┬───────────────┘
                       │
@@ -387,7 +498,10 @@ response.send_stream(nar_stream).await?;                   // harmonia-cache
 
 | hnix-store | Harmonia | Notes |
 |------------|----------|-------|
-| (internal) | harmonia-io | Async I/O primitives (extracted for reuse) |
+| (internal) | harmonia-utils-io | Async I/O primitives (extracted for reuse) |
+| (none) | harmonia-utils-base-encoding | Nix base32/hex/base64 encoding (standalone crate) |
+| (none) | harmonia-utils-hash | Hash types and algorithms (standalone crate) |
+| (internal) | harmonia-utils-test | Test utilities (proptest strategies) |
 | hnix-store-core | harmonia-store-core | Pure semantics, types |
 | hnix-store-nar | harmonia-nar | Archive format |
 | hnix-store-json | harmonia-protocol | Wire protocol (not just JSON). (JSON is actually in harmonia-store-core, because Rust doesn't support orphan instances.) |
@@ -395,17 +509,28 @@ response.send_stream(nar_stream).await?;                   // harmonia-cache
 | hnix-store-db | harmonia-store-db | SQLite DB for store metadata |
 | hnix-store-readonly | (future) | Could add as separate crate |
 
-**Key Difference**: Harmonia has a separate `harmonia-daemon` server implementation, whereas hnix-store focuses on client-side store abstractions.
+**Key Differences**:
+- Harmonia has a separate `harmonia-daemon` server implementation, whereas hnix-store focuses on client-side store abstractions.
+- Harmonia extracts base encoding and hash utilities into standalone crates (`harmonia-utils-base-encoding`, `harmonia-utils-hash`) that can be reused by other projects needing Nix-compatible encoding/hashing.
 
 ## Implementation Guidelines
 
-### I/O Primitives Layer Rules
+### Utilities Layer Rules (harmonia-utils-*)
 
-1. **No store semantics**: Generic async I/O utilities only
-2. **Async-first**: Designed for non-blocking I/O
-3. **Bounded memory**: Configurable buffer sizes, no unbounded growth
+1. **No store semantics**: Generic utilities only, nothing Nix-specific in business logic
+2. **Minimal dependencies**: Utils crates should have minimal deps on each other
+3. **Protocol-specific, not Nix-specific**: Implementation choices (hash algos, encodings) not business logic
 4. **Composable**: Traits and utilities that work together
-5. **Zero-copy where possible**: Minimize data copying
+5. **Well-tested**: Property-based tests and known test vectors
+
+*For I/O utilities specifically*:
+- Async-first: Designed for non-blocking I/O
+- Bounded memory: Configurable buffer sizes, no unbounded growth
+- Zero-copy where possible: Minimize data copying
+
+*For encoding/hash utilities specifically*:
+- Pure functions: No I/O, deterministic
+- const where possible: Compile-time evaluation
 
 ### Core Layer Rules
 
@@ -456,12 +581,31 @@ When reviewing code, ensure:
 - [ ] Comprehensive unit tests
 - [ ] Property-based tests for core operations
 
-**I/O primitives layer** (harmonia-io):
+**Utilities layer** (harmonia-utils-*):
+
+*harmonia-utils-io*:
 - [ ] No store-specific types or logic
 - [ ] Uses generic async I/O traits
 - [ ] Buffer sizes are configurable
 - [ ] Memory usage is bounded
 - [ ] Tests use mock I/O (tokio-test)
+
+*harmonia-utils-base-encoding*:
+- [ ] No dependencies on other harmonia crates
+- [ ] Pure functions only
+- [ ] Comprehensive test vectors (from Nix/upstream)
+- [ ] Property-based roundtrip tests
+
+*harmonia-utils-hash*:
+- [ ] Only depends on harmonia-utils-base-encoding
+- [ ] Pure functions (except HashSink which is async)
+- [ ] All hash algorithms tested against known vectors
+- [ ] Property-based tests for formatting roundtrips
+
+*harmonia-utils-test*:
+- [ ] Only used as dev-dependency
+- [ ] Strategies generate valid data
+- [ ] No runtime dependencies on test frameworks
 
 **Format layer** (harmonia-nar):
 - [ ] Uses generic AsyncRead/AsyncWrite traits
