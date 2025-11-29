@@ -51,6 +51,8 @@
                   name = "upload-codecov-effect";
                   # Effect derivations don't need sources
                   dontUnpack = true;
+                  # codecov-cli needs git for CI detection
+                  nativeBuildInputs = [ pkgs.git ];
                   # The build phase IS the effect - it runs when buildbot-effects executes this
                   buildPhase = ''
                     set -euo pipefail
