@@ -54,6 +54,8 @@
                     pkgs.jq
                     codecov-cli
                   ];
+                  # codecov.yml in repo has disable_default_path_fixes: true
+                  # This means codecov accepts paths as-is without needing network files
                   buildPhase = ''
                     set -euo pipefail
 
@@ -87,6 +89,7 @@
                       --sha "${args.rev}"
 
                     # Upload coverage for each system
+                    # --disable-search: don't search for coverage files, we specify them explicitly
                     ${builtins.concatStringsSep "\n" (
                       builtins.map (system: ''
                         echo "Uploading coverage for ${system}..."

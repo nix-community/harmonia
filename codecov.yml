@@ -1,0 +1,27 @@
+# Codecov configuration
+# https://docs.codecov.com/docs/codecov-yaml
+
+codecov:
+  # Disable default path fixing since coverage reports from Nix builds
+  # already have correct paths (harmonia-cache/src/...) that match the repo structure
+  disable_default_path_fixes: true
+
+coverage:
+  # Don't fail status checks for missing coverage
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+# Coverage flags for different architectures
+flag_management:
+  individual_flags:
+    - name: x86_64-linux
+      carryforward: true
+    - name: aarch64-linux
+      carryforward: true
+    - name: aarch64-darwin
+      carryforward: true
