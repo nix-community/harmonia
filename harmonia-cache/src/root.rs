@@ -21,13 +21,23 @@ pub(crate) async fn get(
     vars.insert("homepage", CARGO_HOME_PAGE.to_string());
     vars.insert("name", CARGO_NAME.to_string());
 
+    // Determine scheme: check X-Forwarded-Proto first, then connection info, default to https
+    let scheme = req
+        .headers()
+        .get("X-Forwarded-Proto")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| req.connection_info().scheme().to_string());
+
     // Get cache URL from Host header
-    let cache_url = req
+    let host = req
         .headers()
         .get("Host")
         .and_then(|h| h.to_str().ok())
-        .map(|h| format!("https://{h}"))
-        .unwrap_or_else(|| "https://cache.example.com".to_string());
+        .unwrap_or("cache.example.com");
+    let cache_url = format!("{scheme}://{host}");
     vars.insert("cache_url", cache_url);
 
     // Get public keys from configured signing keys
