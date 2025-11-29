@@ -18,8 +18,8 @@
         { pkgs, ... }:
         let
           inherit (pkgs) lib;
-          # config.systems is a list in flake-parts
-          systems = config.systems;
+          # Skip x86_64-darwin for now - rustc builds are slow and often not cached
+          systems = builtins.filter (s: s != "x86_64-darwin") config.systems;
 
           # codecov-cli depends on test-results-parser which has an unfree license
           # Override just the license instead of using allowUnfree (expensive)
