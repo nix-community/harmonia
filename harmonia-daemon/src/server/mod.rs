@@ -22,7 +22,6 @@ use tokio::net::UnixListener;
 use tokio::select;
 use tracing::{Instrument, debug, error, info, instrument, trace};
 
-use harmonia_utils_io::{AsyncBufReadCompat, BytesReader};
 use harmonia_nar::NarReader;
 use harmonia_protocol::ProtocolVersion;
 use harmonia_protocol::daemon::{
@@ -50,6 +49,7 @@ use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
+use harmonia_utils_io::{AsyncBufReadCompat, BytesReader};
 
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::from_parts(1, 37);
 const NIX_VERSION: &str = "2.24.0 (Harmonia)";

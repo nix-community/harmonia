@@ -443,8 +443,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "Pool capacity must be positive")]
     fn test_pool_zero_capacity() {
-        let mut config = PoolConfig::default();
-        config.max_size = 0;
+        let config = PoolConfig {
+            max_size: 0,
+            ..Default::default()
+        };
         let _ = ConnectionPool::new("/tmp/test.sock", config);
     }
 

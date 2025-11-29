@@ -42,7 +42,6 @@ use harmonia_protocol::types::{
 };
 
 // From harmonia-store-core
-use harmonia_utils_io::{AsyncBufReadCompat, BytesReader, Lending};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::log::{LogMessage, Message, Verbosity};
@@ -51,6 +50,7 @@ use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddressMethodAlgorithm, StoreDir, StorePath, StorePathHash, StorePathSet,
 };
+use harmonia_utils_io::{AsyncBufReadCompat, BytesReader, Lending};
 
 // From harmonia-nar
 use harmonia_nar::archive::{NarBytesReader, NarReader};

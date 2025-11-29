@@ -3,10 +3,10 @@ use std::{collections::BTreeMap, fmt};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::derived_path::OutputName;
-use harmonia_utils_hash::Hash;
 use crate::store_path::ContentAddressMethod;
 use crate::store_path::ContentAddressMethodAlgorithm;
 use crate::store_path::{ContentAddress, StoreDir, StorePath, StorePathName, StorePathNameError};
+use harmonia_utils_hash::Hash;
 
 struct OutputPathName<'b> {
     drv_name: &'b StorePathName,
@@ -174,10 +174,10 @@ pub type DerivationOutputs = BTreeMap<OutputName, DerivationOutput>;
 #[cfg(test)]
 pub mod arbitrary {
     use super::*;
-    use harmonia_utils_hash as hash;
     use crate::test::arbitrary::helpers::Union;
     use ::proptest::prelude::*;
     use ::proptest::sample::SizeRange;
+    use harmonia_utils_hash as hash;
 
     pub fn arb_derivation_outputs(
         size: impl Into<SizeRange>,

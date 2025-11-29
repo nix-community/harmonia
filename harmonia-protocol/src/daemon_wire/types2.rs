@@ -22,12 +22,12 @@ use crate::types::{
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::DerivedPath;
-use harmonia_utils_hash as hash;
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
+use harmonia_utils_hash as hash;
 
 use super::IgnoredZero;
 use super::types::Operation;

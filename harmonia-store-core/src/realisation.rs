@@ -8,10 +8,10 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
 use crate::derived_path::OutputName;
-use harmonia_utils_hash::fmt::Any;
-use harmonia_utils_hash::Hash;
 use crate::signature::Signature;
 use crate::store_path::{StorePath, StorePathNameError};
+use harmonia_utils_hash::Hash;
+use harmonia_utils_hash::fmt::Any;
 
 #[derive(
     Debug,
@@ -154,9 +154,9 @@ mod unittests {
 
     use crate::btree_map;
     use crate::derived_path::OutputName;
+    use crate::set;
     use harmonia_utils_hash::Hash;
     use harmonia_utils_hash::fmt::Any;
-    use crate::set;
 
     use super::{DrvOutput, Realisation};
 

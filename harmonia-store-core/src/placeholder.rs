@@ -6,10 +6,10 @@
 
 use std::path::PathBuf;
 
-use harmonia_utils_base_encoding::base32;
 use crate::derived_path::SingleDerivedPath;
-use harmonia_utils_hash::Sha256;
 use crate::store_path::StorePath;
+use harmonia_utils_base_encoding::base32;
+use harmonia_utils_hash::Sha256;
 
 /// A placeholder for a Nix store path
 #[derive(Debug, Clone, PartialEq, Eq)]

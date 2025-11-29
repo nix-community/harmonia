@@ -23,7 +23,6 @@ use crate::daemon_wire::{IgnoredTrue, IgnoredZero};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
-use harmonia_utils_hash::NarHash;
 use harmonia_store_core::log::Verbosity;
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
 use harmonia_store_core::signature::Signature;
@@ -32,6 +31,7 @@ use harmonia_store_core::signature::proptests::arb_signatures;
 use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
+use harmonia_utils_hash::NarHash;
 
 pub type DaemonString = Bytes;
 pub type DaemonPath = Bytes;

@@ -179,9 +179,9 @@ pub mod proptest {
 
 #[cfg(test)]
 mod unittests {
+    use crate::store_path::{ContentAddress, StorePath, StorePathName};
     use harmonia_utils_hash::fmt::{Any, Bare, Base16};
     use harmonia_utils_hash::{Hash, Sha256};
-    use crate::store_path::{ContentAddress, StorePath, StorePathName};
 
     use super::StoreDir;
     use pretty_assertions::assert_eq;
