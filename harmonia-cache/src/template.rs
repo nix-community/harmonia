@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 pub const BASE_TEMPLATE: &str = include_str!("templates/base.html");
 pub const LANDING_TEMPLATE: &str = include_str!("templates/landing.html");
+pub const LANDING_WITH_KEYS_TEMPLATE: &str = include_str!("templates/landing_with_keys.html");
 pub const DIRECTORY_TEMPLATE: &str = include_str!("templates/directory.html");
 pub const DIRECTORY_ROW_TEMPLATE: &str = include_str!("templates/directory_row.html");
 
