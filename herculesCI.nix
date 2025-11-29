@@ -43,25 +43,21 @@
         in
         {
           uploadCodecov = {
-            # buildbot-effects instantiates .run and runs the derivation's builder
-            # The effect code runs as the build script
             run =
               if isMain then
-                pkgs.stdenv.mkDerivation {
+                pkgs.writeShellApplication {
                   name = "upload-codecov-effect";
-                  # Effect derivations don't need sources
-                  dontUnpack = true;
-                  # codecov-cli needs git for CI detection
-                  nativeBuildInputs = [ pkgs.git ];
-                  # The build phase IS the effect - it runs when buildbot-effects executes this
-                  buildPhase = ''
-                    set -euo pipefail
-
+                  runtimeInputs = [
+                    pkgs.git
+                    pkgs.jq
+                    codecov-cli
+                  ];
+                  text = ''
                     # Set HOME for codecov-cli (runs in sandbox without it)
                     export HOME=/tmp
 
                     # Read codecov token from secrets
-                    CODECOV_TOKEN=$(${pkgs.jq}/bin/jq -r '.codecov.data.token // empty' "$HERCULES_CI_SECRETS_JSON")
+                    CODECOV_TOKEN=$(jq -r '.codecov.data.token // empty' "$HERCULES_CI_SECRETS_JSON")
 
                     if [[ -z "$CODECOV_TOKEN" ]]; then
                       echo "ERROR: Codecov token not found in secrets"
@@ -74,7 +70,7 @@
                       builtins.map (system: ''
                         echo "Uploading coverage for ${system}..."
                         if [[ -f "${testOutputs.${system}}/${system}.json" ]]; then
-                          ${codecov-cli}/bin/codecovcli do-upload \
+                          codecovcli do-upload \
                             --token "$CODECOV_TOKEN" \
                             --slug "nix-community/harmonia" \
                             --git-service github \
@@ -89,7 +85,6 @@
                       '') systems
                     )}
                   '';
-                  installPhase = "touch $out";
                 }
               else
                 null;
