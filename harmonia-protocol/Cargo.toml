@@ -11,6 +11,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "Nix daemon wire protocol types and serialization"
+readme = "README.md"
 
 [dependencies]
 async-stream = "0.3"

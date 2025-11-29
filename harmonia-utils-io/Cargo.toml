@@ -11,6 +11,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "Async I/O utilities for Harmonia"
+readme = "README.md"
 
 [dependencies]
 bytes = { workspace = true }

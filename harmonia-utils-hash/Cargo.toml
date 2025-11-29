@@ -11,6 +11,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "Hash utilities for Harmonia (content addressing, hash types)"
+readme = "README.md"
 
 [dependencies]
 data-encoding = { workspace = true }

@@ -11,6 +11,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "NAR (Nix ARchive) format packing and unpacking"
+readme = "README.md"
 
 [dependencies]
 bstr = "1.11"

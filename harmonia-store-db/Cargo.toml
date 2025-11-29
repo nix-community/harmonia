@@ -10,6 +10,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "SQLite database interface for Nix store metadata"
+readme = "README.md"
 
 [dependencies]
 rusqlite = { workspace = true }

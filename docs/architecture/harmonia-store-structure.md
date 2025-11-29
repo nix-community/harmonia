@@ -95,37 +95,31 @@ Pure core layer enables:
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Crate Responsibilities
+## Crates
 
-### harmonia-store-core (Core)
+### Main Crates
 
-**Purpose**:
-Pure store semantics, agnostic to IO / implementation strategy in general.
-This is the "business logic" of Nix, pure and simple.
-It should be usable with a wide variety of implementation strategies, not forcing any decisions.
-It should also be widely usable by other tools which need to engage with Nix (e.g. tools that create dynamic derivations from other build systems' build plans).
+| Crate | Purpose | Details |
+|-------|---------|---------|
+| [harmonia-store-core](../../harmonia-store-core/README.md) | Pure store semantics | Store paths, derivations, signatures |
+| [harmonia-store-db](../../harmonia-store-db/README.md) | SQLite database | Store metadata access |
+| [harmonia-nar](../../harmonia-nar/README.md) | NAR format | Archive packing/unpacking |
+| [harmonia-protocol](../../harmonia-protocol/README.md) | Wire protocol | Daemon communication |
+| [harmonia-protocol-derive](../../harmonia-protocol-derive/README.md) | Derive macros | Protocol serialization |
+| [harmonia-daemon](../../harmonia-daemon/README.md) | Daemon server | Store operations server |
+| [harmonia-store-remote](../../harmonia-store-remote/README.md) | Daemon client | Remote store access |
+| [harmonia-client](../../harmonia-client/README.md) | CLI wrapper | Nix command wrapper |
+| [harmonia-cache](../../harmonia-cache/README.md) | Binary cache | HTTP cache server |
+| [harmonia-ssh-store](../../harmonia-ssh-store/README.md) | SSH store | Remote store via SSH |
 
-**Contents** (from Nix.rs):
-- `hash/` - Hash types, algorithms, content addressing
-- `store_path/` - Store path parsing, validation, manipulation
-- `derivation/` - Derivation (.drv) file format and semantics
-- `signature/` - Cryptographic signatures for store paths
-- `realisation/` - Store path realisation tracking
+### Utility Crates (`harmonia-utils-*`)
 
-**Key Characteristic**: No `async`, no filesystem access, no network
-- All operations are pure computations
-- Can be tested without IO
-- Can be compiled to WASM
-
-**Example API**:
-```rust
-// Pure computation - no IO
-pub fn parse_store_path(path: &str) -> Result<StorePath, ParseError>;
-pub fn compute_hash(content: &[u8], hash_type: HashType) -> Hash;
-pub fn verify_signature(path: &StorePath, sig: &Signature) -> bool;
-```
-
-### harmonia-utils-*
+| Crate | Purpose | Details |
+|-------|---------|---------|
+| [harmonia-utils-io](../../harmonia-utils-io/README.md) | Async I/O | Streaming, buffering |
+| [harmonia-utils-base-encoding](../../harmonia-utils-base-encoding/README.md) | Base encodings | Nix base32, hex, base64 |
+| [harmonia-utils-hash](../../harmonia-utils-hash/README.md) | Hash utilities | Algorithms, formatting |
+| [harmonia-utils-test](../../harmonia-utils-test/README.md) | Test utilities | Proptest strategies |
 
 **Purpose**:
 Somewhat the opposite of harmonia-store-core.
@@ -133,259 +127,11 @@ Reusable building blocks, very much geared towards specific protocols that Nix h
 It is easy to imagine other versions of Nix not making these specific choices (e.g. different protocols, different hash algorithms, etc.)
 Also while these crates are implementation-specific, they are somewhat purpose-/interface-agnostic --- nothing in here is really "Nix-specific", nothing in here is "business logic", except for in the most mundane ways (like choices of hash algorithms, and nixbase32 having a different alphabet).
 
-#### harmonia-utils-io
-
-Reusable async I/O building blocks for streaming protocols.
-
-**Contents** (from Nix.rs):
-- `AsyncBytesRead` - Async trait for reading byte streams with buffering
-- `BytesReader` - Buffered async byte reader with configurable buffer sizes
-- `Lending` / `LentReader` - Reader lending for composable stream processing
-- `DrainInto` - Drain remaining bytes from a reader
-- `TeeWriter` - Write to two destinations simultaneously
-- `wire` - Wire protocol primitives (padding, alignment, zero bytes)
-
-**Example API**:
-```rust
-// Async byte reading with buffering
-pub trait AsyncBytesRead: AsyncRead {
-    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<Bytes>>;
-    fn consume(self: Pin<&mut Self>, amt: usize);
-}
-
-// Wire protocol utilities
-pub mod wire {
-    pub const ZEROS: [u8; 8] = [0u8; 8];
-    pub const fn calc_padding(len: u64) -> usize;
-    pub const fn calc_aligned(len: u64) -> u64;
-}
-```
-
-#### harmonia-utils-base-encoding
-
-Base encoding/decoding utilities for the various encodings Nix uses.
-
-**Contents**:
-- `base32` - Nix base32 encoding (special 32-character alphabet, LSB first, reversed)
-- `Base` - Enum for selecting encoding format (Hex, NixBase32, Base64)
-- `decode_for_base` / `encode_for_base` - Get encode/decode functions for a given base
-- `base64_len` - Calculate base64 encoded length
-
-**Example API**:
-```rust
-// Nix base32 encoding
-pub mod base32 {
-    pub fn encode_string(input: &[u8]) -> String;
-    pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartial>;
-}
-
-// Base encoding selection
-pub enum Base { Hex, NixBase32, Base64 }
-pub fn decode_for_base(base: Base) -> impl Fn(&[u8], &mut [u8]) -> Result<usize, DecodePartial>;
-```
-
-#### harmonia-utils-hash
-
-Cryptographic hash utilities for content addressing.
-
-**Contents** (from Nix.rs):
-- `Hash` - Generic hash type supporting MD5, SHA1, SHA256, SHA512
-- `Algorithm` - Hash algorithm enum with size and digest operations
-- `Sha256` / `NarHash` - Specialized hash types for common use cases
-- `Context` - Multi-step (Init-Update-Finish) digest calculation
-- `HashSink` - Async writer that computes hash of written data
-- `fmt` - Hash formatting (Base16, Base32, Base64, SRI)
-
-**Example API**:
-```rust
-// Hash computation
-let hash = Algorithm::SHA256.digest(b"hello, world");
-
-// Multi-step hashing
-let mut ctx = Context::new(Algorithm::SHA256);
-ctx.update("hello");
-ctx.update(", world");
-let hash = ctx.finish();
-
-// Hash formatting
-let base32 = hash.as_base32().to_string();  // "1b8m03r63zqh..."
-let sri = hash.sri().to_string();           // "sha256-ungWv48B..."
-```
-
-#### harmonia-utils-test
-
-Proptest strategies and test macros for property-based testing.
-
-**Contents**:
-- `arb_filename` / `arb_path` - Strategies for generating valid filenames and paths
-- `arb_byte_string` - Strategy for generating arbitrary byte strings
-- `arb_duration` / `arb_system_time` - Strategies for time values
-- `pretty_prop_assert_eq!` - Assertion macro with pretty diff output
-- `helpers::Union` - Weighted union of proptest strategies
-
-**Example API**:
-```rust
-use harmonia_utils_test::{arb_path, pretty_prop_assert_eq};
-use proptest::prelude::*;
-
-proptest! {
-    #[test]
-    fn roundtrip(path in arb_path()) {
-        let encoded = encode(&path);
-        let decoded = decode(&encoded)?;
-        pretty_prop_assert_eq!(path, decoded);
-    }
-}
-```
-
 **Key Characteristics** (all utils crates):
 - Foundation for higher-level crates
 - Independent of harmonia-store-core (no store semantics)
 - Async-first design with bounded memory usage (for I/O crates)
 - Pure functions, no I/O (for encoding/hash crates)
-
-### harmonia-store-db (Database)
-
-**Purpose**: SQLite database interface for Nix store metadata
-
-**Contents**: New implementation (inspired by hnix-store-db)
-- Full Nix schema support (ValidPaths, Refs, DerivationOutputs, Realisations)
-- Read-only system database access (immutable mode)
-- In-memory database for testing
-- Write operations for testing and local store management
-
-**Key Characteristic**: Direct metadata access
-- Bypasses daemon for metadata queries
-- Useful for direct store inspection
-- Schema matches Nix's db.sqlite exactly
-
-**Example API**:
-```rust
-// Open system database (read-only)
-let db = StoreDb::open_system()?;
-
-// Query path info with references
-let info = db.query_path_info("/nix/store/...")?;
-let refs = db.query_references("/nix/store/...")?;
-let derivers = db.query_valid_derivers("/nix/store/...")?;
-
-// In-memory for testing
-let db = StoreDb::open_memory()?;
-db.register_valid_path(&params)?;
-```
-
-### harmonia-nar (Format)
-
-**Purpose**: NAR archive format handling
-
-**Contents** (from Nix.rs):
-- `archive/` - NAR packing/unpacking logic
-- NAR header parsing
-- Streaming NAR operations
-
-**Key Characteristic**: Format-specific, but IO-agnostic
-- Can work with any IO source/sink
-- Reusable across different store implementations
-- Streaming-friendly (doesn't require entire NAR in memory)
-
-**Example API**:
-```rust
-// Takes any AsyncRead, returns parsed NAR
-pub async fn unpack_nar<R: AsyncRead>(reader: R) -> Result<NarContents, NarError>;
-
-// Takes contents, writes to any AsyncWrite
-pub async fn pack_nar<W: AsyncWrite>(contents: &Path, writer: W) -> Result<(), NarError>;
-```
-
-### harmonia-protocol (Protocol)
-
-**Purpose**: Daemon wire protocol definition
-
-**Contents** (from Nix.rs):
-- `wire/` - Protocol message types
-- Serialization/deserialization for protocol
-- Derive macros for protocol messages (from nixrs-derive)
-
-**Key Characteristic**: Protocol-focused
-- Defines the contract between client and daemon
-- Version negotiation
-- Operation encoding/decoding
-
-**Example API**:
-```rust
-#[derive(NixProtocol)]
-pub enum Operation {
-    QueryValidPaths { paths: Vec<StorePath> },
-    QueryPathInfo { path: StorePath },
-    NarFromPath { path: StorePath },
-    // ...
-}
-
-pub trait ProtocolCodec {
-    async fn read_operation<R: AsyncRead>(&mut self, reader: R) -> Result<Operation>;
-    async fn write_operation<W: AsyncWrite>(&mut self, writer: W, op: &Operation) -> Result<()>;
-}
-```
-
-### harmonia-daemon (Implementation)
-
-**Purpose**: Daemon server implementation
-
-**Contents** (from Nix.rs):
-- `daemon/` - Server logic, socket handling
-- Store operations implementation
-- Worker threads/connection management
-
-**Key Characteristic**: Ties everything together
-- Uses harmonia-store-core for semantics
-- Uses harmonia-nar for archive operations
-- Uses harmonia-protocol for communication
-- Adds IO effects (filesystem, sockets)
-
-**Example API**:
-```rust
-pub struct Daemon {
-    store: Store,
-    config: DaemonConfig,
-}
-
-impl Daemon {
-    pub async fn serve(&self, listener: UnixListener) -> Result<()> {
-        // Accept connections, handle protocol operations
-    }
-}
-```
-
-### harmonia-client (Implementation)
-
-**Purpose**: Daemon client library with connection pooling
-
-**Contents**: New implementation for Harmonia
-- Protocol client using harmonia-protocol types
-- Connection pool with queue management
-- Retry logic and error handling
-- Metrics and observability hooks
-
-**Key Characteristic**: Reusable client library
-- Built-in connection pooling (no separate pool crate needed)
-- Typed errors
-- Async-first API
-
-**Example API**:
-```rust
-pub struct Client {
-    pool: ConnectionPool,
-    config: ClientConfig,
-}
-
-impl Client {
-    pub async fn query_path_info(&self, path: &StorePath) -> Result<PathInfo>;
-    pub async fn nar_from_path(&self, path: &StorePath) -> Result<impl AsyncRead>;
-
-    // Pool management
-    pub fn pool_metrics(&self) -> PoolMetrics;
-}
-```
 
 ## Benefits of This Structure
 
