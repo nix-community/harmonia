@@ -2,18 +2,26 @@
 
 **Purpose**: Daemon client library with connection pooling
 
-**Contents**: New implementation for Harmonia
+## Overview
+
+This crate provides a client implementation for connecting to the Nix daemon and performing store operations over the daemon protocol. It is the Remote Store Layer in Harmonia's store architecture.
+
+## Contents: New implementation for Harmonia
+
 - Protocol client using harmonia-protocol types
 - Connection pool with queue management
 - Retry logic and error handling
 - Metrics and observability hooks
 
-**Key Characteristic**: Reusable client library
+## Key Characteristics
+
+Reusable client library:
 - Built-in connection pooling (no separate pool crate needed)
 - Typed errors
 - Async-first API
 
-**Example API**:
+## Example
+
 ```rust
 pub struct Client {
     pool: ConnectionPool,

@@ -2,7 +2,12 @@
 
 Reusable async I/O building blocks for streaming protocols.
 
-**Contents** (from Nix.rs):
+## Overview
+
+This crate provides async I/O primitives used throughout Harmonia for reading and writing byte streams. It is designed for protocols like NAR that require buffered, streaming I/O with bounded memory usage.
+
+## Contents
+
 - `AsyncBytesRead` - Async trait for reading byte streams with buffering
 - `BytesReader` - Buffered async byte reader with configurable buffer sizes
 - `Lending` / `LentReader` - Reader lending for composable stream processing
@@ -10,8 +15,11 @@ Reusable async I/O building blocks for streaming protocols.
 - `TeeWriter` - Write to two destinations simultaneously
 - `wire` - Wire protocol primitives (padding, alignment, zero bytes)
 
-**Example API**:
+## Example
+
 ```rust
+use harmonia_utils_io::{AsyncBytesRead, BytesReader, wire};
+
 // Async byte reading with buffering
 pub trait AsyncBytesRead: AsyncRead {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<Bytes>>;
@@ -26,7 +34,8 @@ pub mod wire {
 }
 ```
 
-**Key Characteristics**:
+## Key Characteristics
+
 - Async-first design with tokio
 - Bounded memory usage with configurable buffer sizes
 - Zero-copy where possible using `bytes::Bytes`

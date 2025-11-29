@@ -2,17 +2,25 @@
 
 **Purpose**: Daemon wire protocol definition
 
-**Contents** (from Nix.rs):
+## Overview
+
+This crate defines the types and serialization format for the Nix daemon protocol, enabling communication between clients and the daemon server. It is the Protocol Layer in Harmonia's store architecture.
+
+## Contents (from Nix.rs):
+
 - `wire/` - Protocol message types
 - Serialization/deserialization for protocol
 - Derive macros for protocol messages (from nixrs-derive)
 
-**Key Characteristic**: Protocol-focused
+## Key Characteristics
+
+Protocol-focused:
 - Defines the contract between client and daemon
 - Version negotiation
 - Operation encoding/decoding
 
-**Example API**:
+## Example
+
 ```rust
 #[derive(NixProtocol)]
 pub enum Operation {

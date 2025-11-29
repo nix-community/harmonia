@@ -2,18 +2,30 @@
 
 **Purpose**: SQLite database interface for Nix store metadata
 
-**Contents**: New implementation (inspired by hnix-store-db)
+## Overview
+
+This crate provides read and write access to the Nix store's SQLite database, enabling queries for store path metadata, references, and derivation outputs. It is the Database Layer in Harmonia's store architecture.
+
+New implementation (inspired by hnix-store-db).
+
+## Contents
+
+New implementation (inspired by hnix-store-db)
+
 - Full Nix schema support (ValidPaths, Refs, DerivationOutputs, Realisations)
 - Read-only system database access (immutable mode)
 - In-memory database for testing
 - Write operations for testing and local store management
 
-**Key Characteristic**: Direct metadata access
+## Key Characteristics
+
+Direct metadata access:
 - Bypasses daemon for metadata queries
 - Useful for direct store inspection
 - Schema matches Nix's db.sqlite exactly
 
-**Example API**:
+## Example
+
 ```rust
 // Open system database (read-only)
 let db = StoreDb::open_system()?;
