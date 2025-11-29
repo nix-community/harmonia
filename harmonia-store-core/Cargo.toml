@@ -17,14 +17,9 @@ readme = "README.md"
 bytes = { workspace = true, features = ["serde"] }
 data-encoding = { workspace = true }
 derive_more = { workspace = true }
-futures = { workspace = true }
 harmonia-utils-base-encoding = { path = "../harmonia-utils-base-encoding" }
 harmonia-utils-hash = { path = "../harmonia-utils-hash" }
-md5 = { workspace = true }
 num_enum = { workspace = true }
-once_cell = { workspace = true }
-parking_lot = { workspace = true }
-pin-project-lite = { workspace = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { version = "0.5", optional = true }
 ring = { workspace = true }

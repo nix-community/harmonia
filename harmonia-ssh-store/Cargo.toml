@@ -14,21 +14,8 @@ description = "SSH remote store implementation (optional - pending Phase 3 asses
 readme = "README.md"
 
 [dependencies]
-bytes = { workspace = true }
-futures = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-
-# Internal dependencies
-harmonia-store-core = { path = "../harmonia-store-core" }
-harmonia-protocol = { path = "../harmonia-protocol" }
-
 # SSH dependencies (will be added if imported)
 # ssh2 = "0.9"  # Or async-ssh2-tokio
-
-[dev-dependencies]
-rstest = { workspace = true }
-tempfile = { workspace = true }
 
 [lints]
 workspace = true
