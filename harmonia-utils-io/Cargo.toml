@@ -22,7 +22,7 @@ tokio = { workspace = true, features = ["io-util", "sync"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-hex-literal = "0.4"
+hex-literal = "1.1"
 proptest = { workspace = true }
 rstest = { workspace = true }
 test-log = "0.2"
