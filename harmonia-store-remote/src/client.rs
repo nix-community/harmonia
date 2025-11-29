@@ -928,45 +928,6 @@ where
         .fill_operation(Operation::AddPermRoot)
     }
 
-    fn sync_with_gc(&mut self) -> impl ResultLog<Output = DaemonResult<()>> + Send + '_ {
-        async move {
-            self.writer.write_value(&Operation::SyncWithGC).await?;
-            Ok(self.process_stderr())
-        }
-        .future_result()
-        .fill_operation(Operation::SyncWithGC)
-    }
-
-    fn query_derivation_outputs<'a>(
-        &'a mut self,
-        path: &'a StorePath,
-    ) -> impl ResultLog<Output = DaemonResult<StorePathSet>> + Send + 'a {
-        async move {
-            self.writer
-                .write_value(&Operation::QueryDerivationOutputs)
-                .await?;
-            self.writer.write_value(path).await?;
-            Ok(self.process_stderr())
-        }
-        .future_result()
-        .fill_operation(Operation::QueryDerivationOutputs)
-    }
-
-    fn query_derivation_output_names<'a>(
-        &'a mut self,
-        path: &'a StorePath,
-    ) -> impl ResultLog<Output = DaemonResult<BTreeSet<OutputName>>> + Send + 'a {
-        async move {
-            self.writer
-                .write_value(&Operation::QueryDerivationOutputNames)
-                .await?;
-            self.writer.write_value(path).await?;
-            Ok(self.process_stderr())
-        }
-        .future_result()
-        .fill_operation(Operation::QueryDerivationOutputNames)
-    }
-
     fn add_ca_to_store<'a, 'r, S>(
         &'a mut self,
         name: &'a str,

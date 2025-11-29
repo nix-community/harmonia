@@ -6,6 +6,10 @@
 
 This crate provides the server-side implementation of the Nix daemon protocol, handling client connections and store operations.
 
+## Requirements
+
+- **Nix 2.24+** (protocol version 1.37) is required. Older Nix versions are not supported.
+
 ## Contents
 
 **Contents** (from Nix.rs):
