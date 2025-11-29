@@ -5,23 +5,23 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum DaemonError {
-    #[error("Database error: {0}")]
+    #[error("database error: {0}")]
     Database(String),
 
-    #[error("Store database error: {0}")]
+    #[error("store database error: {0}")]
     StoreDb(#[from] harmonia_store_db::Error),
 
-    #[error("IO error: {message}")]
+    #[error("I/O error while {message}: {source}")]
     Io {
         message: String,
         #[source]
         source: std::io::Error,
     },
 
-    #[error("Protocol error: {0}")]
+    #[error("protocol error: {0}")]
     Protocol(#[from] harmonia_protocol::types::DaemonError),
 
-    #[error("Configuration error: {0}")]
+    #[error("configuration error: {0}")]
     Config(String),
 
     #[error("TOML parsing error: {0}")]

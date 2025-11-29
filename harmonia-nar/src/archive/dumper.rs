@@ -437,7 +437,6 @@ mod unittests {
     use std::fs::create_dir_all;
 
     use futures::TryStreamExt as _;
-    use pretty_assertions::assert_eq;
     use tempfile::Builder;
 
     use super::*;

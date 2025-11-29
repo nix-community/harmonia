@@ -274,6 +274,6 @@ mod unittests {
 
         let io = File::open(path).await.unwrap();
         let s = read_nar(BytesReader::new(io)).await.unwrap();
-        pretty_assertions::assert_eq!(s, expected);
+        assert_eq!(s, expected);
     }
 }

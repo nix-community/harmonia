@@ -81,35 +81,3 @@ prop_compose! {
         Duration::from_secs((secs as i64).unsigned_abs())
     }
 }
-
-#[macro_export]
-macro_rules! pretty_prop_assert_eq {
-    ($left:expr , $right:expr,) => ({
-        $crate::pretty_prop_assert_eq!($left, $right)
-    });
-    ($left:expr , $right:expr) => ({
-        match (&($left), &($right)) {
-            (left_val, right_val) => {
-                ::proptest::prop_assert!(*left_val == *right_val,
-                    "assertion failed: `(left == right)`\
-                          \n\
-                          \n{}\
-                          \n",
-                          ::pretty_assertions::Comparison::new(left_val, right_val))
-            }
-        }
-    });
-    ($left:expr , $right:expr, $($arg:tt)*) => ({
-        match (&($left), &($right)) {
-            (left_val, right_val) => {
-                ::proptest::prop_assert!(*left_val == *right_val,
-                    "assertion failed: `(left == right)`: {}\
-                          \n\
-                          \n{}\
-                          \n",
-                           format_args!($($arg)*),
-                           ::pretty_assertions::Comparison::new(left_val, right_val))
-            }
-        }
-    });
-}

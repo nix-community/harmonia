@@ -660,6 +660,6 @@ mod tests {
             .read_slice(value.as_bytes())
             .build();
         let actual: Realisation = mock.read_value().await.unwrap();
-        pretty_assertions::assert_eq!(actual, expected);
+        assert_eq!(actual, expected);
     }
 }

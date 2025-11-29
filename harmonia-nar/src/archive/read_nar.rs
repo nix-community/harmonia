@@ -103,7 +103,7 @@ use harmonia_utils_io::{AsyncBytesRead, DrainInto};
 #[allow(unsafe_code)]
 const fn copy_from_slice(dst: &mut [u8], src: &[u8]) {
     if dst.len() != src.len() {
-        panic!("failed");
+        panic!("copy_from_slice: destination and source lengths differ");
     }
     // SAFETY: `self` is valid for `self.len()` elements by definition, and `src` was
     // checked to have the same length. The slices cannot overlap because
@@ -242,7 +242,7 @@ impl<const P: bool> Inner<P> {
                     self.state = InnerState::Eof;
                 }
             }
-            _ => panic!("Invalid NAR state for bump"),
+            _ => panic!("invalid NAR state for bump: {:?}", self.state),
         }
     }
     pub(crate) fn drive(&mut self, mut buf: &[u8]) -> io::Result<usize> {
@@ -878,10 +878,10 @@ mod unittests {
                 assert_eq!(kind, err.kind());
             }
             (_, Err(err)) => {
-                panic!("Unexpected read failure {err:?}");
+                panic!("unexpected read failure: {err:?}");
             }
             (Err(kind), _) => {
-                panic!("Read should fail with {kind:?} error");
+                panic!("read should fail with {kind:?} error, but succeeded with rest={rest:?}");
             }
         }
     }

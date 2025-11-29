@@ -43,7 +43,6 @@ harmonia-nar = { path = "../harmonia-nar", features = ["test"] }
 proptest = { workspace = true }
 proptest-derive = "0.5"
 rstest = { workspace = true }
-pretty_assertions = { workspace = true }
 test-strategy = { workspace = true }
 tokio-test = "0.4"
 hex-literal = "1.1"

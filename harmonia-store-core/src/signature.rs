@@ -458,7 +458,6 @@ pub mod proptests {
 #[cfg(test)]
 mod unittests {
     use super::*;
-    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_public_key() {

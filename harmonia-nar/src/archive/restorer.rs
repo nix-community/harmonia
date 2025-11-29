@@ -416,7 +416,7 @@ mod proptests {
 
     use crate::archive::{NarEvent, NarWriteError, dump, restore, test_data};
     use crate::test::arbitrary::archive::arb_nar_events;
-    use harmonia_utils_test::pretty_prop_assert_eq;
+    use proptest::prop_assert_eq;
 
     #[test]
     fn proptest_restore_dump() {
@@ -436,7 +436,7 @@ mod proptests {
                 let s = dump(path)
                     .and_then(NarEvent::read_file)
                     .try_collect::<test_data::TestNarEvents>().await?;
-                pretty_prop_assert_eq!(&s, &events);
+                prop_assert_eq!(&s, &events);
                 Ok(())
             })?;
 

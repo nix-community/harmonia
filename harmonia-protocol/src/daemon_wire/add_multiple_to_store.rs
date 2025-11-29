@@ -129,7 +129,6 @@ mod unittests {
     use bytes::Bytes;
     use futures::stream::iter;
     use futures::{TryFutureExt as _, TryStreamExt as _};
-    use pretty_assertions::assert_eq;
     use rstest::rstest;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::try_join;

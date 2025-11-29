@@ -205,8 +205,16 @@ async fn inner_main() -> Result<()> {
             std::process::exit(1);
         }
         let config = tls::load_tls_config(
-            Path::new(&c.tls_cert_path.clone().unwrap()),
-            Path::new(&c.tls_key_path.clone().unwrap()),
+            Path::new(
+                &c.tls_cert_path
+                    .clone()
+                    .expect("tls certificate path must be set when tls is enabled"),
+            ),
+            Path::new(
+                &c.tls_key_path
+                    .clone()
+                    .expect("tls key path must be set when tls is enabled"),
+            ),
         )?;
 
         server = server

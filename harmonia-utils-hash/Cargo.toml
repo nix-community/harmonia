@@ -27,7 +27,6 @@ tokio = { workspace = true, features = ["io-util"] }
 
 [dev-dependencies]
 hex-literal = "1.1"
-pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 rstest = { workspace = true }
 rstest_reuse = "0.7"

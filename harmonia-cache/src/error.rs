@@ -46,10 +46,10 @@ pub enum ConfigError {
     #[error("Failed to parse TOML: {0}")]
     TomlParse(#[from] toml::de::Error),
 
-    #[error("Invalid signing key: {reason}")]
+    #[error("invalid signing key: {reason}")]
     InvalidSigningKey { reason: String },
 
-    #[error("Invalid configuration: {reason}")]
+    #[error("invalid configuration: {reason}")]
     Invalid { reason: String },
 }
 
@@ -58,13 +58,13 @@ pub enum ServerError {
     #[error("TLS setup failed: {reason}")]
     TlsSetup { reason: String },
 
-    #[error("Server startup failed: {reason}")]
+    #[error("server startup failed: {reason}")]
     Startup { reason: String },
 }
 
 #[derive(Error, Debug)]
 pub enum StoreError {
-    #[error("Failed to query path for hash {hash}: {reason}")]
+    #[error("failed to query store path '{hash}': {reason}")]
     PathQuery { hash: String, reason: String },
 
     #[error("Daemon communication error: {0}")]

@@ -61,8 +61,8 @@ impl PrometheusMetrics {
         let mut buffer = vec![];
         encoder
             .encode(&self.registry.gather(), &mut buffer)
-            .unwrap();
-        String::from_utf8(buffer).unwrap()
+            .expect("failed to encode Prometheus metrics to buffer");
+        String::from_utf8(buffer).expect("prometheus metrics buffer contains invalid UTF-8")
     }
 }
 

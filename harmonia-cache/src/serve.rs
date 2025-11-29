@@ -64,7 +64,10 @@ pub(crate) fn directory_listing(
         .read_dir()
         .io_context(format!("cannot read directory: {}", fs_path.display()))?
     {
-        let entry = entry.unwrap();
+        let entry = entry.io_context(format!(
+            "failed to read directory entry in: {}",
+            fs_path.display()
+        ))?;
         let p = match entry.path().strip_prefix(fs_path) {
             Ok(p) => url_prefix.join(p).to_string_lossy().into_owned(),
             Err(_) => continue,

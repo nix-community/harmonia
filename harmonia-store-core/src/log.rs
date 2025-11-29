@@ -257,8 +257,8 @@ mod unittests {
     )]
     fn serialize_deserialize(#[case] json: &str, #[case] msg: LogMessage) {
         let actual: LogMessage = serde_json::from_str(json).unwrap();
-        pretty_assertions::assert_eq!(actual, msg);
+        assert_eq!(actual, msg);
         let actual_s = serde_json::to_string(&msg).unwrap();
-        pretty_assertions::assert_eq!(actual_s, json);
+        assert_eq!(actual_s, json);
     }
 }
