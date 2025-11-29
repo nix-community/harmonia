@@ -589,7 +589,7 @@ nix_serialize_remote!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
     use crate::de::NixRead;
     use crate::ser::NixWrite;
     use harmonia_store_core::realisation::Realisation;

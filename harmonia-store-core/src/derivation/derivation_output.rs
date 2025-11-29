@@ -254,7 +254,7 @@ pub mod arbitrary {
 
     pub fn arb_derivation_output_impure() -> impl Strategy<Value = DerivationOutput> {
         any::<ContentAddressMethodAlgorithm>() // This works with derive(Arbitrary)
-            .prop_map(|ca| DerivationOutput::Impure(ca))
+            .prop_map(DerivationOutput::Impure)
     }
 
     pub fn arb_derivation_output_floating<H>(
@@ -268,7 +268,7 @@ pub mod arbitrary {
             2 => hash_type.clone().prop_map(ContentAddressMethodAlgorithm::Flat),
             2 => hash_type.prop_map(ContentAddressMethodAlgorithm::Recursive),
         ]
-        .prop_map(|ca| DerivationOutput::CAFloating(ca))
+        .prop_map(DerivationOutput::CAFloating)
     }
 
     pub fn arb_derivation_output() -> impl Strategy<Value = DerivationOutput> {

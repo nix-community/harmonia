@@ -209,7 +209,7 @@ mod tests {
     fn test_compute_built_placeholder_opaque() {
         let store_path: StorePath = "00000000000000000000000000000000-test".parse().unwrap();
         let placeholder = compute_built_placeholder(&SingleDerivedPath::Opaque(store_path), "out");
-        assert!(placeholder.to_string_lossy().len() > 0);
+        assert!(!placeholder.to_string_lossy().is_empty());
     }
 
     #[test]
@@ -222,6 +222,6 @@ mod tests {
             output: "inner".parse().unwrap(),
         };
         let placeholder = compute_built_placeholder(&inner_path, "outer");
-        assert!(placeholder.to_string_lossy().len() > 0);
+        assert!(!placeholder.to_string_lossy().is_empty());
     }
 }

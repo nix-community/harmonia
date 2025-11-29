@@ -22,6 +22,7 @@ use tokio::net::UnixListener;
 use tokio::select;
 use tracing::{Instrument, debug, error, info, instrument, trace};
 
+use harmonia_io::{AsyncBufReadCompat, BytesReader};
 use harmonia_nar::NarReader;
 use harmonia_protocol::ProtocolVersion;
 use harmonia_protocol::daemon::{
@@ -43,7 +44,6 @@ use harmonia_protocol::ser::{NixWrite, NixWriter};
 use harmonia_protocol::types::{AddToStoreItem, DaemonPath};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
-use harmonia_io::{AsyncBufReadCompat, BytesReader};
 use harmonia_store_core::log::LogMessage;
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
 use harmonia_store_core::signature::Signature;
