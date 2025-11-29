@@ -115,11 +115,11 @@ let
         cargo llvm-cov --no-report --workspace
 
         # Generate coverage report in codecov JSON format
-        mkdir -p $out
         cargo llvm-cov report --codecov --output-path coverage-raw.json
 
         # Fix paths: strip build directory prefix to get repo-relative paths
         # e.g., /nix/var/nix/builds/.../source/harmonia-cache/src/foo.rs -> harmonia-cache/src/foo.rs
+        mkdir -p $out
         jq '.coverage |= with_entries(.key |= (capture(".*/source/(?<path>.*)") // {path: .}).path)' \
           coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
       '';
