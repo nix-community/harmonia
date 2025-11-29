@@ -59,10 +59,9 @@ let
         curl
       ];
 
-      # Set HARMONIA_BIN to the build directory so tests use the release binary
       # Set NIX_UPSTREAM_SRC to nix source for JSON test data
+      # Tests use CARGO_BIN_EXE_* to find binaries automatically
       preCheck = ''
-        export HARMONIA_BIN=$(pwd)/target/release
         export NIX_UPSTREAM_SRC=${nix-src}
       ''
       + lib.optionalString pkgs.stdenv.isDarwin ''
@@ -84,33 +83,49 @@ let
     }
   );
 
-  # Test derivation - runs tests with llvm-cov, outputs lcov report
-  tests = craneLib.cargoLlvmCov (
+  # Test derivation with coverage - follows nomad pattern
+  # https://github.com/nomad/nomad/blob/main/nix/coverage.nix
+  # Uses mkCargoDerivation directly since cargoLlvmCov overrides buildPhaseCargoCommand
+  tests = craneLib.mkCargoDerivation (
     commonArgs
     // {
       inherit cargoArtifacts;
-      cargoLlvmCovExtraArgs = "--codecov --output-path $out --remap-path-prefix";
+      pnameSuffix = "-llvm-cov";
+      doInstallCargoArtifacts = false;
+
       nativeBuildInputs = [
         nix
         curl
+        pkgs.cargo-llvm-cov
+        pkgs.jq
       ];
-      preBuild = ''
+
+      # Custom build command following nomad pattern:
+      # 1. Run tests with --no-report to collect coverage data
+      # 2. Generate report separately with --codecov
+      buildPhaseCargoCommand = ''
         export NIX_UPSTREAM_SRC=${nix-src}
         export LLVM_COV=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-cov
         export LLVM_PROFDATA=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-profdata
+        ${lib.optionalString pkgs.stdenv.isDarwin ''
+          export _NIX_TEST_NO_SANDBOX="1"
+        ''}
 
-        # Build binaries with coverage instrumentation for integration tests
-        # Use a SEPARATE target directory to avoid cargo-llvm-cov cleaning them up
-        export RUSTFLAGS="-C instrument-coverage --cfg=coverage"
-        export LLVM_PROFILE_FILE="$(pwd)/target/llvm-cov-target/harmonia-%p-%m.profraw"
-        cargo build --release --bins --target-dir target/harmonia-bins
+        # Run tests and collect coverage data (no report yet)
+        # Tests use CARGO_BIN_EXE_* to find binaries automatically
+        cargo llvm-cov --no-report --workspace
 
-        # Point tests to our separately-built binaries
-        export HARMONIA_BIN=$(pwd)/target/harmonia-bins/release
-      ''
-      + lib.optionalString pkgs.stdenv.isDarwin ''
-        export _NIX_TEST_NO_SANDBOX="1"
+        # Generate coverage report in codecov JSON format
+        mkdir -p $out
+        cargo llvm-cov report --codecov --output-path coverage-raw.json
+
+        # Fix paths: strip build directory prefix to get repo-relative paths
+        # e.g., /nix/var/nix/builds/.../source/harmonia-cache/src/foo.rs -> harmonia-cache/src/foo.rs
+        jq '.coverage |= with_entries(.key |= (capture(".*/source/(?<path>.*)") // {path: .}).path)' \
+          coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
       '';
+
+      installPhaseCommand = "";
     }
   );
 
