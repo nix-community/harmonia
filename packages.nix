@@ -101,8 +101,9 @@ let
       ];
 
       # Custom build command following nomad pattern:
-      # 1. Run tests with --no-report to collect coverage data
-      # 2. Generate report separately with --codecov
+      # 1. Build binaries with instrumentation
+      # 2. Run tests with instrumented binaries via env vars
+      # 3. Generate report separately with --codecov
       buildPhaseCargoCommand = ''
         export NIX_UPSTREAM_SRC=${nix-src}
         export LLVM_COV=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-cov
@@ -111,8 +112,18 @@ let
           export _NIX_TEST_NO_SANDBOX="1"
         ''}
 
-        # Run tests and collect coverage data (no report yet)
-        cargo llvm-cov --no-report --workspace
+        # Get coverage environment (LLVM_PROFILE_FILE, RUSTFLAGS, etc.)
+        eval "$(cargo llvm-cov show-env --export-prefix)"
+
+        # Build workspace binaries with coverage instrumentation
+        cargo build --workspace
+
+        # Point integration tests to instrumented binaries for coverage
+        export HARMONIA_DAEMON_BIN="$PWD/target/debug/harmonia-daemon"
+        export HARMONIA_CACHE_BIN="$PWD/target/debug/harmonia-cache"
+
+        # Run tests (they will use the instrumented binaries and write profraw data)
+        cargo test --workspace
 
         # Generate coverage report in codecov JSON format
         cargo llvm-cov report --codecov --output-path coverage-raw.json

@@ -15,6 +15,8 @@
       cargo
       cargo-watch
       cargo-llvm-cov
+      # LLVM tools needed for cargo-llvm-cov
+      llvmPackages.bintools-unwrapped
     ];
 
     buildInputs = with pkgs; [
