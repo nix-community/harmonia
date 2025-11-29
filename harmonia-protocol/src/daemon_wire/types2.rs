@@ -4,16 +4,11 @@ use std::str::FromStr;
 use std::str::from_utf8;
 use std::time::Duration;
 
-use bytes::Bytes;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-#[cfg(test)]
-use proptest::arbitrary::any_with;
 #[cfg(test)]
 use test_strategy::Arbitrary;
 use tracing::{Span, debug_span};
 
-#[cfg(test)]
-use crate::ProtocolVersion;
 use crate::de::{Error as _, NixDeserialize as NixDeserializeTrait, NixRead};
 use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
 use crate::types::{
@@ -27,7 +22,6 @@ use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
-use harmonia_utils_hash as hash;
 
 use super::IgnoredZero;
 use super::types::Operation;
@@ -206,44 +200,19 @@ pub enum Request {
     AddToStoreNar(AddToStoreNarRequest),
     QueryMissing(Vec<DerivedPath>),
     QueryDerivationOutputMap(StorePath),
-    RegisterDrvOutput(RegisterDrvOutputRequest),
+    RegisterDrvOutput(Realisation),
     QueryRealisation(DrvOutput),
     AddMultipleToStore(AddMultipleToStoreRequest),
     AddBuildLog(BaseStorePath),
     BuildPathsWithResults(BuildPathsRequest),
     AddPermRoot(AddPermRootRequest),
-
-    /// Obsolete Nix 2.5.0 Protocol 1.32
-    SyncWithGC,
-    /// Obsolete Nix 2.4 Protocol 1.25
-    AddTextToStore(AddTextToStoreRequest),
-    /// Obsolete Nix 2.4 Protocol 1.22*
-    QueryDerivationOutputs(StorePath),
-    /// Obsolete Nix 2.4 Protocol 1.21
-    QueryDerivationOutputNames(StorePath),
-    /// Obsolete Nix 2.0, Protocol 1.19*
-    QuerySubstitutablePathInfos(QuerySubstitutablePathInfosRequest),
-    /// Obsolete Nix 2.0 Protocol 1.17
-    ExportPath(StorePath),
-    /// Obsolete Nix 2.0 Protocol 1.17
-    ImportPaths,
-    /// Obsolete Nix 2.0 Protocol 1.16
-    QueryPathHash(StorePath),
-    /// Obsolete Nix 2.0 Protocol 1.16
-    QueryReferences(StorePath),
-    /// Obsolete Nix 2.0 Protocol 1.16
-    QueryDeriver(StorePath),
-    /// Obsolete Nix 1.2 Protocol 1.12
-    HasSubstitutes(StorePathSet),
-    /// Obsolete Nix 1.2 Protocol 1.12
-    QuerySubstitutablePathInfo(StorePath),
 }
 
 impl Request {
     pub fn operation(&self) -> Operation {
         match self {
             Request::IsValidPath(_) => Operation::IsValidPath,
-            Request::QueryReferrers(_) => Operation::QueryReferences,
+            Request::QueryReferrers(_) => Operation::QueryReferrers,
             Request::AddToStore(_) => Operation::AddToStore,
             Request::BuildPaths(_) => Operation::BuildPaths,
             Request::EnsurePath(_) => Operation::EnsurePath,
@@ -272,18 +241,6 @@ impl Request {
             Request::AddBuildLog(_) => Operation::AddBuildLog,
             Request::BuildPathsWithResults(_) => Operation::BuildPathsWithResults,
             Request::AddPermRoot(_) => Operation::AddPermRoot,
-            Request::SyncWithGC => Operation::SyncWithGC,
-            Request::AddTextToStore(_) => Operation::AddTextToStore,
-            Request::QueryDerivationOutputs(_) => Operation::QueryDerivationOutputs,
-            Request::QueryDerivationOutputNames(_) => Operation::QueryDerivationOutputNames,
-            Request::QuerySubstitutablePathInfos(_) => Operation::QuerySubstitutablePathInfos,
-            Request::ExportPath(_) => Operation::ExportPath,
-            Request::ImportPaths => Operation::ImportPaths,
-            Request::QueryPathHash(_) => Operation::QueryPathHash,
-            Request::QueryReferences(_) => Operation::QueryReferences,
-            Request::QueryDeriver(_) => Operation::QueryDeriver,
-            Request::HasSubstitutes(_) => Operation::HasSubstitutes,
-            Request::QuerySubstitutablePathInfo(_) => Operation::QuerySubstitutablePathInfo,
         }
     }
 
@@ -291,13 +248,8 @@ impl Request {
         match self {
             Request::IsValidPath(path) => debug_span!("IsValidPath", ?path),
             Request::QueryReferrers(path) => debug_span!("QueryReferrers", ?path),
-            Request::AddToStore(AddToStoreRequest::Protocol25(req)) => {
+            Request::AddToStore(req) => {
                 debug_span!("AddToStore", name=?req.name, cam=?req.cam, refs=req.refs.len(), repair=req.repair)
-            }
-            Request::AddToStore(AddToStoreRequest::ProtocolPre25(req)) => {
-                debug_span!("AddToStore", base_name=req.base_name, fixed=req.fixed,
-                    recursive=?req.recursive,
-                    hash_algo=?req.hash_algo)
             }
             Request::BuildPaths(req) => {
                 debug_span!("BuildPaths", paths=req.paths.len(), mode=?req.mode)
@@ -364,14 +316,8 @@ impl Request {
             Request::QueryDerivationOutputMap(path) => {
                 debug_span!("QueryDerivationOutputMap", ?path)
             }
-            Request::RegisterDrvOutput(RegisterDrvOutputRequest::Post31(realisation)) => {
+            Request::RegisterDrvOutput(realisation) => {
                 debug_span!("RegisterDrvOutput", ?realisation)
-            }
-            Request::RegisterDrvOutput(RegisterDrvOutputRequest::Pre31 {
-                output_id,
-                output_path,
-            }) => {
-                debug_span!("RegisterDrvOutput", ?output_id, ?output_path)
             }
             Request::QueryRealisation(drv_output) => {
                 debug_span!("QueryRealisation", ?drv_output)
@@ -390,38 +336,6 @@ impl Request {
             Request::AddPermRoot(req) => {
                 let gc_root = String::from_utf8_lossy(&req.gc_root);
                 debug_span!("AddPermRoot", path=?req.store_path, ?gc_root)
-            }
-            Request::SyncWithGC => debug_span!("SyncWithGC"),
-            Request::AddTextToStore(req) => {
-                debug_span!(
-                    "AddTextToStore",
-                    suffix = req.suffix,
-                    text = req.text.len(),
-                    refs = req.refs.len()
-                )
-            }
-            Request::QueryDerivationOutputs(path) => debug_span!("QueryDerivationOutputs", ?path),
-            Request::QueryDerivationOutputNames(path) => {
-                debug_span!("QueryDerivationOutputNames", ?path)
-            }
-            Request::QuerySubstitutablePathInfos(
-                QuerySubstitutablePathInfosRequest::Protocol22(infos),
-            ) => {
-                debug_span!("QuerySubstitutablePathInfos", infos = infos.len())
-            }
-            Request::QuerySubstitutablePathInfos(
-                QuerySubstitutablePathInfosRequest::ProtocolPre22(paths),
-            ) => {
-                debug_span!("QuerySubstitutablePathInfos", paths = paths.len())
-            }
-            Request::ExportPath(path) => debug_span!("ExportPath", ?path),
-            Request::ImportPaths => debug_span!("ImportPaths"),
-            Request::QueryPathHash(path) => debug_span!("QueryPathHash", ?path),
-            Request::QueryReferences(path) => debug_span!("QueryReferences", ?path),
-            Request::QueryDeriver(path) => debug_span!("QueryDeriver", ?path),
-            Request::HasSubstitutes(paths) => debug_span!("HasSubstitutes", paths = paths.len()),
-            Request::QuerySubstitutablePathInfo(path) => {
-                debug_span!("QuerySubstitutablePathInfo", ?path)
             }
         }
     }
@@ -452,63 +366,30 @@ pub struct SubstitutablePathInfo {
 pub struct BuildResult {
     pub status: BuildStatus,
     pub error_msg: DaemonString,
-    #[nix(version = "29..")]
     pub times_built: DaemonInt,
-    #[nix(version = "29..")]
     pub is_non_deterministic: bool,
-    #[nix(version = "29..")]
     pub start_time: DaemonTime,
-    #[nix(version = "29..")]
     pub stop_time: DaemonTime,
-    #[nix(version = "37..")]
     pub cpu_user: Option<Microseconds>,
-    #[nix(version = "37..")]
     pub cpu_system: Option<Microseconds>,
-    #[nix(version = "28..")]
     pub built_outputs: BTreeMap<DrvOutput, Realisation>,
 }
 
 pub type KeyedBuildResults = Vec<KeyedBuildResult>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
 #[cfg_attr(test, derive(Arbitrary))]
-#[cfg_attr(test, arbitrary(args = ProtocolVersion))]
 pub struct KeyedBuildResult {
     pub path: DerivedPath,
-    #[cfg_attr(test, strategy(any_with::<BuildResult>(*args)))]
     pub result: BuildResult,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-pub enum AddToStoreRequest {
-    #[nix(version = "..=24")]
-    ProtocolPre25(AddToStoreRequestPre25),
-    #[nix(version = "25..")]
-    Protocol25(AddToStoreRequest25),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-pub struct AddToStoreRequestPre25 {
-    pub base_name: String,
-    pub fixed: bool,
-    pub recursive: FileIngestionMethod,
-    pub hash_algo: hash::Algorithm,
-    // NAR dump
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-pub struct AddToStoreRequest25 {
+pub struct AddToStoreRequest {
     pub name: String,
     pub cam: ContentAddressMethodAlgorithm,
     pub refs: StorePathSet,
     pub repair: bool,
     // Framed NAR dump
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-pub struct AddTextToStoreRequest {
-    pub suffix: String,
-    pub text: Bytes,
-    pub refs: StorePathSet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
@@ -536,17 +417,8 @@ pub struct CollectGarbageResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-pub enum QuerySubstitutablePathInfosRequest {
-    #[nix(version = "..=21")]
-    ProtocolPre22(StorePathSet),
-    #[nix(version = "22..")]
-    Protocol22(BTreeMap<StorePath, Option<ContentAddress>>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
 pub struct QueryValidPathsRequest {
     pub paths: StorePathSet,
-    #[nix(version = "27..")]
     pub substitute: bool,
 }
 
@@ -585,24 +457,7 @@ pub struct QueryMissingResult {
     pub nar_size: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-pub enum RegisterDrvOutputRequest {
-    #[nix(version = "31..")]
-    Post31(Realisation),
-    #[nix(version = "..=30")]
-    Pre31 {
-        output_id: DrvOutput,
-        output_path: StorePath,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-pub enum QueryRealisationResponse {
-    #[nix(version = "..=30")]
-    ProtocolPre31(StorePathSet),
-    #[nix(version = "31..")]
-    Protocol31(Vec<Realisation>),
-}
+pub type QueryRealisationResponse = Vec<Realisation>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
 pub struct AddMultipleToStoreRequest {
@@ -723,35 +578,9 @@ impl NixSerializeTrait for Option<Microseconds> {
 #[cfg(test)]
 pub mod arbitrary {
     use super::*;
-    use crate::daemon::ProtocolVersion;
     use ::proptest::prelude::*;
     use harmonia_store_core::realisation::arbitrary::arb_drv_outputs;
     use harmonia_store_core::test::arbitrary::arb_byte_string;
-
-    pub fn version_cut_off<B, A, V>(
-        version: ProtocolVersion,
-        cut_off: u8,
-        before: B,
-        after: A,
-    ) -> BoxedStrategy<V>
-    where
-        B: Strategy<Value = V> + 'static,
-        A: Strategy<Value = V> + 'static,
-    {
-        if version.minor() < cut_off {
-            before.boxed()
-        } else {
-            after.boxed()
-        }
-    }
-
-    pub fn field_after<A, V>(version: ProtocolVersion, cut_off: u8, after: A) -> BoxedStrategy<V>
-    where
-        A: Strategy<Value = V> + 'static,
-        V: Default + Clone + std::fmt::Debug + 'static,
-    {
-        version_cut_off(version, cut_off, Just(V::default()), after)
-    }
 
     impl Arbitrary for BuildMode {
         type Parameters = ();
@@ -807,25 +636,25 @@ pub mod arbitrary {
     }
 
     impl Arbitrary for BuildResult {
-        type Parameters = ProtocolVersion;
+        type Parameters = ();
         type Strategy = BoxedStrategy<BuildResult>;
-        fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-            arb_build_result(args).boxed()
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_build_result().boxed()
         }
     }
 
     prop_compose! {
-        pub fn arb_build_result(version: ProtocolVersion)
+        pub fn arb_build_result()
         (
             status in any::<BuildStatus>(),
             error_msg in arb_byte_string(),
-            times_built in field_after(version, 29, 0u32..50u32),
-            is_non_deterministic in field_after(version, 29, ::proptest::bool::ANY),
-            start_time in field_after(version, 29, ::proptest::num::i64::ANY),
-            duration_secs in field_after(version, 29, 0i64..604_800i64),
-            cpu_user in field_after(version, 37, any::<Option<Microseconds>>()),
-            cpu_system in field_after(version, 37, any::<Option<Microseconds>>()),
-            built_outputs in field_after(version, 28, arb_drv_outputs(0..5)),
+            times_built in 0u32..50u32,
+            is_non_deterministic in ::proptest::bool::ANY,
+            start_time in ::proptest::num::i64::ANY,
+            duration_secs in 0i64..604_800i64,
+            cpu_user in any::<Option<Microseconds>>(),
+            cpu_system in any::<Option<Microseconds>>(),
+            built_outputs in arb_drv_outputs(0..5),
         ) -> BuildResult
         {
             let stop_time = start_time + duration_secs;
