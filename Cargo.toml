@@ -46,7 +46,7 @@ nix = { version = "0.30", features = ["signal"] }
 # Dependencies for Nix.rs import (spec 001-nixrs-base)
 bytes = "1.10"
 data-encoding = "2.6"
-md5 = "0.7"
+md5 = "0.8"
 num_enum = "0.7"
 derive_more = { version = "2.0", features = ["display"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
