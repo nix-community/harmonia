@@ -44,7 +44,7 @@ prometheus = { version = "0.14", default-features = false }
 nix = { version = "0.30", features = ["signal"] }
 
 # Dependencies for Nix.rs import (spec 001-nixrs-base)
-bytes = "1.10"
+bytes = "1.11"
 data-encoding = "2.6"
 md5 = "0.8"
 num_enum = "0.7"
