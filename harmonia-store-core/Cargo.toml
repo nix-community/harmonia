@@ -39,7 +39,6 @@ proptest-derive = "0.5"
 rstest = { workspace = true }
 tempfile = { workspace = true }
 test-strategy = { workspace = true }
-pretty_assertions = { workspace = true }
 tokio-test = "0.4"
 hex-literal = "1.1"
 harmonia-protocol = { path = "../harmonia-protocol", features = ["test"] }

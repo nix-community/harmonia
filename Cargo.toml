@@ -63,7 +63,6 @@ proptest = "1.6"
 rstest = "0.26"
 tempfile = "3.10"
 test-strategy = "0.4"
-pretty_assertions = "1.4"
 
 # Database
 rusqlite = { version = "0.37", features = ["bundled"] }

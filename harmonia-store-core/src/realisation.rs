@@ -219,7 +219,7 @@ mod unittests {
     )]
     fn parse_realisation(#[case] value: &str, #[case] expected: Realisation) {
         let actual: Realisation = serde_json::from_str(value).unwrap();
-        pretty_assertions::assert_eq!(actual, expected);
+        assert_eq!(actual, expected);
     }
 
     #[rstest]
@@ -238,7 +238,7 @@ mod unittests {
     )]
     fn write_realisation(#[case] value: Realisation, #[case] expected: &str) {
         let actual = serde_json::to_string(&value).unwrap();
-        pretty_assertions::assert_eq!(actual, expected);
+        assert_eq!(actual, expected);
     }
 
     // TODO: These protocol serialization tests belong in harmonia-protocol, not store-core
@@ -291,6 +291,6 @@ mod unittests {
     //         .read_slice(value.as_bytes())
     //         .build();
     //     let actual: Realisation = mock.read_value().await.unwrap();
-    //     pretty_assertions::assert_eq!(actual, expected);
+    //     assert_eq!(actual, expected);
     // }
 }

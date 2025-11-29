@@ -292,7 +292,7 @@ mod unittests {
         tree.insert(TOK_SYM, Node::Symlink);
         tree.insert(TOK_FILE, Node::File);
         tree.insert(TOK_FILE_E, Node::ExecutableFile);
-        pretty_assertions::assert_eq!(tree, NODE_SELECT);
+        assert_eq!(tree, NODE_SELECT);
     }
 
     #[rstest]

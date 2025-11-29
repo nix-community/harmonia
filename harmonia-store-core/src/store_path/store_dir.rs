@@ -184,7 +184,6 @@ mod unittests {
     use harmonia_utils_hash::{Hash, Sha256};
 
     use super::StoreDir;
-    use pretty_assertions::assert_eq;
     use rstest::rstest;
     use std::path::Path;
 

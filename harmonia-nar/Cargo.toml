@@ -31,7 +31,6 @@ harmonia-utils-test = { path = "../harmonia-utils-test" }
 proptest = { workspace = true }
 rstest = { workspace = true }
 tempfile = { workspace = true }
-pretty_assertions = { workspace = true }
 test-strategy = { workspace = true }
 tokio-test = "0.4"
 test-log = "0.2"

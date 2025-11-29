@@ -165,7 +165,6 @@ mod unittests {
 
     use bytes::Bytes;
     use futures::TryStreamExt;
-    use pretty_assertions::assert_eq;
     use rstest::rstest;
     use tokio::fs::File;
     use tokio::io::AsyncReadExt as _;
