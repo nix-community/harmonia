@@ -8,7 +8,7 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::wire::ZEROS;
-use harmonia_io::{AsyncBytesRead, DrainInto};
+use harmonia_utils_io::{AsyncBytesRead, DrainInto};
 
 #[derive(Debug, Clone)]
 enum State {
@@ -306,7 +306,7 @@ mod unittests {
     use rstest::rstest;
 
     use super::PaddedReader;
-    use harmonia_io::AsyncBytesRead as _;
+    use harmonia_utils_io::AsyncBytesRead as _;
 
     #[tokio::test]
     #[rstest]

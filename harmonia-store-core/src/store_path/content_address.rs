@@ -7,8 +7,8 @@ use proptest_derive::Arbitrary;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use crate::hash::fmt::{NonSRI, ParseHashError, ParseHashErrorKind};
-use crate::hash::{Algorithm, Hash, Sha256, UnknownAlgorithm};
+use harmonia_utils_hash::fmt::{NonSRI, ParseHashError, ParseHashErrorKind};
+use harmonia_utils_hash::{Algorithm, Hash, Sha256, UnknownAlgorithm};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize,
@@ -243,7 +243,7 @@ mod unittests {
     use rstest::rstest;
 
     use super::*;
-    use crate::hash::Algorithm;
+    use harmonia_utils_hash::Algorithm;
 
     #[rstest]
     #[case::text(

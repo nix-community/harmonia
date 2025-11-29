@@ -6,12 +6,12 @@ use data_encoding::{BASE64, DecodeError, DecodeKind};
 
 use thiserror::Error;
 
-use crate::base32;
-use crate::hash;
-use crate::hash::InvalidHashError;
-use crate::hash::UnknownAlgorithm;
+use harmonia_utils_base_encoding::base32;
+use harmonia_utils_base_encoding::{Base, decode_for_base};
 
-use crate::base::{Base, decode_for_base};
+use crate as hash;
+use crate::InvalidHashError;
+use crate::UnknownAlgorithm;
 
 mod private {
     pub trait Sealed {}
@@ -608,7 +608,7 @@ impl<H: CommonHash + Sized> Base16<H> {
     /// # Examples
     ///
     /// ```rust
-    /// use harmonia_store_core::hash;
+    /// use harmonia_utils_hash as hash;
     ///
     /// let hex = hash::Algorithm::SHA256.digest(b"Hello World!").base16();
     /// assert_eq!(hex.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
@@ -706,7 +706,7 @@ impl<H: CommonHash + Sized> Base32<H> {
     /// # Examples
     ///
     /// ```rust
-    /// use harmonia_store_core::hash;
+    /// use harmonia_utils_hash as hash;
     ///
     /// let base32 = hash::Algorithm::SHA256.digest(b"Hello World!").base32();
     /// assert_eq!(base32.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
@@ -808,7 +808,7 @@ impl<H: CommonHash> Base64<H> {
     /// # Examples
     ///
     /// ```rust
-    /// use harmonia_store_core::hash;
+    /// use harmonia_utils_hash as hash;
     ///
     /// let base64 = hash::Algorithm::SHA256.digest(b"Hello World!").base64();
     /// assert_eq!(base64.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
@@ -1002,7 +1002,7 @@ impl<H: CommonHash + Sized> SRI<H> {
     /// # Examples
     ///
     /// ```rust
-    /// use harmonia_store_core::hash;
+    /// use harmonia_utils_hash as hash;
     ///
     /// let sri = hash::Algorithm::SHA256.digest(b"Hello World!").sri();
     /// assert_eq!(sri.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
@@ -1250,7 +1250,7 @@ mod unittests {
     use hex_literal::hex;
 
     use super::*;
-    use crate::hash::{Algorithm, Hash, NarHash};
+    use crate::{Algorithm, Hash, NarHash};
 
     struct HashFormats {
         hash: Hash,

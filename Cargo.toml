@@ -1,7 +1,9 @@
 [workspace]
 members = [
   "harmonia-client",
-  "harmonia-io",
+  "harmonia-utils-io",
+  "harmonia-utils-base-encoding",
+  "harmonia-utils-hash",
   "harmonia-store-core",
   "harmonia-store-db",
   "harmonia-store-remote",
@@ -11,7 +13,7 @@ members = [
   "harmonia-ssh-store",
   "harmonia-cache",
   "harmonia-daemon",
-  "harmonia-test-utils",
+  "harmonia-utils-test",
 ]
 resolver = "2"
 

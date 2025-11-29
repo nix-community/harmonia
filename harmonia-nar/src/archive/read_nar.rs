@@ -97,7 +97,7 @@ use tracing::{error, trace};
 
 use super::radix_tree::{RLookup, RMatch, RTree};
 use crate::wire::{ZEROS, calc_aligned};
-use harmonia_io::{AsyncBytesRead, DrainInto};
+use harmonia_utils_io::{AsyncBytesRead, DrainInto};
 
 // https://github.com/rust-lang/rust/issues/131415
 #[allow(unsafe_code)]

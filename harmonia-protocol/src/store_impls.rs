@@ -111,7 +111,7 @@ where
     R: ?Sized + NixRead + Send,
 {
     use crate::de::Error;
-    use harmonia_store_core::hash::fmt::Base32;
+    use harmonia_utils_hash::fmt::Base32;
 
     let store_path_str = reader.read_value::<String>().await?;
     let method_str = reader.read_value::<String>().await?;
@@ -499,25 +499,25 @@ nix_serialize_remote!(
 // Algorithm
 nix_deserialize_remote!(
     #[nix(from_str)]
-    harmonia_store_core::hash::Algorithm
+    harmonia_utils_hash::Algorithm
 );
 nix_serialize_remote!(
     #[nix(display)]
-    harmonia_store_core::hash::Algorithm
+    harmonia_utils_hash::Algorithm
 );
 
 // NarHash (uses custom from/into with fmt types)
 nix_deserialize_remote!(
     #[nix(
-        from = "harmonia_store_core::hash::fmt::Bare<harmonia_store_core::hash::fmt::Any<harmonia_store_core::hash::NarHash>>"
+        from = "harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Any<harmonia_utils_hash::NarHash>>"
     )]
-    harmonia_store_core::hash::NarHash
+    harmonia_utils_hash::NarHash
 );
 nix_serialize_remote!(
     #[nix(
-        into = "harmonia_store_core::hash::fmt::Bare<harmonia_store_core::hash::fmt::Base16<harmonia_store_core::hash::NarHash>>"
+        into = "harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Base16<harmonia_utils_hash::NarHash>>"
     )]
-    harmonia_store_core::hash::NarHash
+    harmonia_utils_hash::NarHash
 );
 
 // Signature
@@ -541,21 +541,21 @@ nix_serialize_remote!(
 );
 
 // Hash and its format wrappers
-nix_deserialize_remote!(#[nix(from_str)] harmonia_store_core::hash::fmt::Any<harmonia_store_core::hash::Hash>);
-nix_serialize_remote!(#[nix(display)] harmonia_store_core::hash::fmt::Base32<harmonia_store_core::hash::Hash>);
+nix_deserialize_remote!(#[nix(from_str)] harmonia_utils_hash::fmt::Any<harmonia_utils_hash::Hash>);
+nix_serialize_remote!(#[nix(display)] harmonia_utils_hash::fmt::Base32<harmonia_utils_hash::Hash>);
 
 nix_deserialize_remote!(
-    #[nix(from = "harmonia_store_core::hash::fmt::Any<harmonia_store_core::hash::Hash>")]
-    harmonia_store_core::hash::Hash
+    #[nix(from = "harmonia_utils_hash::fmt::Any<harmonia_utils_hash::Hash>")]
+    harmonia_utils_hash::Hash
 );
 nix_serialize_remote!(
-    #[nix(into = "harmonia_store_core::hash::fmt::Base32<harmonia_store_core::hash::Hash>")]
-    harmonia_store_core::hash::Hash
+    #[nix(into = "harmonia_utils_hash::fmt::Base32<harmonia_utils_hash::Hash>")]
+    harmonia_utils_hash::Hash
 );
 
 // NarHash format wrappers
-nix_deserialize_remote!(#[nix(from_str)] harmonia_store_core::hash::fmt::Bare<harmonia_store_core::hash::fmt::Any<harmonia_store_core::hash::NarHash>>);
-nix_serialize_remote!(#[nix(display)] harmonia_store_core::hash::fmt::Bare<harmonia_store_core::hash::fmt::Base16<harmonia_store_core::hash::NarHash>>);
+nix_deserialize_remote!(#[nix(from_str)] harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Any<harmonia_utils_hash::NarHash>>);
+nix_serialize_remote!(#[nix(display)] harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Base16<harmonia_utils_hash::NarHash>>);
 
 // ContentAddressMethodAlgorithm
 nix_deserialize_remote!(

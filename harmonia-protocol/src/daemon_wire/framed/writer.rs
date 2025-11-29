@@ -8,7 +8,7 @@ use pin_project_lite::pin_project;
 use tokio::io::AsyncWrite;
 use tracing::{Span, debug, trace, trace_span};
 
-use harmonia_io::{DEFAULT_BUF_SIZE, RESERVED_BUF_SIZE};
+use harmonia_utils_io::{DEFAULT_BUF_SIZE, RESERVED_BUF_SIZE};
 
 pin_project! {
     #[derive(Debug)]

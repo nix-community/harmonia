@@ -18,7 +18,7 @@
 //! ```
 //!
 
-use crate::hash::{self, Algorithm};
+use harmonia_utils_hash::{self, Algorithm};
 
 use super::{ContentAddress, StoreDirDisplay, StorePathSet};
 
@@ -49,18 +49,18 @@ where
 pub enum PathType {
     Text {
         references: StorePathSet,
-        digest: hash::Sha256,
+        digest: harmonia_utils_hash::Sha256,
     },
     Source {
         references: StorePathSet,
         self_ref: bool,
-        digest: hash::Sha256,
+        digest: harmonia_utils_hash::Sha256,
     },
     Output {
-        hash: hash::Hash,
+        hash: harmonia_utils_hash::Hash,
     },
     FlatOutput {
-        hash: hash::Hash,
+        hash: harmonia_utils_hash::Hash,
     },
 }
 
@@ -115,12 +115,12 @@ impl StoreDirDisplay for PathType {
             }
             PathType::Output { hash } => {
                 let digest_input = format!("fixed:out:r:{hash:x}");
-                let digest = hash::Sha256::digest(digest_input);
+                let digest = harmonia_utils_hash::Sha256::digest(digest_input);
                 write!(f, "output:out:sha256:{digest:x}")
             }
             PathType::FlatOutput { hash } => {
                 let digest_input = format!("fixed:out:{hash:x}");
-                let digest = hash::Sha256::digest(digest_input);
+                let digest = harmonia_utils_hash::Sha256::digest(digest_input);
                 write!(f, "output:out:sha256:{digest:x}")
             }
         }

@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use harmonia_store_core::derived_path::{DerivedPath, OutputSpec, SingleDerivedPath};
-use harmonia_store_core::hash::{Algorithm, Hash};
+use harmonia_utils_hash::{Algorithm, Hash};
 use harmonia_store_core::placeholder::Placeholder;
 use harmonia_store_core::realisation::Realisation;
 use harmonia_store_core::store_path::{ContentAddress, StorePath};
@@ -422,7 +422,7 @@ test_upstream_json!(
     libstore_test_data_path("derivation/ca/advanced-attributes-structured-attrs.json"),
     {
         use harmonia_store_core::derivation::{Derivation, DerivationOutput, StructuredAttrs};
-        use harmonia_store_core::hash::Algorithm;
+        use harmonia_utils_hash::Algorithm;
         use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
         use std::collections::{BTreeMap, BTreeSet};
 
@@ -544,7 +544,7 @@ test_upstream_json!(
     libstore_test_data_path("derivation/ca/advanced-attributes-structured-attrs-defaults.json"),
     {
         use harmonia_store_core::derivation::{Derivation, DerivationOutput, StructuredAttrs};
-        use harmonia_store_core::hash::Algorithm;
+        use harmonia_utils_hash::Algorithm;
         use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
         use std::collections::{BTreeMap, BTreeSet};
         Derivation {

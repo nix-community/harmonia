@@ -8,8 +8,8 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
 use crate::derived_path::OutputName;
-use crate::hash::fmt::Any;
-use crate::hash::{self, Hash};
+use harmonia_utils_hash::fmt::Any;
+use harmonia_utils_hash::Hash;
 use crate::signature::Signature;
 use crate::store_path::{StorePath, StorePathNameError};
 
@@ -27,7 +27,7 @@ use crate::store_path::{StorePath, StorePathNameError};
 )]
 #[display("{drv_hash:x}!{output_name}")]
 pub struct DrvOutput {
-    pub drv_hash: hash::Hash,
+    pub drv_hash: harmonia_utils_hash::Hash,
     pub output_name: OutputName,
 }
 
@@ -37,7 +37,7 @@ pub enum ParseDrvOutputError {
     Hash(
         #[from]
         #[source]
-        hash::fmt::ParseHashError,
+        harmonia_utils_hash::fmt::ParseHashError,
     ),
     #[error("derivation output has {0}")]
     OutputName(
@@ -98,7 +98,7 @@ pub mod arbitrary {
     prop_compose! {
         pub fn arb_drv_output()
         (
-            drv_hash in any::<hash::Hash>(),
+            drv_hash in any::<harmonia_utils_hash::Hash>(),
             output_name in any::<OutputName>(),
         ) -> DrvOutput
         {
@@ -154,8 +154,8 @@ mod unittests {
 
     use crate::btree_map;
     use crate::derived_path::OutputName;
-    use crate::hash::Hash;
-    use crate::hash::fmt::Any;
+    use harmonia_utils_hash::Hash;
+    use harmonia_utils_hash::fmt::Any;
     use crate::set;
 
     use super::{DrvOutput, Realisation};

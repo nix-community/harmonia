@@ -1,3 +1,12 @@
+// SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+// SPDX-License-Identifier: EUPL-1.2 OR MIT
+//
+// This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
+// Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
+
+//! Nix base32 encoding/decoding.
+
 #[cfg(test)]
 use data_encoding::DecodeKind;
 use data_encoding::{BitOrder, DecodeError, DecodePartial, Encoding, Specification};

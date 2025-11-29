@@ -17,6 +17,8 @@ bytes = { workspace = true, features = ["serde"] }
 data-encoding = { workspace = true }
 derive_more = { workspace = true }
 futures = { workspace = true }
+harmonia-utils-base-encoding = { path = "../harmonia-utils-base-encoding" }
+harmonia-utils-hash = { path = "../harmonia-utils-hash" }
 md5 = { workspace = true }
 num_enum = { workspace = true }
 once_cell = { workspace = true }
@@ -29,7 +31,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = "3.11"
 test-strategy = { workspace = true, optional = true }
-harmonia-test-utils = { path = "../harmonia-test-utils", optional = true }
+harmonia-utils-test = { path = "../harmonia-utils-test", optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "sync"] }
 tracing = { workspace = true }
@@ -45,13 +47,13 @@ pretty_assertions = { workspace = true }
 tokio-test = "0.4"
 hex-literal = "0.4"
 harmonia-protocol = { path = "../harmonia-protocol", features = ["test"] }
-harmonia-test-utils = { path = "../harmonia-test-utils" }
+harmonia-utils-test = { path = "../harmonia-utils-test" }
 test-log = "0.2"
 rstest_reuse = "0.7"
 paste = "1.0"
 
 [features]
-test = ["proptest", "proptest-derive", "test-strategy", "harmonia-test-utils"]
+test = ["proptest", "proptest-derive", "test-strategy", "harmonia-utils-test", "harmonia-utils-hash/test"]
 
 [lints]
 workspace = true

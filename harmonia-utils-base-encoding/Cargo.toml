@@ -3,19 +3,25 @@
 # SPDX-License-Identifier: MIT
 
 [package]
-name = "harmonia-test-utils"
+name = "harmonia-utils-base-encoding"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Test utilities for Harmonia (proptest strategies, macros)"
+description = "Base encoding utilities for Harmonia (Nix base32, hex, base64)"
 
 [dependencies]
-bytes = { workspace = true }
-pretty_assertions = { workspace = true }
+data-encoding = { workspace = true }
+derive_more = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+hex-literal = "0.4"
 proptest = { workspace = true }
+rstest = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

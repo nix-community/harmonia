@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::derived_path::OutputName;
-use crate::hash::Hash;
+use harmonia_utils_hash::Hash;
 use crate::store_path::ContentAddressMethod;
 use crate::store_path::ContentAddressMethodAlgorithm;
 use crate::store_path::{ContentAddress, StoreDir, StorePath, StorePathName, StorePathNameError};
@@ -42,7 +42,7 @@ struct RawDerivationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     method: Option<ContentAddressMethod>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    hash_algo: Option<crate::hash::Algorithm>,
+    hash_algo: Option<harmonia_utils_hash::Algorithm>,
     #[serde(default, skip_serializing_if = "is_false")]
     impure: bool,
 }
@@ -174,7 +174,7 @@ pub type DerivationOutputs = BTreeMap<OutputName, DerivationOutput>;
 #[cfg(test)]
 pub mod arbitrary {
     use super::*;
-    use crate::hash;
+    use harmonia_utils_hash as hash;
     use crate::test::arbitrary::helpers::Union;
     use ::proptest::prelude::*;
     use ::proptest::sample::SizeRange;

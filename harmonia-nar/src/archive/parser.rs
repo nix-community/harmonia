@@ -10,7 +10,7 @@ use tracing::trace;
 
 use crate::ByteString;
 use crate::padded_reader::PaddedReader;
-use harmonia_io::{AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending, LentReader};
+use harmonia_utils_io::{AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending, LentReader};
 
 use super::NarEvent;
 use super::read_nar::{Inner, InnerState, NodeType};

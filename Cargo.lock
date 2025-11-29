@@ -1005,35 +1005,18 @@ version = "2.1.0"
 dependencies = [
  "env_logger",
  "futures",
- "harmonia-io",
  "harmonia-nar",
  "harmonia-protocol",
  "harmonia-store-core",
  "harmonia-store-db",
+ "harmonia-utils-hash",
+ "harmonia-utils-io",
  "log",
  "serde",
  "tempfile",
  "thiserror",
  "tokio",
  "toml",
- "tracing",
-]
-
-[[package]]
-name = "harmonia-io"
-version = "2.1.0"
-dependencies = [
- "bytes",
- "futures",
- "hex-literal",
- "parking_lot",
- "pin-project-lite",
- "proptest",
- "rstest",
- "test-log",
- "test-strategy",
- "tokio",
- "tokio-test",
  "tracing",
 ]
 
@@ -1045,8 +1028,8 @@ dependencies = [
  "bytes",
  "derive_more",
  "futures",
- "harmonia-io",
- "harmonia-test-utils",
+ "harmonia-utils-io",
+ "harmonia-utils-test",
  "pin-project-lite",
  "pretty_assertions",
  "proptest",
@@ -1071,10 +1054,11 @@ dependencies = [
  "bytes",
  "derive_more",
  "futures",
- "harmonia-io",
  "harmonia-nar",
  "harmonia-protocol-derive",
  "harmonia-store-core",
+ "harmonia-utils-hash",
+ "harmonia-utils-io",
  "hex-literal",
  "libc",
  "num_enum",
@@ -1127,7 +1111,9 @@ dependencies = [
  "derive_more",
  "futures",
  "harmonia-protocol",
- "harmonia-test-utils",
+ "harmonia-utils-base-encoding",
+ "harmonia-utils-hash",
+ "harmonia-utils-test",
  "hex-literal",
  "md5",
  "num_enum",
@@ -1172,10 +1158,10 @@ version = "2.1.0"
 dependencies = [
  "async-stream",
  "futures",
- "harmonia-io",
  "harmonia-nar",
  "harmonia-protocol",
  "harmonia-store-core",
+ "harmonia-utils-io",
  "prometheus",
  "tempfile",
  "thiserror",
@@ -1184,7 +1170,59 @@ dependencies = [
 ]
 
 [[package]]
-name = "harmonia-test-utils"
+name = "harmonia-utils-base-encoding"
+version = "2.1.0"
+dependencies = [
+ "data-encoding",
+ "derive_more",
+ "hex-literal",
+ "proptest",
+ "rstest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "harmonia-utils-hash"
+version = "2.1.0"
+dependencies = [
+ "data-encoding",
+ "derive_more",
+ "harmonia-utils-base-encoding",
+ "hex-literal",
+ "md5",
+ "pretty_assertions",
+ "proptest",
+ "proptest-derive",
+ "ring",
+ "rstest",
+ "rstest_reuse",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "harmonia-utils-io"
+version = "2.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "hex-literal",
+ "parking_lot",
+ "pin-project-lite",
+ "proptest",
+ "rstest",
+ "test-log",
+ "test-strategy",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
+name = "harmonia-utils-test"
 version = "2.1.0"
 dependencies = [
  "bytes",

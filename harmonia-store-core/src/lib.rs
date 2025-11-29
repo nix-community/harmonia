@@ -44,18 +44,8 @@ where
     }
 }
 
-// Wire utilities
-pub(crate) mod wire {
-    pub const fn base64_len(len: usize) -> usize {
-        ((4 * len / 3) + 3) & !3
-    }
-}
-
-pub mod base;
-pub mod base32;
 pub mod derivation;
 pub mod derived_path;
-pub mod hash;
 pub mod log;
 pub mod placeholder;
 pub mod realisation;

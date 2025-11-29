@@ -31,7 +31,7 @@
 pub type ByteString = bytes::Bytes;
 
 /// Wire protocol utilities for NAR format.
-pub use harmonia_io::wire;
+pub use harmonia_utils_io::wire;
 
 pub mod padded_reader;
 

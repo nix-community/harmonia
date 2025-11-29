@@ -1,8 +1,26 @@
+// SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+// SPDX-License-Identifier: EUPL-1.2 OR MIT
+//
+// This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
+// Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
+
+//! Base encoding utilities for Harmonia.
+//!
+//! This crate provides base encoding/decoding for the Nix store:
+//! - Nix base32 (special 32-character alphabet, LSB first, reversed)
+//! - Standard hex (base16)
+//! - Standard base64
+
+pub mod base32;
+
 use data_encoding::{BASE64, DecodePartial, HEXLOWER_PERMISSIVE};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::base32::{self};
-use crate::wire::base64_len;
+/// Calculate the length of a base64 encoded string for a given decoded byte size
+pub const fn base64_len(len: usize) -> usize {
+    ((4 * len / 3) + 3) & !3
+}
 
 #[derive(derive_more::Display, Debug, PartialEq, Clone, Copy)]
 pub enum Base {

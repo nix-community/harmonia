@@ -6,9 +6,9 @@
 
 use std::path::PathBuf;
 
-use crate::base32;
+use harmonia_utils_base_encoding::base32;
 use crate::derived_path::SingleDerivedPath;
-use crate::hash::Sha256;
+use harmonia_utils_hash::Sha256;
 use crate::store_path::StorePath;
 
 /// A placeholder for a Nix store path

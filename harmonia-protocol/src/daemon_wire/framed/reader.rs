@@ -5,7 +5,7 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead};
 use tracing::trace;
 
-use harmonia_io::TryReadU64;
+use harmonia_utils_io::TryReadU64;
 
 #[derive(Debug, Default)]
 enum FramedReadState {

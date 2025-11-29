@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 [package]
-name = "harmonia-io"
+name = "harmonia-utils-io"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

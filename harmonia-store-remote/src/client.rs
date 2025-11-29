@@ -42,7 +42,7 @@ use harmonia_protocol::types::{
 };
 
 // From harmonia-store-core
-use harmonia_io::{AsyncBufReadCompat, BytesReader, Lending};
+use harmonia_utils_io::{AsyncBufReadCompat, BytesReader, Lending};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::log::{LogMessage, Message, Verbosity};

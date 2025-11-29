@@ -22,7 +22,7 @@ use tokio::net::UnixListener;
 use tokio::select;
 use tracing::{Instrument, debug, error, info, instrument, trace};
 
-use harmonia_io::{AsyncBufReadCompat, BytesReader};
+use harmonia_utils_io::{AsyncBufReadCompat, BytesReader};
 use harmonia_nar::NarReader;
 use harmonia_protocol::ProtocolVersion;
 use harmonia_protocol::daemon::{

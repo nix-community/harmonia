@@ -15,7 +15,7 @@ use thiserror::Error;
 use tracing::error;
 
 use crate::store_path::{StoreDir, StorePath};
-use crate::wire::base64_len;
+use harmonia_utils_base_encoding::base64_len;
 
 pub const SIGNATURE_BYTES: usize = 64;
 const SIGNATURE_BASE64_LEN: usize = base64_len(SIGNATURE_BYTES);

@@ -7,7 +7,7 @@ use ring::digest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use crate::base::Base;
+use harmonia_utils_base_encoding::Base;
 
 mod algo;
 pub mod fmt;
@@ -82,7 +82,7 @@ impl TryFrom<digest::Digest> for Hash {
 #[derive(Serialize, Deserialize)]
 struct RawHash {
     algorithm: Algorithm,
-    format: crate::base::Base,
+    format: harmonia_utils_base_encoding::Base,
     hash: String,
 }
 
@@ -110,7 +110,7 @@ impl<'de> Deserialize<'de> for Hash {
         let raw = RawHash::deserialize(deserializer)?;
 
         // Use the existing parse_with_base function which handles buffer sizing correctly
-        crate::hash::fmt::parse_with_base::<Hash, { LARGEST_ALGORITHM.size() }>(
+        crate::fmt::parse_with_base::<Hash, { LARGEST_ALGORITHM.size() }>(
             raw.algorithm,
             &raw.hash,
             raw.format,
@@ -180,7 +180,7 @@ impl Sha256 {
     /// Returns the digest of `data` using the sha256
     ///
     /// ```
-    /// # use harmonia_store_core::hash::Sha256;
+    /// # use harmonia_utils_hash::Sha256;
     /// let hash = Sha256::digest("abc");
     ///
     /// assert_eq!("1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s", hash.as_base32().as_bare().to_string());
@@ -232,7 +232,7 @@ enum InnerContext {
 /// # Examples
 ///
 /// ```
-/// use harmonia_store_core::hash;
+/// use harmonia_utils_hash as hash;
 ///
 /// let one_shot = hash::Algorithm::SHA256.digest("hello, world");
 ///
@@ -298,7 +298,7 @@ impl sfmt::Debug for Context {
 ///
 /// ```
 /// use tokio::io;
-/// use harmonia_store_core::hash;
+/// use harmonia_utils_hash as hash;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {

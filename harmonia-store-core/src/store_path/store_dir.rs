@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::hash;
+use harmonia_utils_hash;
 
 use super::create::Fingerprint;
 use super::{ContentAddress, StorePath, StorePathName};
@@ -89,7 +89,7 @@ impl StoreDir {
             path_type,
         };
         let finger_print_s = self.display(&fingerprint).to_string();
-        StorePath::from_hash(&hash::Sha256::digest(finger_print_s), name)
+        StorePath::from_hash(&harmonia_utils_hash::Sha256::digest(finger_print_s), name)
     }
 }
 
@@ -179,8 +179,8 @@ pub mod proptest {
 
 #[cfg(test)]
 mod unittests {
-    use crate::hash::fmt::{Any, Bare, Base16};
-    use crate::hash::{self, Hash, Sha256};
+    use harmonia_utils_hash::fmt::{Any, Bare, Base16};
+    use harmonia_utils_hash::{Hash, Sha256};
     use crate::store_path::{ContentAddress, StorePath, StorePathName};
 
     use super::StoreDir;
@@ -240,11 +240,11 @@ mod unittests {
         #[case] fingerprint: &str,
         #[case] final_path: StorePath,
     ) {
-        let expected_hash = hash::Sha256::digest(fingerprint);
+        let expected_hash = harmonia_utils_hash::Sha256::digest(fingerprint);
         let expected_path = StorePath::from_hash(&expected_hash, name.clone());
         let store_dir = StoreDir::default();
         if let Some(print) = inner_print {
-            let hash = hash::Sha256::digest(print);
+            let hash = harmonia_utils_hash::Sha256::digest(print);
             let actual_fingerprint = format!("output:out:sha256:{hash:x}:{store_dir}:{name}");
             assert_eq!(actual_fingerprint, fingerprint);
         }
