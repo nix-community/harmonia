@@ -69,6 +69,23 @@
                       exit 1
                     fi
 
+                    # Create commit in codecov first
+                    echo "Creating commit in codecov..."
+                    codecovcli create-commit \
+                      --token "$CODECOV_TOKEN" \
+                      --slug "nix-community/harmonia" \
+                      --git-service github \
+                      --sha "${args.rev}" \
+                      --branch "${args.branch}"
+
+                    # Create report for the commit
+                    echo "Creating report in codecov..."
+                    codecovcli create-report \
+                      --token "$CODECOV_TOKEN" \
+                      --slug "nix-community/harmonia" \
+                      --git-service github \
+                      --sha "${args.rev}"
+
                     # Upload coverage for each system
                     ${builtins.concatStringsSep "\n" (
                       builtins.map (system: ''
