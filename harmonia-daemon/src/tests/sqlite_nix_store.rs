@@ -1,7 +1,10 @@
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-License-Identifier: MIT
+
 use crate::handler::LocalStoreHandler;
-use crate::sqlite::StoreDb;
-use harmonia_store_remote::protocol::StorePath;
-use harmonia_store_remote::server::RequestHandler;
+use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
+use harmonia_store_core::store_path::StorePath;
+use harmonia_store_db::StoreDb;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -42,7 +45,8 @@ fn test_sqlite_with_nix_initialized_store() {
     );
 
     // Now test our SQLite module can open and query the database
-    let db = StoreDb::open(&db_path).expect("Failed to open database");
+    let db = StoreDb::open(&db_path, harmonia_store_db::OpenMode::ReadOnly)
+        .expect("Failed to open database");
 
     // Copy something small to the store
     let hello_drv = Command::new("nix")
@@ -92,18 +96,16 @@ fn test_sqlite_with_nix_initialized_store() {
                 .next()
                 .and_then(|line| line.split_whitespace().next())
             {
-                // The path should now be in our test store directory
-                let store_path = std::path::Path::new(path);
-
-                // Test is_valid_path
-                let is_valid = db.is_valid_path(store_path).unwrap();
+                // Test is_valid_path - use full path string
+                let is_valid = db.is_valid_path(path).unwrap();
                 assert!(is_valid, "Path {path} should be valid");
 
-                // Test query_path_info
-                let info = db.query_path_info(store_path).unwrap();
+                // Test query_path_info - use full path string
+                let info = db.query_path_info(path).unwrap();
                 assert!(info.is_some(), "Should get path info for {path}");
 
                 // Extract hash part (first 32 chars of the base name)
+                let store_path = std::path::Path::new(path);
                 if let Some(hash_part) = store_path
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -111,7 +113,9 @@ fn test_sqlite_with_nix_initialized_store() {
                     .map(|name| &name[..32])
                 {
                     // Test query_path_from_hash_part
-                    let found_path = db.query_path_from_hash_part(&store_dir, hash_part).unwrap();
+                    let found_path = db
+                        .query_path_from_hash_part(&store_dir.to_string_lossy(), hash_part)
+                        .unwrap();
                     assert!(
                         found_path.is_some(),
                         "Should find path by hash part {hash_part}"
@@ -123,7 +127,7 @@ fn test_sqlite_with_nix_initialized_store() {
 
     // Even if we couldn't copy anything, at least verify the empty database works
     let is_valid = db
-        .is_valid_path(&store_dir.join("non-existent-path"))
+        .is_valid_path(&store_dir.join("non-existent-path").to_string_lossy())
         .unwrap();
     assert!(!is_valid, "Non-existent path should not be valid");
 }
@@ -159,26 +163,22 @@ async fn test_handler_with_nix_store() {
         .await
         .expect("Failed to create handler");
 
+    // Complete handshake to get a DaemonStore
+    let mut store = handler.handshake().await.expect("Handshake failed");
+
     // Test with a non-existent path
-    let fake_path = StorePath::from(
-        format!(
-            "{}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test",
-            store_dir.display()
-        )
-        .into_bytes(),
-    );
-    let is_valid = handler.handle_is_valid_path(&fake_path).await.unwrap();
+    let fake_path = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test").unwrap();
+    let is_valid = store.is_valid_path(&fake_path).await.unwrap();
     assert!(!is_valid, "Non-existent path should not be valid");
 
     // Test query_path_info on non-existent path
-    let info = handler.handle_query_path_info(&fake_path).await.unwrap();
+    let info = store.query_path_info(&fake_path).await.unwrap();
     assert!(info.is_none(), "Should return None for non-existent path");
 
     // Test query_path_from_hash_part with non-existent hash
-    let result = handler
-        .handle_query_path_from_hash_part(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        .await
-        .unwrap();
+    // Create a fake hash with arbitrary bytes (20 bytes for store path hash)
+    let fake_hash = harmonia_store_core::store_path::StorePathHash::copy_from_slice(&[0u8; 20]);
+    let result = store.query_path_from_hash_part(&fake_hash).await.unwrap();
     assert!(
         result.is_none(),
         "Should return None for non-existent hash part"

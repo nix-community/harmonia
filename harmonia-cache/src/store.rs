@@ -1,49 +1,49 @@
 use crate::error::{Result, StoreError};
-use harmonia_store_remote::client::{DaemonClient, PoolConfig};
-use harmonia_store_remote::protocol::StorePath;
+use harmonia_store_core::store_path::{StoreDir, StorePath};
+use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct Store {
     virtual_store: Vec<u8>,
     real_store: Option<Vec<u8>>,
-    daemon_socket: PathBuf,
-    pub daemon: Arc<Mutex<Option<DaemonClient>>>,
-    pub pool_config: PoolConfig,
+    pool: ConnectionPool,
 }
 
 impl Store {
     pub fn new(
         virtual_store: Vec<u8>,
+        daemon_store: Vec<u8>,
         real_store: Option<Vec<u8>>,
         daemon_socket: PathBuf,
         pool_config: PoolConfig,
     ) -> Self {
+        // Use daemon_store for the pool - this is the store the daemon actually uses
+        let store_dir_str = std::str::from_utf8(&daemon_store).unwrap_or("/nix/store");
+        let store_dir = StoreDir::new(store_dir_str).unwrap_or_default();
+
+        let pool = ConnectionPool::with_store_dir(&daemon_socket, store_dir, pool_config);
+
         Self {
             virtual_store,
             real_store,
-            daemon_socket,
-            daemon: Arc::new(Mutex::new(None)),
-            pool_config,
+            pool,
         }
     }
+
     pub fn get_real_path(&self, store_path: &StorePath) -> PathBuf {
-        let virtual_path = Path::new(OsStr::from_bytes(store_path.as_bytes()));
-        if self.real_store.is_some()
-            && virtual_path.starts_with(OsStr::from_bytes(&self.virtual_store))
-        {
-            return self.real_store().join(
-                virtual_path
-                    .strip_prefix(OsStr::from_bytes(&self.virtual_store))
-                    .unwrap(),
-            );
+        // StorePath is now just "hash-name", construct full path
+        let virtual_store_path = Path::new(OsStr::from_bytes(&self.virtual_store));
+        let full_virtual_path = virtual_store_path.join(store_path.to_string());
+
+        if self.real_store.is_some() {
+            // Map from virtual store to real store
+            return self.real_store().join(store_path.to_string());
         }
-        PathBuf::from(virtual_path)
+        full_virtual_path
     }
 
     pub fn real_store(&self) -> &Path {
@@ -57,59 +57,30 @@ impl Store {
     }
 
     pub fn to_virtual_path(&self, store_path: &StorePath) -> StorePath {
-        if let Some(real_store) = &self.real_store {
-            let path_bytes = store_path.as_bytes();
-            if path_bytes.starts_with(real_store) {
-                // Replace real store prefix with virtual store prefix
-                let relative_path = &path_bytes[real_store.len()..];
-                let mut virtual_path = self.virtual_store.clone();
-                virtual_path.extend_from_slice(relative_path);
-                return StorePath::new(virtual_path);
-            }
-        }
-        // If no real_store configured or path doesn't match, return as-is
+        // StorePath is now just "hash-name", which is store-agnostic
+        // No translation needed - just return the same StorePath
         store_path.clone()
     }
 
-    pub async fn get_daemon(&self) -> Result<tokio::sync::MutexGuard<'_, Option<DaemonClient>>> {
-        let mut daemon_guard = self.daemon.lock().await;
-
-        // Connect to daemon if not already connected
-        if daemon_guard.is_none() {
-            log::debug!("Connecting to daemon at {:?}", self.daemon_socket);
-            match DaemonClient::connect_with_config(&self.daemon_socket, self.pool_config.clone())
-                .await
-            {
-                Ok(client) => {
-                    log::debug!("Successfully connected to daemon");
-                    *daemon_guard = Some(client);
-                }
-                Err(e) => {
-                    log::error!(
-                        "Failed to connect to daemon at {:?}: {}",
-                        self.daemon_socket,
-                        e
-                    );
-                    return Err(StoreError::Remote(e).into());
-                }
-            }
-        }
-
-        Ok(daemon_guard)
+    pub async fn acquire(&self) -> Result<PooledConnectionGuard> {
+        self.pool
+            .acquire()
+            .await
+            .map_err(|e| StoreError::Remote(e).into())
     }
 }
 
 impl Default for Store {
     fn default() -> Self {
-        Self {
-            virtual_store: b"/nix/store".to_vec(),
-            real_store: None,
-            daemon_socket: PathBuf::from("/nix/var/nix/daemon-socket/socket"),
-            daemon: Arc::new(Mutex::new(None)),
-            pool_config: PoolConfig {
+        Self::new(
+            b"/nix/store".to_vec(),
+            b"/nix/store".to_vec(),
+            None,
+            PathBuf::from("/nix/var/nix/daemon-socket/socket"),
+            PoolConfig {
                 max_size: 2, // Small pool for tests
                 ..Default::default()
             },
-        }
+        )
     }
 }

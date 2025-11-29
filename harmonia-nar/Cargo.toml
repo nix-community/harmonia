@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
+# SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "harmonia-nar"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "NAR (Nix ARchive) format packing and unpacking"
+readme = "README.md"
+
+[dependencies]
+bstr = "1.11"
+bytes = { workspace = true }
+derive_more = { workspace = true }
+futures = { workspace = true }
+harmonia-utils-io = { path = "../harmonia-utils-io" }
+pin-project-lite = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util"] }
+tokio-util = { workspace = true, features = ["io", "io-util"] }
+tracing = { workspace = true }
+walkdir = "2.5"
+
+[dev-dependencies]
+harmonia-utils-test = { path = "../harmonia-utils-test" }
+proptest = { workspace = true }
+rstest = { workspace = true }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+test-strategy = { workspace = true }
+tokio-test = "0.4"
+test-log = "0.2"
+
+[features]
+test = []
+
+[lints]
+workspace = true

@@ -5,6 +5,7 @@
   makeWrapper,
   nix,
   curl,
+  nix-src,
 }:
 let
   craneLib = crane.mkLib pkgs;
@@ -59,8 +60,10 @@ let
       ];
 
       # Set HARMONIA_BIN to the build directory so tests use the release binary
+      # Set NIX_UPSTREAM_SRC to nix source for JSON test data
       preCheck = ''
         export HARMONIA_BIN=$(pwd)/target/release
+        export NIX_UPSTREAM_SRC=${nix-src}
       ''
       + lib.optionalString pkgs.stdenv.isDarwin ''
         export _NIX_TEST_NO_SANDBOX="1"

@@ -10,7 +10,8 @@ use std::{fmt::Display, time::Duration};
 use url::Url;
 
 use actix_web::{App, HttpResponse, HttpServer, http, web};
-use harmonia_store_remote::protocol::StorePath;
+use harmonia_store_core::store_path::{StorePath, StorePathHash};
+use harmonia_store_remote::DaemonStore;
 
 /// Macro for building byte vectors efficiently from parts
 #[macro_export]
@@ -43,23 +44,25 @@ mod tls;
 mod version;
 
 async fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
-    let mut daemon_guard =
-        settings
-            .store
-            .get_daemon()
-            .await
-            .map_err(|e| StoreError::Operation {
-                reason: format!("Failed to get daemon connection: {e}"),
-            })?;
-    let daemon = daemon_guard.as_mut().unwrap();
-
-    Ok(daemon
-        .query_path_from_hash_part(hash)
-        .await
-        .map_err(|e| StoreError::PathQuery {
+    // Parse the hash bytes into a StorePathHash
+    let store_path_hash =
+        StorePathHash::decode_digest(hash).map_err(|e| StoreError::PathQuery {
             hash: String::from_utf8_lossy(hash).to_string(),
-            reason: e.to_string(),
-        })?)
+            reason: format!("Invalid hash format: {e}"),
+        })?;
+
+    let mut guard = settings.store.acquire().await?;
+
+    guard
+        .client()
+        .query_path_from_hash_part(&store_path_hash)
+        .await
+        .map_err(|e| {
+            CacheError::from(StoreError::PathQuery {
+                hash: String::from_utf8_lossy(hash).to_string(),
+                reason: e.to_string(),
+            })
+        })
 }
 
 const TAILWIND_CSS: &str = include_str!("styles/output.css");
@@ -118,7 +121,6 @@ impl actix_web::error::ResponseError for ServerError {
             CacheError::Store(StoreError::PathQuery { .. }) => StatusCode::NOT_FOUND,
             CacheError::Signing(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CacheError::Serve(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            CacheError::Nar(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CacheError::BuildLog(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CacheError::NarInfo(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -137,10 +139,8 @@ type ServerResult = std::result::Result<HttpResponse, ServerError>;
 async fn inner_main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let mut config = config::load()?;
-
-    // Initialize metrics with config
-    let metrics = prometheus::initialize_metrics(&mut config)?;
+    let (metrics, pool_metrics) = prometheus::initialize_metrics()?;
+    let config = config::load(Some(pool_metrics))?;
 
     let c = web::Data::new(config);
     let config_data = c.clone();

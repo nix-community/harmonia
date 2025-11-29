@@ -1,22 +1,17 @@
-use std::collections::BTreeMap;
-use std::mem::size_of;
-
-use crate::error::{CacheError, IoErrorContext, NarError, Result, StoreError};
+use crate::error::{CacheError, Result, StoreError};
 use actix_web::web::Bytes;
 use actix_web::{HttpRequest, HttpResponse, http, web};
+use futures::{SinkExt, StreamExt};
+use harmonia_nar::{NarWriter, dump};
+use harmonia_store_core::store_path::StorePathHash;
+use harmonia_store_remote::DaemonStore;
 use serde::Deserialize;
-use std::fs::{self, Metadata};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use sync::mpsc::Sender;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use std::path::PathBuf;
+use tokio::task;
+use tokio_util::io::ReaderStream;
 
 use crate::config::Config;
 use crate::{cache_control_max_age_1y, some_or_404};
-use std::ffi::{OsStr, OsString};
-use tokio::{sync, task};
 
 /// Represents the query string of a NAR URL.
 #[derive(Debug, Deserialize)]
@@ -62,285 +57,55 @@ impl HttpRange {
     }
 }
 
-// We send this error across thread boundaries, so it must be Send + Sync
-#[derive(Debug)]
-enum ThreadSafeError {}
-impl std::error::Error for ThreadSafeError {}
-impl std::fmt::Display for ThreadSafeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "error")
-    }
-}
+/// Buffer size for the duplex channel (64KB for good throughput)
+const DUPLEX_BUFFER_SIZE: usize = 64 * 1024;
 
-fn alignment(size: u64) -> usize {
-    let align = 8 - (size % 8);
-    if align == 8 { 0 } else { align as usize }
-}
+/// Chunk size for ReaderStream (64KB chunks)
+const READER_CHUNK_SIZE: usize = 64 * 1024;
 
-async fn write_byte_slices(
-    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
-    slices: &[&[u8]],
-) -> Result<()> {
-    let total_len = slices
-        .iter()
-        .map(|slice| size_of::<u64>() + slice.len() + alignment(slice.len() as u64))
-        .sum();
-
-    let mut vec = Vec::with_capacity(total_len);
-    for slice in slices {
-        vec.extend_from_slice(&(slice.len() as u64).to_le_bytes());
-        vec.extend_from_slice(slice);
-        vec.extend_from_slice(&[0u8; 8][0..alignment(slice.len() as u64)]);
-    }
-
-    tx.send(Ok(Bytes::from(vec)))
-        .await
-        .map_err(|e| NarError::ChannelSend {
-            reason: format!("Failed to send byte slices: {e}"),
-        })?;
-    Ok(())
-}
-
-async fn dump_contents(
-    p: &Path,
-    expected_size: u64,
-    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
-) -> Result<()> {
-    let mut file = File::open(p).await.map_err(|e| {
-        log::warn!("Failed to open file for dumping contents: {}", p.display());
-        NarError::ReadFile {
-            path: p.display().to_string(),
-            source: e,
-        }
-    })?;
-    let mut left = expected_size;
-
-    loop {
-        let mut buf = vec![0; 16384];
-
-        let n = file.read(&mut buf).await.io_context(format!(
-            "Failed to read file for dumping contents: {}",
-            p.display()
-        ))?;
-        if n == 0 {
-            if left != 0 {
-                log::warn!(
-                    "Read less bytes than expected while dumping contents: {}",
-                    p.to_string_lossy()
-                );
-                return Err(NarError::Streaming {
-                    reason: format!(
-                        "Unexpected end of file while dumping contents: {}",
-                        p.display()
-                    ),
-                }
-                .into());
-            }
-            // add zero padding at the end
-            buf.resize(n + alignment(expected_size), 0);
-            tx.send(Ok(Bytes::from(buf)))
-                .await
-                .map_err(|e| NarError::ChannelSend {
-                    reason: format!("Failed to send final NAR chunk with padding: {e}"),
-                })?;
-            break;
-        }
-        if n as u64 > left {
-            log::warn!(
-                "Read more bytes than expected while dumping contents: {}",
-                p.to_string_lossy()
-            );
-            return Err(NarError::Streaming {
-                reason: format!(
-                    "Read more bytes than expected while dumping contents: {}",
-                    p.display()
-                ),
-            }
-            .into());
-        }
-        left -= n as u64;
-
-        tx.send(Ok(Bytes::from(buf).slice(0..n)))
-            .await
-            .map_err(|e| NarError::ChannelSend {
-                reason: format!("Failed to send NAR chunk: {e}"),
-            })?;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn strip_case_hack_suffix(s: &OsStr) -> &OsStr {
-    let needle = b"~nix~case~hack~";
-    let pos = s
-        .as_bytes()
-        .windows(needle.len())
-        .position(|window| window == needle);
-    if let Some(pos) = pos {
-        OsStr::from_bytes(&s.as_bytes()[0..pos])
-    } else {
-        s
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn strip_case_hack_suffix(s: &OsStr) -> &OsStr {
-    s
-}
-
-struct Frame {
+/// Dump a path to NAR format using harmonia-nar, returning a stream of bytes.
+///
+/// Uses tokio::io::duplex() to bridge NarWriter (which writes to AsyncWrite)
+/// to a byte stream suitable for HTTP streaming.
+async fn dump_path_stream(
     path: PathBuf,
-    metadata: Metadata,
-    children: Option<BTreeMap<OsString, OsString>>,
-    first_child: bool,
-}
+) -> Result<impl futures::Stream<Item = std::result::Result<Bytes, std::io::Error>>> {
+    let (writer, reader) = tokio::io::duplex(DUPLEX_BUFFER_SIZE);
 
-impl Frame {
-    async fn new(path: PathBuf) -> Result<Self> {
-        let metadata = tokio::fs::symlink_metadata(&path)
-            .await
-            .io_context(format!(
-                "Failed to get metadata for path: {}",
-                path.display()
-            ))?;
-        let children = if metadata.is_dir() {
-            let mut read_dir = tokio::fs::read_dir(&path).await.io_context(format!(
-                "Failed to read directory for path: {}",
-                path.display()
-            ))?;
-            let mut entries = BTreeMap::new();
-            while let Some(e) = read_dir
-                .next_entry()
-                .await
-                .io_context("Failed to read directory")?
-            {
-                let file_name = e.file_name();
-                if file_name == "." || file_name == ".." {
-                    continue;
+    // Spawn task to dump NAR events through NarWriter
+    let dump_task = task::spawn(async move {
+        let events = dump(&path);
+        let mut nar_writer = NarWriter::new(writer);
+
+        // Forward all events to the writer
+        futures::pin_mut!(events);
+        while let Some(event_result) = events.next().await {
+            match event_result {
+                Ok(event) => {
+                    if let Err(e) = nar_writer.send(event).await {
+                        log::error!("Error writing NAR event for {}: {}", path.display(), e);
+                        return;
+                    }
                 }
-                entries.insert(strip_case_hack_suffix(&file_name).to_owned(), file_name);
-            }
-            if entries.is_empty() {
-                None
-            } else {
-                Some(entries)
-            }
-        } else {
-            None
-        };
-
-        Ok(Self {
-            path,
-            metadata,
-            children,
-            first_child: true,
-        })
-    }
-}
-
-async fn dump_file(
-    frame: &Frame,
-    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
-) -> Result<()> {
-    if frame.metadata.permissions().mode() & 0o100 != 0 {
-        write_byte_slices(
-            tx,
-            &[b"(", b"type", b"regular", b"executable", b"", b"contents"],
-        )
-        .await?;
-    } else {
-        write_byte_slices(tx, &[b"(", b"type", b"regular", b"contents"]).await?;
-    }
-    tx.send(Ok(Bytes::from(frame.metadata.len().to_le_bytes().to_vec())))
-        .await
-        .map_err(|e| NarError::ChannelSend {
-            reason: format!("Failed to send file size: {e}"),
-        })?;
-
-    dump_contents(&frame.path, frame.metadata.len(), tx).await?;
-    write_byte_slices(tx, &[b")"]).await?;
-    Ok(())
-}
-
-async fn dump_symlink(
-    frame: &Frame,
-    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
-) -> Result<()> {
-    let link_target = fs::read_link(&frame.path).map_err(|e| NarError::SymlinkRead {
-        path: frame.path.display().to_string(),
-        source: e,
-    })?;
-    write_byte_slices(
-        tx,
-        &[
-            b"(",
-            b"type",
-            b"symlink",
-            b"target",
-            link_target.as_os_str().as_bytes(),
-            b")",
-        ],
-    )
-    .await?;
-    Ok(())
-}
-
-async fn dump_path(
-    path: PathBuf,
-    tx: &Sender<std::result::Result<Bytes, ThreadSafeError>>,
-) -> Result<()> {
-    write_byte_slices(tx, &[b"nix-archive-1"]).await?;
-    let mut stack = vec![Frame::new(path).await?];
-
-    while let Some(frame) = stack.last_mut() {
-        let file_type = frame.metadata.file_type();
-        if file_type.is_dir() {
-            if frame.first_child {
-                write_byte_slices(tx, &[b"(", b"type", b"directory"]).await?;
-                if frame.children.is_none() {
-                    // end directory
-                    write_byte_slices(tx, &[b")"]).await?;
-                    // pop directory from stack
-                    stack.pop();
-                    continue;
+                Err(e) => {
+                    log::error!("Error reading path {} for NAR dump: {}", path.display(), e);
+                    return;
                 }
             }
-
-            if let Some(childrens) = frame.children.as_mut() {
-                if frame.first_child {
-                    frame.first_child = false;
-                } else {
-                    // end entry
-                    write_byte_slices(tx, &[b")"]).await?;
-                }
-                if let Some((nar_name, name)) = childrens.pop_first() {
-                    write_byte_slices(tx, &[b"entry", b"(", b"name", nar_name.as_bytes(), b"node"])
-                        .await?;
-                    let path = frame.path.join(name);
-                    stack.push(Frame::new(path).await?);
-                } else {
-                    // end directory
-                    write_byte_slices(tx, &[b")"]).await?;
-                    // pop directory from stack
-                    stack.pop();
-                }
-            }
-        } else {
-            if file_type.is_file() {
-                dump_file(frame, tx).await?;
-            } else if file_type.is_symlink() {
-                dump_symlink(frame, tx).await?;
-            } else {
-                return Err(NarError::Streaming {
-                    reason: format!("Unsupported file type for path: {}", frame.path.display()),
-                }
-                .into());
-            }
-            stack.pop();
         }
-    }
 
-    Ok(())
+        // Close the writer to signal EOF
+        if let Err(e) = nar_writer.close().await {
+            log::error!("Error closing NAR writer for {}: {}", path.display(), e);
+        }
+    });
+
+    // Detach the task - it will run independently
+    drop(dump_task);
+
+    // Return a stream that reads from the duplex reader
+    let stream = ReaderStream::with_capacity(reader, READER_CHUNK_SIZE);
+    Ok(stream.map(|result| result))
 }
 
 pub(crate) async fn get(
@@ -363,18 +128,23 @@ pub(crate) async fn get(
     };
     let store_path = match outhash {
         Some(outhash) => {
-            let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
-                CacheError::from(StoreError::Operation {
-                    reason: format!("Failed to get daemon connection: {e}"),
-                })
-            })?;
-            let daemon = daemon_guard.as_mut().unwrap();
-            daemon
-                .query_path_from_hash_part(outhash.as_bytes())
+            // Parse outhash to StorePathHash
+            let store_path_hash =
+                StorePathHash::decode_digest(outhash.as_bytes()).map_err(|e| {
+                    CacheError::from(StoreError::PathQuery {
+                        hash: outhash.to_string(),
+                        reason: format!("Invalid hash format: {e}"),
+                    })
+                })?;
+
+            let mut guard = settings.store.acquire().await?;
+            guard
+                .client()
+                .query_path_from_hash_part(&store_path_hash)
                 .await
                 .map_err(|e| {
                     CacheError::from(StoreError::PathQuery {
-                        hash: String::from_utf8_lossy(outhash.as_bytes()).to_string(),
+                        hash: outhash.to_string(),
                         reason: e.to_string(),
                     })
                 })?
@@ -396,14 +166,10 @@ pub(crate) async fn get(
 
     // lookup the path info.
     let info = {
-        let mut daemon_guard = settings.store.get_daemon().await.map_err(|e| {
-            CacheError::from(StoreError::Operation {
-                reason: format!("Failed to get daemon connection: {e}"),
-            })
-        })?;
-        let daemon = daemon_guard.as_mut().unwrap();
+        let mut guard = settings.store.acquire().await?;
 
-        match daemon
+        match guard
+            .client()
             .query_path_info(&store_path)
             .await
             .map_err(|e| CacheError::from(StoreError::Remote(e)))?
@@ -415,27 +181,27 @@ pub(crate) async fn get(
                     .body("path info not found"));
             }
         }
-    }; // daemon_guard is dropped here
+    }; // guard is dropped here
 
-    if narhash.as_bytes() != info.hash.to_nix_base32() {
+    // URL narhash is bare (no sha256: prefix), so use as_bare() for comparison
+    let expected_hash = info.nar_hash.as_base32().as_bare().to_string();
+    if narhash != expected_hash {
         return Ok(HttpResponse::NotFound()
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));
     }
 
-    let mut rlength = info.nar_size;
-    let offset;
+    let rlength = info.nar_size;
     let mut res = HttpResponse::Ok();
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
-    let rx = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let real_path = settings.store.get_real_path(&store_path);
 
     // Credit actix_web actix-files: https://github.com/actix/actix-web/blob/master/actix-files/src/named.rs#L525
     if let Some(ranges) = req.headers().get(http::header::RANGE) {
         if let Ok(ranges_header) = ranges.to_str() {
             if let Ok(ranges) = HttpRange::parse(ranges_header, rlength) {
-                rlength = ranges[0].length;
-                offset = ranges[0].start;
+                let range_length = ranges[0].length;
+                let offset = ranges[0].start;
 
                 if settings.enable_compression {
                     // don't allow compression middleware to modify partial content
@@ -450,10 +216,23 @@ pub(crate) async fn get(
                     format!(
                         "bytes {}-{}/{}",
                         offset,
-                        offset + rlength - 1,
+                        offset + range_length - 1,
                         info.nar_size
                     ),
                 ));
+
+                // For range requests, we need to skip bytes and limit output
+                let stream = dump_path_stream(real_path).await?;
+                let ranged_stream = create_range_stream(stream, offset, range_length);
+
+                return Ok(res
+                    .insert_header((http::header::CONTENT_TYPE, "application/x-nix-archive"))
+                    .insert_header((http::header::ACCEPT_RANGES, "bytes"))
+                    .insert_header(cache_control_max_age_1y())
+                    .body(actix_web::body::SizedStream::new(
+                        range_length,
+                        ranged_stream,
+                    )));
             } else {
                 res.insert_header((http::header::CONTENT_RANGE, format!("bytes */{rlength}")));
                 return Ok(res.status(http::StatusCode::RANGE_NOT_SATISFIABLE).finish());
@@ -461,119 +240,94 @@ pub(crate) async fn get(
         } else {
             return Ok(res.status(http::StatusCode::BAD_REQUEST).finish());
         };
-        let mut send: u64 = 0;
+    }
 
-        let (tx2, mut rx2) =
-            tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
-        task::spawn(async move {
-            // If Nix is set to a non-root store, physical store paths will differ from
-            // logical paths. Below we check if that is the case, and rewrite to physical
-            // before dumping.
-
-            let err = dump_path(settings.store.get_real_path(&store_path), &tx2).await;
-            if let Err(err) = err {
-                log::error!("Error dumping path {store_path}: {err}");
-            }
-        });
-        // we keep this closure extra to avoid unaligned copies in the non-range request case.
-        task::spawn(async move {
-            while let Some(Ok(data)) = rx2.recv().await {
-                let len = data.len() as u64;
-                if send + len > offset {
-                    let start = offset.saturating_sub(send);
-                    let end = if send + data.len() as u64 > offset + rlength {
-                        start + rlength
-                    } else {
-                        len
-                    };
-                    // does it fit into usize
-                    let start: usize = match start.try_into() {
-                        Ok(v) => v,
-                        Err(e) => {
-                            log::error!("BUG: start(u64) is too big for usize: {e}");
-                            break;
-                        }
-                    };
-                    let end: usize = match end.try_into() {
-                        Ok(v) => v,
-                        Err(e) => {
-                            log::error!("BUG: end(u64) is too big for usize: {e}");
-                            break;
-                        }
-                    };
-                    if tx.send(Ok(data.slice(start..end))).await.is_err() {
-                        break;
-                    }
-                }
-                send += len;
-            }
-        });
-    } else {
-        task::spawn(async move {
-            let err = dump_path(settings.store.get_real_path(&store_path), &tx).await;
-            if let Err(err) = err {
-                log::error!("Error dumping path {store_path}: {err}");
-            }
-        });
-    };
+    // Non-range request: stream the full NAR
+    let stream = dump_path_stream(real_path).await?;
 
     Ok(res
         .insert_header((http::header::CONTENT_TYPE, "application/x-nix-archive"))
         .insert_header((http::header::ACCEPT_RANGES, "bytes"))
         .insert_header(cache_control_max_age_1y())
-        .body(actix_web::body::SizedStream::new(rlength, rx)))
+        .body(actix_web::body::SizedStream::new(rlength, stream)))
+}
+
+/// Create a stream that skips `offset` bytes and returns at most `length` bytes.
+fn create_range_stream<S>(
+    stream: S,
+    offset: u64,
+    length: u64,
+) -> impl futures::Stream<Item = std::result::Result<Bytes, std::io::Error>>
+where
+    S: futures::Stream<Item = std::result::Result<Bytes, std::io::Error>> + Unpin,
+{
+    futures::stream::unfold(
+        (stream, offset, length, 0u64),
+        |(mut stream, offset, length, mut sent)| async move {
+            use futures::StreamExt;
+
+            loop {
+                match stream.next().await {
+                    Some(Ok(data)) => {
+                        let data_len = data.len() as u64;
+
+                        // If we haven't reached the offset yet
+                        if sent + data_len <= offset {
+                            sent += data_len;
+                            continue;
+                        }
+
+                        // Calculate the slice we need from this chunk
+                        let start = if sent < offset {
+                            (offset - sent) as usize
+                        } else {
+                            0
+                        };
+
+                        let remaining = length - (sent.saturating_sub(offset).min(length));
+                        if remaining == 0 {
+                            return None;
+                        }
+
+                        let end = (start as u64 + remaining).min(data_len) as usize;
+
+                        sent += data_len;
+
+                        if start < end {
+                            let slice = data.slice(start..end);
+                            return Some((Ok(slice), (stream, offset, length, sent)));
+                        }
+                    }
+                    Some(Err(e)) => return Some((Err(e), (stream, offset, length, sent))),
+                    None => return None,
+                }
+            }
+        },
+    )
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::store::Store;
-    use harmonia_store_remote::protocol::StorePath;
+    use crate::error::IoErrorContext;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
-    async fn dump_to_vec(path: String) -> Result<Vec<u8>> {
-        let store = Store::new(
-            b"/nix/store".to_vec(),
-            None,
-            std::path::PathBuf::from("/nix/var/nix/daemon-socket/socket"),
-            harmonia_store_remote::client::PoolConfig {
-                max_size: 2, // Small pool for tests
-                ..Default::default()
-            },
-        );
-        let (tx, mut rx) =
-            tokio::sync::mpsc::channel::<std::result::Result<Bytes, ThreadSafeError>>(1000);
-        task::spawn(async move {
-            let store_path = StorePath::from(path.into_bytes());
-            let e = dump_path(store.get_real_path(&store_path), &tx).await;
-            if let Err(e) = e {
-                eprintln!("Error dumping path: {e}");
-            }
-        });
-        let mut resp = Vec::new();
-        let mut i = 0;
-        loop {
-            match rx.recv().await {
-                Some(Ok(bytes)) => {
-                    resp.extend_from_slice(&bytes);
-                }
-                Some(Err(e)) => {
-                    return Err(NarError::Streaming {
-                        reason: format!("Got error: {e}"),
-                    }
-                    .into());
-                }
-                None => {
-                    if i > 100 {
-                        break;
-                    }
-                    i += 1;
-                }
-            }
+    async fn dump_to_vec(path: PathBuf) -> Result<Vec<u8>> {
+        let stream = dump_path_stream(path).await?;
+        futures::pin_mut!(stream);
+
+        let mut result = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.expect("Stream error during NAR dump");
+            result.extend_from_slice(&bytes);
         }
-        Ok(resp)
+        Ok(result)
     }
+
     // Useful for debugging
+    #[allow(dead_code)]
     fn pretty_hex_dump(bytes: &[u8]) {
         let mut i = 0;
         while i < bytes.len() {
@@ -604,11 +358,7 @@ mod test {
 
     #[tokio::test]
     async fn test_dump_store() -> Result<()> {
-        let temp_dir = tempfile::tempdir()
-            .map_err(|e| NarError::Streaming {
-                reason: format!("Failed to create temp dir: {e}"),
-            })
-            .expect("Failed to create temp dir");
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let dir = temp_dir.path();
         fs::write(dir.join("file"), b"somecontent").io_context("Failed to write test file")?;
 
@@ -625,19 +375,18 @@ mod test {
         std::os::unix::fs::symlink("sometarget", dir.join("symlink"))
             .io_context("Failed to create test symlink")?;
 
-        let nar_dump = dump_to_vec(dir.to_str().unwrap().to_owned()).await?;
+        let nar_dump = dump_to_vec(dir.to_path_buf()).await?;
         let res = Command::new("nix-store")
             .arg("--dump")
             .arg(dir)
             .output()
-            .map_err(|e| NarError::Streaming {
-                reason: format!("Failed to run nix-store --dump: {e}"),
-            })?;
+            .expect("Failed to run nix-store --dump");
         assert_eq!(res.status.code(), Some(0));
-        println!("nar_dump:");
-        pretty_hex_dump(&nar_dump);
-        println!("nix-store --dump:");
-        pretty_hex_dump(&res.stdout);
+        println!("nar_dump len: {}", nar_dump.len());
+        println!("nix-store --dump len: {}", res.stdout.len());
+        // pretty_hex_dump(&nar_dump);
+        // println!("nix-store --dump:");
+        // pretty_hex_dump(&res.stdout);
         assert_eq!(res.stdout, nar_dump);
 
         Ok(())

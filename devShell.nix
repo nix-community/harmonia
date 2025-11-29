@@ -1,5 +1,6 @@
 {
   pkgs,
+  nix-src,
 }:
 (pkgs.mkShell.override {
   stdenv =
@@ -25,4 +26,7 @@
     CONFIG_FILE = pkgs.writeText "config.toml" "";
 
     RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+
+    # Path to upstream Nix source for JSON test data
+    NIX_UPSTREAM_SRC = nix-src;
   }

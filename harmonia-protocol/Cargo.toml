@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
+# SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "harmonia-protocol"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Nix daemon wire protocol types and serialization"
+readme = "README.md"
+
+[dependencies]
+async-stream = "0.3"
+bstr = "1.11"
+bytes = { workspace = true }
+derive_more = { workspace = true }
+futures = { workspace = true }
+libc = "0.2"
+num_enum = { workspace = true }
+pin-project-lite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = "3.11"
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util"] }
+tokio-util = { workspace = true, features = ["io"] }
+tracing = { workspace = true }
+
+# Internal dependencies
+harmonia-utils-io = { path = "../harmonia-utils-io" }
+harmonia-utils-hash = { path = "../harmonia-utils-hash" }
+harmonia-store-core = { path = "../harmonia-store-core" }
+harmonia-protocol-derive = { path = "../harmonia-protocol-derive" }
+harmonia-nar = { path = "../harmonia-nar" }
+
+[dev-dependencies]
+harmonia-store-core = { path = "../harmonia-store-core", features = ["test"] }
+harmonia-nar = { path = "../harmonia-nar", features = ["test"] }
+proptest = { workspace = true }
+proptest-derive = "0.5"
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+test-strategy = { workspace = true }
+tokio-test = "0.4"
+hex-literal = "0.4"
+test-log = "0.2"
+
+[features]
+test = []
+
+[lints]
+workspace = true

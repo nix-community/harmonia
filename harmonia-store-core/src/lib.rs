@@ -1,13 +1,56 @@
-pub mod base32;
-pub mod fingerprint;
-pub mod hash;
+// SPDX-FileCopyrightText: 2024 griff
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-License-Identifier: EUPL-1.2 OR MIT
+//
+// This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
+// Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
+
+//! Core Nix store semantics.
+//!
+//! This crate provides the fundamental types and pure computation logic for working
+//! with the Nix store. It is intentionally IO-free - all operations are pure functions
+//! that operate on values, enabling easy testing and composition.
+//!
+//! **Architecture**: This is the Core Layer in Harmonia's store architecture.
+//! See `docs/architecture/harmonia-store-structure.md` for details.
+//!
+//! # Key Modules
+//!
+//! - `hash` - Content addressing, hash types, hash computation
+//! - `store_path` - Store path types, parsing, validation
+//! - `derivation` - Derivation (.drv) file format and semantics
+//! - `signature` - Cryptographic signatures for store paths
+//! - `realisation` - Store path realisation tracking
+//!
+//! # Design Principles
+//!
+//! 1. **No IO**: No filesystem, no network, minimal `async`
+//! 2. **Pure functions**: Deterministic, testable, referentially transparent
+//! 3. **Explicit errors**: All fallible operations return `Result`
+//! 4. **Memory-bounded**: Stream-friendly, no unbounded buffers
+
+// Type alias for byte strings
+pub type ByteString = bytes::Bytes;
+
+// Serde helpers for ByteString
+pub(crate) fn serialize_byte_string<S>(value: &ByteString, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::Serialize;
+    match std::str::from_utf8(value) {
+        Ok(s) => s.serialize(serializer),
+        Err(_) => value.serialize(serializer),
+    }
+}
+
+pub mod derivation;
+pub mod derived_path;
+pub mod log;
+pub mod placeholder;
+pub mod realisation;
 pub mod signature;
-pub mod signing;
 pub mod store_path;
 
-pub use base32::to_nix_base32;
-pub use fingerprint::{FingerprintError, fingerprint_path};
-pub use hash::{Hash, HashAlgo, ParseHashError};
-pub use signature::{NarSignature, Signature, SignatureError};
-pub use signing::{SigningError, SigningKey};
-pub use store_path::StorePath;
+#[cfg(any(test, feature = "test"))]
+pub mod test;

@@ -1,10 +1,10 @@
-use crate::config::Config;
 use crate::error;
 use actix_web::{
     Error, HttpResponse,
     dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready},
     web,
 };
+use harmonia_store_remote::PoolMetrics;
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
 };
@@ -155,27 +155,21 @@ pub async fn metrics_handler(
         .body(body))
 }
 
-pub fn initialize_metrics(
-    config: &mut Config,
-) -> Result<Arc<PrometheusMetrics>, crate::error::CacheError> {
-    // Initialize Prometheus metrics
+pub fn initialize_metrics()
+-> Result<(Arc<PrometheusMetrics>, Arc<PoolMetrics>), crate::error::CacheError> {
     let metrics = Arc::new(
         PrometheusMetrics::new().map_err(|e| error::ServerError::Startup {
             reason: format!("Failed to create prometheus metrics: {e}"),
         })?,
     );
 
-    // Create client metrics and register them
-    let client_metrics = Arc::new(
-        harmonia_store_remote::client::ClientMetrics::new("harmonia", &metrics.registry).map_err(
-            |e| error::ServerError::Startup {
-                reason: format!("Failed to create client metrics: {e}"),
-            },
-        )?,
+    let pool_metrics = Arc::new(
+        PoolMetrics::new("harmonia", &metrics.registry).map_err(|e| {
+            error::ServerError::Startup {
+                reason: format!("Failed to create pool metrics: {e}"),
+            }
+        })?,
     );
 
-    // Set client metrics in config
-    config.set_pool_metrics(client_metrics);
-
-    Ok(metrics)
+    Ok((metrics, pool_metrics))
 }

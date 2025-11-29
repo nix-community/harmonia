@@ -139,11 +139,20 @@ log_level = "debug"
                 .spawn()?
         };
 
+        let pid = child.id();
+        println!(
+            "Starting harmonia-daemon with socket: {} (PID: {pid})",
+            config.socket_path.display()
+        );
+
         // Create a guard that owns the config file
         let guard = Box::new(ProcessAndFileGuard {
             _process: ProcessGuard::new(child),
             _config_file: config_file,
         });
+
+        // Wait for socket to be created
+        wait_for_socket(&config.socket_path, pid, Duration::from_secs(120)).await?;
 
         Ok(DaemonInstance {
             socket_path: config.socket_path,
@@ -258,6 +267,61 @@ async fn wait_for_service(
     .map_err(|_| -> Box<dyn std::error::Error> {
         format!(
             "Timeout waiting for service (PID {pid}) on {host}:{port} after {timeout_duration:?}"
+        )
+        .into()
+    })?
+}
+
+async fn wait_for_socket(
+    socket_path: &std::path::Path,
+    pid: u32,
+    timeout_duration: Duration,
+) -> Result<()> {
+    println!(
+        "Waiting for socket (PID {pid}) at {}",
+        socket_path.display()
+    );
+    let start = std::time::Instant::now();
+
+    timeout(timeout_duration, async {
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+
+            // First check if the process is still running
+            use nix::sys::signal::{Signal, kill};
+            use nix::unistd::Pid;
+
+            if kill(Pid::from_raw(pid as i32), Signal::SIGCONT).is_err() {
+                return Err(
+                    format!("Process {pid} died while waiting for socket to be created").into(),
+                );
+            }
+
+            if socket_path.exists() {
+                println!(
+                    "Socket is ready at {} after {} attempts ({:.2}s)",
+                    socket_path.display(),
+                    attempt,
+                    start.elapsed().as_secs_f32()
+                );
+                return Ok(());
+            }
+
+            if attempt % 10 == 0 {
+                println!(
+                    "Still waiting for socket {} (attempt {attempt})",
+                    socket_path.display()
+                );
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .map_err(|_| -> Box<dyn std::error::Error> {
+        format!(
+            "Timeout waiting for socket (PID {pid}) at {} after {timeout_duration:?}",
+            socket_path.display()
         )
         .into()
     })?

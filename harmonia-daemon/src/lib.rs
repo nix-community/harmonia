@@ -1,7 +1,7 @@
 pub mod config;
 pub mod error;
 pub mod handler;
-pub mod sqlite;
+pub mod server;
 
 #[cfg(test)]
 mod tests;

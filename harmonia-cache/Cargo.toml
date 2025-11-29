@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 [[bin]]
 name = "harmonia-cache"
@@ -33,9 +34,12 @@ thiserror = { workspace = true }
 tempfile = "3.23"
 url = "2.5.7"
 async-compression = { version = "0.4.34", features = ["tokio", "bzip2"] }
-tokio-util = "0.7.17"
+tokio-util = { version = "0.7.17", features = ["io"] }
+# Nix.rs-based crates
 harmonia-store-core = { path = "../harmonia-store-core" }
 harmonia-store-remote = { path = "../harmonia-store-remote" }
+harmonia-nar = { path = "../harmonia-nar" }
+futures = { workspace = true }
 prometheus = { workspace = true }
 
 [build-dependencies]

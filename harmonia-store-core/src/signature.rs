@@ -1,158 +1,532 @@
-use base64::{Engine, engine::general_purpose};
-use ed25519_dalek::Signature as Ed25519Signature;
+#![allow(unsafe_code)]
+
+use std::collections::BTreeSet;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+use std::sync::Arc;
+
+use data_encoding::BASE64;
+
+use ring::error::{KeyRejected, Unspecified};
+use ring::rand;
+use ring::signature::{self, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
+use tracing::error;
 
-#[derive(Debug, Error)]
-pub enum SignatureError {
-    #[error("Failed to decode base64: {0}")]
-    Base64Decode(#[from] base64::DecodeError),
+use crate::store_path::{StoreDir, StorePath};
+use harmonia_utils_base_encoding::base64_len;
 
-    #[error("Invalid signature length: expected 64 bytes, got {0}")]
-    InvalidLength(usize),
+pub const SIGNATURE_BYTES: usize = 64;
+const SIGNATURE_BASE64_LEN: usize = base64_len(SIGNATURE_BYTES);
+const SIGNATURE_BASE64_DECODED_LEN: usize = 66;
+pub const SEED_BYTES: usize = 32;
+pub const PUBLIC_KEY_BYTES: usize = 32;
+const PUBLIC_KEY_BASE64_LEN: usize = base64_len(PUBLIC_KEY_BYTES);
+const PUBLIC_KEY_BASE64_DECODED_LEN: usize = 33;
+pub const SECRET_KEY_BYTES: usize = SEED_BYTES + PUBLIC_KEY_BYTES;
+const SECRET_KEY_BASE64_LEN: usize = base64_len(SECRET_KEY_BYTES);
+const SECRET_KEY_BASE64_DECODED_LEN: usize = 66;
 
-    #[error("Invalid signature format: {0}")]
-    InvalidFormat(String),
-
-    #[error("Failed to parse ed25519 signature: {0}")]
-    Ed25519(#[from] ed25519_dalek::SignatureError),
+#[derive(Error, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub enum ParseSignatureError {
+    #[error("signature is corrupt")]
+    CorruptSignature,
+    #[error("signature is not valid")]
+    InvalidSignature,
 }
 
-/// A newtype wrapper around an Ed25519 signature
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Signature(Ed25519Signature);
+pub type SignatureSet = BTreeSet<Signature>;
+
+#[derive(
+    Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, DeserializeFromStr, SerializeDisplay,
+)]
+pub struct Signature(Arc<String>, [u8; SIGNATURE_BYTES]);
 
 impl Signature {
-    /// Create a new signature from raw bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SignatureError> {
-        if bytes.len() != 64 {
-            return Err(SignatureError::InvalidLength(bytes.len()));
-        }
-        let sig = Ed25519Signature::from_slice(bytes)?;
-        Ok(Signature(sig))
-    }
-
-    /// Get the raw bytes of the signature
-    pub fn to_bytes(&self) -> [u8; 64] {
-        self.0.to_bytes()
-    }
-
-    /// Convert signature to base64-encoded text
-    pub fn to_base64(&self) -> String {
-        general_purpose::STANDARD.encode(self.to_bytes())
-    }
-
-    /// Parse a signature from base64-encoded text
-    pub fn from_base64(s: &str) -> Result<Self, SignatureError> {
-        let bytes = general_purpose::STANDARD.decode(s)?;
-        Self::from_bytes(&bytes)
-    }
-
-    /// Get the inner Ed25519 signature
-    pub fn inner(&self) -> &Ed25519Signature {
+    pub fn name(&self) -> &str {
         &self.0
+    }
+
+    pub fn signature_bytes(&self) -> &[u8] {
+        &self.1[..]
+    }
+
+    pub fn signature(&self) -> impl fmt::Display + '_ {
+        Base64Display::<SIGNATURE_BASE64_LEN>(self.signature_bytes())
+    }
+
+    pub fn from_parts(name: &str, signature: &[u8]) -> Result<Signature, ParseSignatureError> {
+        if signature.len() != SIGNATURE_BYTES {
+            error!(
+                "Signature wrong length {}!={}",
+                signature.len(),
+                SIGNATURE_BYTES
+            );
+            return Err(ParseSignatureError::InvalidSignature);
+        }
+        let mut data = [0u8; SIGNATURE_BYTES];
+        data.copy_from_slice(signature);
+
+        Ok(Self(Arc::new(name.to_string()), data))
+    }
+}
+
+struct Base64Display<'d, const N: usize>(&'d [u8]);
+impl<const N: usize> fmt::Display for Base64Display<'_, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut buf = [0u8; N];
+        BASE64.encode_mut(self.0, &mut buf);
+
+        // SAFETY: Base64 is a subset of ASCII, which guarantees valid UTF-8.
+        let s = unsafe { std::str::from_utf8_unchecked(&buf) };
+        write!(f, "{s}")
     }
 }
 
 impl fmt::Display for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_base64())
+        write!(f, "{}:{}", self.name(), self.signature())
     }
 }
 
 impl FromStr for Signature {
-    type Err = SignatureError;
+    type Err = ParseSignatureError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_base64(s)
-    }
-}
-
-impl Hash for Signature {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.to_bytes().hash(state);
-    }
-}
-
-/// A composite type containing a named signature
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NarSignature {
-    /// The name/identifier of the public key used (e.g., "cache.nixos.org-1")
-    pub key_name: String,
-    /// The actual signature
-    pub sig: Signature,
-}
-
-impl NarSignature {
-    /// Create a new NAR signature
-    pub fn new(key_name: String, sig: Signature) -> Self {
-        Self { key_name, sig }
-    }
-
-    /// Convert to the Nix text format: "key-name:base64-signature"
-    pub fn to_text(&self) -> String {
-        format!("{}:{}", self.key_name, self.sig.to_base64())
-    }
-
-    /// Parse from the Nix text format: "key-name:base64-signature"
-    pub fn parse(s: &str) -> Result<Self, SignatureError> {
-        let (key_name, sig_str) = s
-            .split_once(':')
-            .ok_or_else(|| SignatureError::InvalidFormat("Missing ':' separator".to_string()))?;
-
-        if key_name.is_empty() {
-            return Err(SignatureError::InvalidFormat("Empty key name".to_string()));
+        let mut sp = s.splitn(2, ':');
+        let name = Arc::new(
+            sp.next()
+                .ok_or(ParseSignatureError::CorruptSignature)?
+                .to_string(),
+        );
+        let sig_s = sp.next().ok_or(ParseSignatureError::CorruptSignature)?;
+        if sig_s.len() != SIGNATURE_BASE64_LEN {
+            return Err(ParseSignatureError::InvalidSignature);
         }
-
-        let sig = Signature::from_base64(sig_str)?;
-        Ok(Self::new(key_name.to_string(), sig))
+        let mut sig_b = [0u8; SIGNATURE_BASE64_DECODED_LEN];
+        let len = BASE64
+            .decode_mut(sig_s.as_bytes(), &mut sig_b)
+            .map_err(|_| ParseSignatureError::InvalidSignature)?;
+        if len != SIGNATURE_BYTES {
+            error!("Signature wrong length {}!={}", len, SIGNATURE_BYTES);
+            return Err(ParseSignatureError::InvalidSignature);
+        }
+        let mut sig_buf = [0u8; SIGNATURE_BYTES];
+        sig_buf.copy_from_slice(&sig_b[..SIGNATURE_BYTES]);
+        Ok(Signature(name, sig_buf))
     }
 }
 
-impl fmt::Display for NarSignature {
+#[derive(Error, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub enum ParseKeyError {
+    #[error("key is corrupt")]
+    CorruptKey,
+    #[error("secret key is not valid")]
+    InvalidSecretKey,
+    #[error("public key is not valid")]
+    InvalidPublicKey,
+}
+
+#[derive(Clone)]
+pub struct PublicKey {
+    name: Arc<String>,
+    key_data: [u8; PUBLIC_KEY_BYTES],
+    key: UnparsedPublicKey<[u8; PUBLIC_KEY_BYTES]>,
+}
+
+impl PublicKey {
+    pub fn verify<M: AsRef<[u8]>>(&self, data: M, signature: &Signature) -> bool {
+        let message = data.as_ref();
+        self.key
+            .verify(message, signature.signature_bytes())
+            .is_ok()
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn key(&self) -> impl fmt::Display + '_ {
+        Base64Display::<PUBLIC_KEY_BASE64_LEN>(&self.key_data)
+    }
+}
+
+impl PartialEq for PublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.key_data == other.key_data
+    }
+}
+
+impl Eq for PublicKey {}
+
+impl fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_text())
+        f.debug_struct("PublicKey")
+            .field("name", &self.name)
+            .field("key", &format_args!("{}", self.key()))
+            .finish()
     }
 }
 
-impl FromStr for NarSignature {
-    type Err = SignatureError;
+impl fmt::Display for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.name(), self.key())
+    }
+}
+
+impl FromStr for PublicKey {
+    type Err = ParseKeyError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s)
+        let mut sp = s.splitn(2, ':');
+        let name = Arc::new(sp.next().ok_or(ParseKeyError::CorruptKey)?.to_string());
+        let key_s = sp.next().ok_or(ParseKeyError::CorruptKey)?;
+        if key_s.len() != PUBLIC_KEY_BASE64_LEN {
+            return Err(ParseKeyError::InvalidPublicKey);
+        }
+        let mut key_buf = [0u8; PUBLIC_KEY_BASE64_DECODED_LEN];
+        let len = BASE64
+            .decode_mut(key_s.as_bytes(), &mut key_buf)
+            .map_err(|_| ParseKeyError::InvalidPublicKey)?;
+        if len != PUBLIC_KEY_BYTES {
+            return Err(ParseKeyError::InvalidPublicKey);
+        }
+        let mut key_data = [0u8; PUBLIC_KEY_BYTES];
+        key_data.copy_from_slice(&key_buf[..PUBLIC_KEY_BYTES]);
+        let key = UnparsedPublicKey::new(&signature::ED25519, key_data);
+        Ok(PublicKey {
+            name,
+            key,
+            key_data,
+        })
+    }
+}
+
+#[derive(Error, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[error("error generating key")]
+pub struct GenerateKeyError;
+
+impl From<Unspecified> for GenerateKeyError {
+    fn from(_: Unspecified) -> Self {
+        GenerateKeyError
+    }
+}
+impl From<KeyRejected> for GenerateKeyError {
+    fn from(_: KeyRejected) -> Self {
+        GenerateKeyError
+    }
+}
+
+pub struct SecretKey {
+    name: Arc<String>,
+    key_data: [u8; SECRET_KEY_BYTES],
+    key: Ed25519KeyPair,
+}
+
+impl SecretKey {
+    pub fn generate(
+        name: String,
+        rng: &dyn rand::SecureRandom,
+    ) -> Result<SecretKey, GenerateKeyError> {
+        let name = Arc::new(name);
+        let seed: [u8; SEED_BYTES] = rand::generate(rng)?.expose();
+        let key = Ed25519KeyPair::from_seed_unchecked(&seed)?;
+        let pk = key.public_key();
+        let mut key_data = [0u8; SECRET_KEY_BYTES];
+        key_data[0..SEED_BYTES].copy_from_slice(&seed);
+        key_data[SEED_BYTES..SECRET_KEY_BYTES].copy_from_slice(pk.as_ref());
+        Ok(SecretKey {
+            name,
+            key,
+            key_data,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn key(&self) -> impl fmt::Display + '_ {
+        Base64Display::<SECRET_KEY_BASE64_LEN>(&self.key_data)
+    }
+
+    pub fn sign<M: AsRef<[u8]>>(&self, data: M) -> Signature {
+        let msg = data.as_ref();
+        let sig = self.key.sign(msg);
+        let mut sig_buf = [0u8; SIGNATURE_BYTES];
+        sig_buf.copy_from_slice(sig.as_ref());
+        Signature(self.name.clone(), sig_buf)
+    }
+
+    pub fn to_public_key(&self) -> PublicKey {
+        let name = self.name.clone();
+        let peer_public_key_bytes = self.key.public_key();
+        let mut key_buf = [0u8; PUBLIC_KEY_BYTES];
+        key_buf.copy_from_slice(peer_public_key_bytes.as_ref());
+        let key = UnparsedPublicKey::new(&signature::ED25519, key_buf);
+        let mut key_data = [0u8; PUBLIC_KEY_BYTES];
+        key_data.copy_from_slice(peer_public_key_bytes.as_ref());
+        PublicKey {
+            name,
+            key,
+            key_data,
+        }
+    }
+}
+
+impl fmt::Debug for SecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SecretKey")
+            .field("name", &self.name)
+            .field("key", &format_args!("{}", self.key()))
+            .finish()
+    }
+}
+impl fmt::Display for SecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.name(), self.key())
+    }
+}
+
+impl PartialEq for SecretKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.key_data == other.key_data
+    }
+}
+
+impl Eq for SecretKey {}
+
+impl From<SecretKey> for PublicKey {
+    fn from(v: SecretKey) -> Self {
+        v.to_public_key()
+    }
+}
+
+impl<'a> From<&'a SecretKey> for PublicKey {
+    fn from(v: &'a SecretKey) -> Self {
+        v.to_public_key()
+    }
+}
+
+impl FromStr for SecretKey {
+    type Err = ParseKeyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut sp = s.splitn(2, ':');
+        let name = Arc::new(sp.next().ok_or(ParseKeyError::CorruptKey)?.to_string());
+        let key_s = sp.next().ok_or(ParseKeyError::CorruptKey)?;
+        if key_s.len() != SECRET_KEY_BASE64_LEN {
+            return Err(ParseKeyError::InvalidSecretKey);
+        }
+        let mut key_b = [0u8; SECRET_KEY_BASE64_DECODED_LEN];
+        let len = BASE64
+            .decode_mut(key_s.as_bytes(), &mut key_b)
+            .map_err(|_| ParseKeyError::InvalidSecretKey)?;
+        if len != SECRET_KEY_BYTES {
+            return Err(ParseKeyError::InvalidSecretKey);
+        }
+        let mut key_data = [0u8; SECRET_KEY_BYTES];
+        key_data.copy_from_slice(&key_b[..SECRET_KEY_BYTES]);
+        let seed = &key_data[0..SEED_BYTES];
+        let public_key = &key_data[SEED_BYTES..SECRET_KEY_BYTES];
+        let key = Ed25519KeyPair::from_seed_and_public_key(seed, public_key)
+            .map_err(|_| ParseKeyError::InvalidSecretKey)?;
+        Ok(SecretKey {
+            name,
+            key,
+            key_data,
+        })
+    }
+}
+
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum FingerprintError {
+    #[error("NAR hash must start with 'sha256:'")]
+    InvalidNarHashPrefix,
+
+    #[error("NAR hash has invalid length: expected 59, got {0}")]
+    InvalidNarHashLength(usize),
+}
+
+/// Generate a fingerprint for signing a store path
+///
+/// The fingerprint format is:
+/// `1;<store-path>;<nar-hash>;<nar-size>;<comma-separated-references>`
+///
+/// # Arguments
+/// * `store_dir` - The Nix store directory
+/// * `store_path` - The store path to fingerprint
+/// * `nar_hash` - The NAR hash in format "sha256:..."
+/// * `nar_size` - The size of the NAR in bytes
+/// * `references` - Sorted references to other store paths
+pub fn fingerprint_path(
+    store_dir: &StoreDir,
+    store_path: &StorePath,
+    nar_hash: &[u8],
+    nar_size: u64,
+    references: &BTreeSet<StorePath>,
+) -> Result<Vec<u8>, FingerprintError> {
+    // Validate NAR hash
+    if !nar_hash.starts_with(b"sha256:") {
+        return Err(FingerprintError::InvalidNarHashPrefix);
+    }
+    if nar_hash.len() != 59 {
+        return Err(FingerprintError::InvalidNarHashLength(nar_hash.len()));
+    }
+
+    // Build the fingerprint
+    let nar_size_str = nar_size.to_string();
+    let nar_size_bytes = nar_size_str.as_bytes();
+
+    // Construct full store path string using StoreDir's display functionality
+    let store_path_str = format!("{}", store_dir.display(store_path));
+    let store_path_bytes = store_path_str.as_bytes();
+
+    // Calculate capacity
+    let fixed_len = 3 + // "1;"
+        store_path_bytes.len() + 1 + // store path + ";"
+        nar_hash.len() + 1 + // nar hash + ";"
+        nar_size_bytes.len() + 1; // nar size + ";"
+
+    let refs_len = if references.is_empty() {
+        0
+    } else {
+        // Each reference formatted with store_dir
+        references
+            .iter()
+            .map(|r| format!("{}", store_dir.display(r)).len())
+            .sum::<usize>()
+            + references.len().saturating_sub(1) // commas between refs
+    };
+
+    let mut result = Vec::with_capacity(fixed_len + refs_len);
+
+    // Add fixed parts
+    result.extend_from_slice(b"1;");
+    result.extend_from_slice(store_path_bytes);
+    result.push(b';');
+    result.extend_from_slice(nar_hash);
+    result.push(b';');
+    result.extend_from_slice(nar_size_bytes);
+    result.push(b';');
+
+    // Add references (comma-separated)
+    for (i, reference) in references.iter().enumerate() {
+        if i > 0 {
+            result.push(b',');
+        }
+        let ref_str = format!("{}", store_dir.display(reference));
+        result.extend_from_slice(ref_str.as_bytes());
+    }
+
+    Ok(result)
+}
+
+#[cfg(any(test, feature = "test"))]
+pub mod proptests {
+    use super::*;
+    use ::proptest::{arbitrary::Arbitrary, prelude::*};
+
+    pub fn arb_key_name(max: u8) -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9+\\-_?=][a-zA-Z0-9+\\-_?=.]{0,210}".prop_map(move |mut s| {
+            if s.len() > max as usize {
+                s.truncate(max as usize);
+            }
+            s
+        })
+    }
+
+    pub fn arb_signature(max: u8) -> impl Strategy<Value = Signature> {
+        (arb_key_name(max), any::<[u8; SIGNATURE_BYTES]>())
+            .prop_map(|(name, signature)| Signature(Arc::new(name), signature))
+    }
+
+    pub fn arb_signatures() -> impl Strategy<Value = BTreeSet<Signature>> {
+        prop::collection::btree_set(any::<Signature>(), 0..5)
+    }
+
+    impl Arbitrary for Signature {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Signature>;
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_signature(211).boxed()
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod unittests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
-    fn test_signature_roundtrip() {
-        let bytes = [42u8; 64];
-        let sig = Signature::from_bytes(&bytes).unwrap();
-        let base64 = sig.to_base64();
-        let sig2 = Signature::from_base64(&base64).unwrap();
-        assert_eq!(sig, sig2);
+    fn test_public_key() {
+        let sk_s = "cache.example.org-1:ZJui+kG6vPCSRD4+p1P4DyUVlASmp/zsaeN84PTFW28tj2/PtQWvFWK6Mw+ay8kGif8AZkR5KosHLvuwlzDlgg==";
+        let sk: SecretKey = sk_s.parse().unwrap();
+        assert_eq!("cache.example.org-1", sk.name());
+        let pk_s = "cache.example.org-1:LY9vz7UFrxViujMPmsvJBon/AGZEeSqLBy77sJcw5YI=";
+        let pk: PublicKey = pk_s.parse().unwrap();
+        assert_eq!("cache.example.org-1", pk.name());
+        assert_eq!(sk.to_public_key(), pk);
+        assert_eq!(sk.to_string(), sk_s);
+        assert_eq!(pk.to_string(), pk_s);
     }
 
     #[test]
-    fn test_nar_signature_parse() {
-        let text = "cache.example.com-1:6wzr1QlOPHG+knFuJIaw+85Z5ivwbdI512JikexG+nQ7JDSZM2hw8zzlcLrguzoLEpCA9VzaEEQflZEHVwy9AA==";
-        let nar_sig = NarSignature::parse(text).unwrap();
-        assert_eq!(nar_sig.key_name, "cache.example.com-1");
-        assert_eq!(nar_sig.to_text(), text);
+    fn test_generate() {
+        let rng = rand::SystemRandom::new();
+        let sk_gen = SecretKey::generate("cache.example.org-1".into(), &rng).unwrap();
+        let sk_s = sk_gen.to_string();
+        let sk: SecretKey = sk_s.parse().unwrap();
+        assert_eq!(sk_gen, sk);
+        assert_eq!(sk.to_string(), sk_s);
+        let pk_s = sk_gen.to_public_key().to_string();
+        let pk: PublicKey = pk_s.parse().unwrap();
+        assert_eq!(sk.to_public_key(), pk);
+        assert_eq!(pk.to_string(), pk_s);
     }
 
     #[test]
-    fn test_invalid_signature_length() {
-        let bytes = [0u8; 32];
-        let err = Signature::from_bytes(&bytes).unwrap_err();
-        match err {
-            SignatureError::InvalidLength(32) => {}
-            _ => panic!("Expected InvalidLength error"),
-        }
+    fn test_verify() {
+        let data = "1;/nix/store/02bfycjg1607gpcnsg8l13lc45qa8qj3-libssh2-1.10.0;sha256:1l29f8r5q2739wnq4i7m2v545qx77b3wrdsw9xz2ajiy3hv1al8b;294664;/nix/store/02bfycjg1607gpcnsg8l13lc45qa8qj3-libssh2-1.10.0,/nix/store/1l4r0r4ab3v3a3ppir4jwiah3icalk9d-zlib-1.2.11,/nix/store/gf6j3k1flnhayvpnwnhikkg0s5dxrn1i-openssl-1.1.1l,/nix/store/z56jcx3j1gfyk4sv7g8iaan0ssbdkhz1-glibc-2.33-56";
+        let s : Signature = "cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==".parse().unwrap();
+        assert_eq!("cache.nixos.org-1", s.name());
+        assert_eq!(
+            s.to_string(),
+            "cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="
+        );
+        let pk: PublicKey = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+            .parse()
+            .unwrap();
+        assert!(pk.verify(data, &s));
+    }
+
+    #[test]
+    fn test_sign() {
+        let data = "1;/nix/store/02bfycjg1607gpcnsg8l13lc45qa8qj3-libssh2-1.10.0;sha256:1l29f8r5q2739wnq4i7m2v545qx77b3wrdsw9xz2ajiy3hv1al8b;294664;/nix/store/02bfycjg1607gpcnsg8l13lc45qa8qj3-libssh2-1.10.0,/nix/store/1l4r0r4ab3v3a3ppir4jwiah3icalk9d-zlib-1.2.11,/nix/store/gf6j3k1flnhayvpnwnhikkg0s5dxrn1i-openssl-1.1.1l,/nix/store/z56jcx3j1gfyk4sv7g8iaan0ssbdkhz1-glibc-2.33-56";
+        let sk_s = "cache.example.org-1:ZJui+kG6vPCSRD4+p1P4DyUVlASmp/zsaeN84PTFW28tj2/PtQWvFWK6Mw+ay8kGif8AZkR5KosHLvuwlzDlgg==";
+        let sk: SecretKey = sk_s.parse().unwrap();
+        let pk_s = "cache.example.org-1:LY9vz7UFrxViujMPmsvJBon/AGZEeSqLBy77sJcw5YI=";
+        let pk: PublicKey = pk_s.parse().unwrap();
+
+        let s = sk.sign(data);
+        assert!(pk.verify(data, &s));
+    }
+
+    #[test]
+    fn test_fingerprint() {
+        let store_dir = StoreDir::new("/nix/store").unwrap();
+        let store_path =
+            StorePath::from_bytes(b"syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin").unwrap();
+        let nar_hash = b"sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0";
+        let mut references = BTreeSet::new();
+        references.insert(
+            StorePath::from_bytes(b"0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0").unwrap(),
+        );
+        let fingerprint =
+            fingerprint_path(&store_dir, &store_path, nar_hash, 196040, &references).unwrap();
+        let expected = b"1;/nix/store/syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin;sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0;196040;/nix/store/0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0";
+        assert_eq!(fingerprint, expected);
     }
 }

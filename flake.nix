@@ -9,6 +9,11 @@
   inputs.treefmt-nix.url = "github:numtide/treefmt-nix";
   inputs.treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   inputs.crane.url = "github:ipetkov/crane";
+  inputs.nix = {
+    url = "github:nixos/nix";
+    # We just need some test data, we're not building upstream nix.
+    flake = false;
+  };
 
   outputs =
     inputs@{ flake-parts, ... }:
@@ -32,6 +37,7 @@
             let
               packageSet = pkgs.callPackages ./packages.nix {
                 crane = inputs.crane;
+                nix-src = inputs.nix;
               };
             in
             {
@@ -53,7 +59,9 @@
             }
             // packages
             // devShells;
-          devShells.default = pkgs.callPackage ./devShell.nix { };
+          devShells.default = pkgs.callPackage ./devShell.nix {
+            nix-src = inputs.nix;
+          };
 
           treefmt = {
             # Used to find the project root
@@ -72,7 +80,10 @@
         { lib, ... }:
         {
           imports = [
-            (lib.modules.importApply ./module.nix { crane = inputs.crane; })
+            (lib.modules.importApply ./module.nix {
+              crane = inputs.crane;
+              nix-src = inputs.nix;
+            })
           ];
         };
     };

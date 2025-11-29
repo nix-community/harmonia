@@ -1,7 +1,7 @@
 use harmonia_daemon::config::Config;
 use harmonia_daemon::error::{DaemonError, IoContext};
 use harmonia_daemon::handler::LocalStoreHandler;
-use harmonia_store_remote::server::DaemonServer;
+use harmonia_daemon::server::DaemonServer;
 use log::{error, info};
 use std::path::PathBuf;
 use tokio::signal;
@@ -23,10 +23,14 @@ async fn main() -> Result<(), DaemonError> {
     info!("Database path: {}", config.db_path.display());
 
     // Create the local store handler
-    let handler = LocalStoreHandler::new(config.store_dir, config.db_path).await?;
+    let handler = LocalStoreHandler::new(config.store_dir.clone(), config.db_path).await?;
+
+    // Create StoreDir for protocol serialization
+    let store_dir = harmonia_store_core::store_path::StoreDir::new(&config.store_dir)
+        .map_err(|e| DaemonError::config(format!("Invalid store directory: {e}")))?;
 
     // Create and start the daemon server
-    let server = DaemonServer::new(handler, config.socket_path.clone());
+    let server = DaemonServer::new(handler, config.socket_path.clone(), store_dir);
 
     // Set up signal handlers
     let shutdown = shutdown_signal();
@@ -36,7 +40,7 @@ async fn main() -> Result<(), DaemonError> {
         result = server.serve() => {
             if let Err(e) = result {
                 error!("Server error: {e}");
-                return Err(DaemonError::Protocol(e));
+                return Err(DaemonError::io("Server error", e));
             }
         }
         _ = shutdown => {

@@ -1,9 +1,11 @@
 use crate::error::{CacheError, ConfigError, Result};
 use crate::store::Store;
-use harmonia_store_core::SigningKey;
+use harmonia_store_core::signature::SecretKey;
+use harmonia_store_remote::{PoolMetrics, pool::PoolConfig};
 use serde::Deserialize;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn default_bind() -> String {
     "[::]:5000".into()
@@ -68,19 +70,12 @@ pub(crate) struct Config {
     pub(crate) daemon_socket: PathBuf,
 
     #[serde(skip, default)]
-    pub(crate) secret_keys: Vec<SigningKey>,
+    pub(crate) secret_keys: Vec<SecretKey>,
     #[serde(skip)]
     pub(crate) store: Store,
 }
 
 impl Config {
-    pub fn set_pool_metrics(
-        &mut self,
-        metrics: std::sync::Arc<harmonia_store_remote::client::ClientMetrics>,
-    ) {
-        self.store.pool_config.metrics = Some(metrics);
-    }
-
     pub(crate) fn load(settings_file: &Path) -> Result<Config> {
         let contents = read_to_string(settings_file).map_err(|e| ConfigError::ReadFile {
             path: settings_file.display().to_string(),
@@ -90,7 +85,7 @@ impl Config {
     }
 }
 
-pub(crate) fn load() -> Result<Config> {
+pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
     let mut settings = match std::env::var("CONFIG_FILE") {
         Err(_) => {
             if Path::new("settings.toml").exists() {
@@ -127,19 +122,28 @@ pub(crate) fn load() -> Result<Config> {
         }
     }
     for sign_key_path in &settings.sign_key_paths {
-        settings
-            .secret_keys
-            .push(SigningKey::from_file(sign_key_path).map_err(|e| {
-                ConfigError::InvalidSigningKey {
+        let key_content =
+            read_to_string(sign_key_path).map_err(|e| ConfigError::InvalidSigningKey {
+                reason: format!(
+                    "Couldn't read secret key from '{}': {}",
+                    sign_key_path.display(),
+                    e
+                ),
+            })?;
+        let key: SecretKey =
+            key_content
+                .trim()
+                .parse()
+                .map_err(|e| ConfigError::InvalidSigningKey {
                     reason: format!(
                         "Couldn't parse secret key from '{}': {}",
                         sign_key_path.display(),
                         e
                     ),
-                }
-            })?);
+                })?;
+        settings.secret_keys.push(key);
     }
-    let store_dir = std::env::var_os("NIX_STORE_DIR")
+    let virtual_store_dir = std::env::var_os("NIX_STORE_DIR")
         .map(|s| s.into_encoded_bytes())
         .unwrap_or_else(|| {
             settings
@@ -148,16 +152,24 @@ pub(crate) fn load() -> Result<Config> {
                 .as_encoded_bytes()
                 .to_vec()
         });
+    // For daemon communication, use real_nix_store if set (chroot mode),
+    // otherwise use the virtual store path
+    let daemon_store_dir = settings
+        .real_nix_store
+        .as_ref()
+        .map(|p| p.as_os_str().as_encoded_bytes().to_vec())
+        .unwrap_or_else(|| virtual_store_dir.clone());
     settings.store = Store::new(
-        store_dir,
+        virtual_store_dir,
+        daemon_store_dir,
         settings
             .real_nix_store
             .clone()
             .map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
         settings.daemon_socket.clone(),
-        harmonia_store_remote::client::PoolConfig {
-            // Pool size should be at least workers + 1 for some headroom
+        PoolConfig {
             max_size: settings.workers + 1,
+            metrics: pool_metrics,
             ..Default::default()
         },
     );

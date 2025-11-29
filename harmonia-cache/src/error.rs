@@ -18,14 +18,11 @@ pub enum CacheError {
     #[error("Store error: {0}")]
     Store(#[from] StoreError),
 
-    #[error("NAR processing error: {0}")]
-    Nar(#[from] NarError),
-
     #[error("Signing error: {0}")]
-    Signing(#[from] harmonia_store_core::SigningError),
+    Signing(#[from] harmonia_store_core::signature::ParseKeyError),
 
     #[error("Fingerprint error: {0}")]
-    Fingerprint(#[from] harmonia_store_core::FingerprintError),
+    Fingerprint(#[from] harmonia_store_core::signature::FingerprintError),
 
     #[error("NARInfo error: {0}")]
     NarInfo(#[from] NarInfoError),
@@ -70,40 +67,20 @@ pub enum StoreError {
     #[error("Failed to query path for hash {hash}: {reason}")]
     PathQuery { hash: String, reason: String },
 
-    #[error("Store operation failed: {reason}")]
-    Operation { reason: String },
-
-    #[error("Remote store error: {0}")]
-    Remote(#[from] harmonia_store_remote::ProtocolError),
-}
-
-#[derive(Error, Debug)]
-pub enum NarError {
-    #[error("Failed to read NAR file {path}: {source}")]
-    ReadFile {
-        path: String,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("Failed to read symlink target for {path}: {source}")]
-    SymlinkRead {
-        path: String,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("Failed to stream NAR: {reason}")]
-    Streaming { reason: String },
-
-    #[error("Channel send failed: {reason}")]
-    ChannelSend { reason: String },
+    #[error("Daemon communication error: {0}")]
+    Remote(#[from] harmonia_store_remote::DaemonError),
 }
 
 #[derive(Error, Debug)]
 pub enum NarInfoError {
     #[error("Failed to query path info: {reason}")]
     QueryFailed { reason: String },
+
+    #[error("Invalid UTF-8 in store directory: {0}")]
+    InvalidUtf8(#[from] std::str::Utf8Error),
+
+    #[error("Invalid store directory: {0}")]
+    InvalidStoreDir(String),
 }
 
 #[derive(Error, Debug)]

@@ -1,5 +1,20 @@
 [workspace]
-members = ["harmonia-cache", "harmonia-client", "harmonia-daemon", "harmonia-store-core", "harmonia-store-remote"]
+members = [
+  "harmonia-client",
+  "harmonia-utils-io",
+  "harmonia-utils-base-encoding",
+  "harmonia-utils-hash",
+  "harmonia-store-core",
+  "harmonia-store-db",
+  "harmonia-store-remote",
+  "harmonia-nar",
+  "harmonia-protocol",
+  "harmonia-protocol-derive",
+  "harmonia-ssh-store",
+  "harmonia-cache",
+  "harmonia-daemon",
+  "harmonia-utils-test",
+]
 resolver = "2"
 
 [workspace.package]
@@ -27,6 +42,36 @@ base64 = "0.22"
 ed25519-dalek = "2.1"
 prometheus = { version = "0.14", default-features = false }
 nix = { version = "0.30", features = ["signal"] }
+
+# Dependencies for Nix.rs import (spec 001-nixrs-base)
+bytes = "1.10"
+data-encoding = "2.6"
+md5 = "0.7"
+num_enum = "0.7"
+derive_more = { version = "2.0", features = ["display"] }
+parking_lot = { version = "0.12", features = ["arc_lock"] }
+pin-project-lite = "0.2"
+futures = "0.3"
+tokio-util = "0.7"
+ring = "0.17"
+once_cell = "1.19"
+tracing = "0.1"
+tracing-futures = "0.2"
+
+# Proc macro dependencies for harmonia-protocol
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = "2.0"
+
+# Dev dependencies for property-based testing
+proptest = "1.6"
+rstest = "0.25"
+tempfile = "3.10"
+test-strategy = "0.4"
+pretty_assertions = "1.4"
+
+# Database
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

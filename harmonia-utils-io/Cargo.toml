@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
+# SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "harmonia-utils-io"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Async I/O utilities for Harmonia"
+readme = "README.md"
+
+[dependencies]
+bytes = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+pin-project-lite = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "sync"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+hex-literal = "0.4"
+proptest = { workspace = true }
+rstest = { workspace = true }
+test-log = "0.2"
+test-strategy = { workspace = true }
+tokio-test = "0.4"
+
+[lints]
+workspace = true

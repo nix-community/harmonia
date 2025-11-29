@@ -1,15 +1,12 @@
-use std::path::Path;
-
 use crate::error::{CacheError, NarInfoError, Result, StoreError};
 use actix_web::{HttpResponse, http, web};
-use harmonia_store_remote::protocol::StorePath;
+use harmonia_store_core::store_path::StorePath;
+use harmonia_store_remote::DaemonStore;
 use serde::{Deserialize, Serialize};
-use std::os::unix::ffi::OsStrExt;
 
 use crate::config::Config;
 use crate::{cache_control_max_age_1d, nixhash, some_or_404};
-use harmonia_store_core::SigningKey;
-use harmonia_store_core::fingerprint_path;
+use harmonia_store_core::signature::{SecretKey, fingerprint_path};
 
 #[derive(Debug, Deserialize)]
 pub struct Param {
@@ -29,23 +26,17 @@ struct NarInfo {
     ca: Option<Vec<u8>>,
 }
 
-fn extract_filename(path: &[u8]) -> Option<Vec<u8>> {
-    Path::new(std::ffi::OsStr::from_bytes(path))
-        .file_name()
-        .map(|v| v.as_bytes().to_vec())
-}
-
 async fn query_narinfo(
     virtual_nix_store: &[u8],
     store_path: &StorePath,
     hash: &str,
-    sign_keys: &Vec<SigningKey>,
+    sign_keys: &[SecretKey],
     settings: &web::Data<Config>,
 ) -> Result<Option<NarInfo>> {
-    let mut daemon_guard = settings.store.get_daemon().await?;
-    let daemon = daemon_guard.as_mut().unwrap();
+    let mut guard = settings.store.acquire().await?;
 
-    let path_info = match daemon
+    let path_info = match guard
+        .client()
         .query_path_info(store_path)
         .await
         .map_err(|e| CacheError::from(StoreError::Remote(e)))?
@@ -55,47 +46,63 @@ async fn query_narinfo(
             return Ok(None);
         }
     };
-    let nar_hash = path_info.hash.to_nix_base32();
+    // as_base32() already includes the "sha256:" prefix
+    let nar_hash = format!("{}", path_info.nar_hash.as_base32()).into_bytes();
+    // For URL, we need just the bare hash (without sha256: prefix)
+    let nar_hash_bare = format!("{}", path_info.nar_hash.as_base32().as_bare()).into_bytes();
+    // Build full store path with virtual store prefix
+    let store_path_str = store_path.to_string();
+    let full_store_path = crate::build_bytes!(virtual_nix_store, b"/", store_path_str.as_bytes(),);
     let mut res = NarInfo {
-        store_path: store_path.as_bytes().to_vec(),
-        url: crate::build_bytes!(b"nar/", &nar_hash, b".nar?hash=", hash.as_bytes(),),
+        store_path: full_store_path,
+        url: crate::build_bytes!(b"nar/", &nar_hash_bare, b".nar?hash=", hash.as_bytes(),),
         compression: b"none".to_vec(),
-        nar_hash: crate::build_bytes!(b"sha256:", &nar_hash,),
+        nar_hash: nar_hash.clone(),
         nar_size: path_info.nar_size,
         references: vec![],
+        // Deriver and References use just the basename (hash-name), not full paths
         deriver: path_info
             .deriver
             .as_ref()
-            .and_then(|d| extract_filename(d.as_bytes())),
+            .map(|d| d.to_string().as_bytes().to_vec()),
         sigs: vec![],
-        ca: path_info.content_address.clone(),
+        ca: path_info.ca.as_ref().map(|ca| ca.to_string().into_bytes()),
     };
 
     if !path_info.references.is_empty() {
         res.references = path_info
             .references
             .iter()
-            .filter_map(|r| extract_filename(r.as_bytes()))
+            .map(|r| r.to_string().as_bytes().to_vec())
             .collect::<Vec<Vec<u8>>>();
     }
 
+    // Convert virtual_nix_store bytes to StoreDir
+    let store_dir = harmonia_store_core::store_path::StoreDir::new(
+        std::str::from_utf8(virtual_nix_store)
+            .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidUtf8(e)))?,
+    )
+    .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidStoreDir(format!("{}", e))))?;
+
     let fingerprint = fingerprint_path(
-        virtual_nix_store,
+        &store_dir,
         store_path,
         &res.nar_hash,
         res.nar_size,
         &path_info.references,
     )?;
-    let fingerprint = Some(fingerprint);
     for sk in sign_keys {
-        if let Some(ref fp) = fingerprint {
-            let signature = sk.sign_string(fp);
-            res.sigs.push(signature.into_bytes());
-        }
+        let signature = sk.sign(&fingerprint);
+        res.sigs.push(signature.to_string().into_bytes());
     }
 
     if res.sigs.is_empty() {
-        res.sigs = path_info.signatures.clone();
+        // Convert Signature objects to their string representation
+        res.sigs = path_info
+            .signatures
+            .iter()
+            .map(|sig| sig.to_string().into_bytes())
+            .collect();
     }
 
     Ok(Some(res))
