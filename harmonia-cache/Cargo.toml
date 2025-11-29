@@ -46,6 +46,7 @@ prometheus = { workspace = true }
 pkg-config = "0.3"
 
 [dev-dependencies]
+harmonia-utils-test = { path = "../harmonia-utils-test" }
 nix = { workspace = true }
 
 [lints]

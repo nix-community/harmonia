@@ -1,10 +1,11 @@
 use std::fs;
 use std::process::Command;
-use tempfile::TempDir;
 
 mod daemon;
 
-use daemon::{Daemon, DaemonConfig, HarmoniaDaemon, pick_unused_port, start_harmonia_cache};
+use daemon::{
+    CanonicalTempDir, Daemon, DaemonConfig, HarmoniaDaemon, pick_unused_port, start_harmonia_cache,
+};
 
 // Compile in the test TLS certificates from the repo
 const TLS_CERT: &str = include_str!("../../tests/tls-cert.pem");
@@ -14,7 +15,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::test]
 async fn test_tls() -> Result<()> {
-    let temp_dir = TempDir::new()?;
+    let temp_dir = CanonicalTempDir::new()?;
 
     // Set up daemon
     let daemon_config = DaemonConfig {
