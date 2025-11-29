@@ -29,6 +29,7 @@
 
 pub mod daemon_wire;
 pub mod de;
+pub mod log;
 pub mod ser;
 pub mod types;
 pub mod version;

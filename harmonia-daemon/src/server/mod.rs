@@ -33,11 +33,11 @@ use harmonia_protocol::daemon::{
     },
 };
 use harmonia_protocol::de::{NixRead, NixReader};
+use harmonia_protocol::log::LogMessage;
 use harmonia_protocol::ser::{NixWrite, NixWriter};
 use harmonia_protocol::types::{AddToStoreItem, DaemonPath};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
-use harmonia_store_core::log::LogMessage;
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{

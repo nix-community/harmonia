@@ -1,14 +1,30 @@
+// SPDX-FileCopyrightText: 2024 griff
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-License-Identifier: EUPL-1.2 OR MIT
+//
+// Logging types for the Nix daemon protocol.
+
+use bytes::Bytes;
 use num_enum::{FromPrimitive, IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 #[cfg(any(test, feature = "test"))]
 use test_strategy::Arbitrary;
 
-use crate::ByteString;
 #[cfg(test)]
-use harmonia_protocol::daemon::ProtocolVersion;
+use crate::ProtocolVersion;
 
 #[cfg(any(test, feature = "test"))]
-use crate::test::arbitrary::arb_byte_string;
+use harmonia_utils_test::arb_byte_string;
+
+pub type ByteString = Bytes;
+
+fn serialize_byte_string<S>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let s = String::from_utf8_lossy(bytes);
+    serializer.serialize_str(&s)
+}
 
 #[derive(
     Debug,
@@ -152,7 +168,7 @@ impl proptest::arbitrary::Arbitrary for LogMessage {
 pub struct Message {
     pub level: Verbosity,
     #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
-    #[serde(rename = "msg", serialize_with = "crate::serialize_byte_string")]
+    #[serde(rename = "msg", serialize_with = "serialize_byte_string")]
     pub text: ByteString,
 }
 
@@ -165,7 +181,7 @@ pub struct Activity {
     pub level: Verbosity,
     pub parent: u64,
     #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
-    #[serde(serialize_with = "crate::serialize_byte_string")]
+    #[serde(serialize_with = "serialize_byte_string")]
     pub text: ByteString, // If logger is JSON, invalid UTF-8 is replaced with U+FFFD
     #[serde(rename = "type")]
     pub activity_type: ActivityType,
@@ -203,7 +219,7 @@ pub enum Field {
     Int(u64),
     String(
         #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
-        #[serde(serialize_with = "crate::serialize_byte_string")]
+        #[serde(serialize_with = "serialize_byte_string")]
         ByteString,
     ),
 }
@@ -212,7 +228,7 @@ pub enum Field {
 mod unittests {
     use rstest::rstest;
 
-    use crate::log::{
+    use super::{
         Activity, ActivityResult, ActivityType, Field, LogMessage, Message, ResultType,
         StopActivity, Verbosity,
     };
