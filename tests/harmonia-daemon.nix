@@ -1,5 +1,5 @@
 { pkgs, self }:
-pkgs.nixosTest {
+pkgs.testers.nixosTest {
   name = "harmonia-daemon";
   globalTimeout = 120;
   nodes = {

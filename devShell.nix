@@ -14,6 +14,7 @@
       rustc
       cargo
       cargo-watch
+      cargo-llvm-cov
     ];
 
     buildInputs = with pkgs; [

@@ -84,6 +84,36 @@ let
     }
   );
 
+  # Test derivation - runs tests with llvm-cov, outputs lcov report
+  tests = craneLib.cargoLlvmCov (
+    commonArgs
+    // {
+      inherit cargoArtifacts;
+      cargoLlvmCovExtraArgs = "--codecov --output-path $out --remap-path-prefix";
+      nativeBuildInputs = [
+        nix
+        curl
+      ];
+      preBuild = ''
+        export NIX_UPSTREAM_SRC=${nix-src}
+        export LLVM_COV=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-cov
+        export LLVM_PROFDATA=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-profdata
+
+        # Build binaries with coverage instrumentation for integration tests
+        # Use a SEPARATE target directory to avoid cargo-llvm-cov cleaning them up
+        export RUSTFLAGS="-C instrument-coverage --cfg=coverage"
+        export LLVM_PROFILE_FILE="$(pwd)/target/llvm-cov-target/harmonia-%p-%m.profraw"
+        cargo build --release --bins --target-dir target/harmonia-bins
+
+        # Point tests to our separately-built binaries
+        export HARMONIA_BIN=$(pwd)/target/harmonia-bins/release
+      ''
+      + lib.optionalString pkgs.stdenv.isDarwin ''
+        export _NIX_TEST_NO_SANDBOX="1"
+      '';
+    }
+  );
+
   # Clippy check derivation
   clippy = craneLib.cargoClippy (
     commonArgs
@@ -94,6 +124,6 @@ let
   );
 in
 {
-  inherit harmonia clippy;
+  inherit harmonia clippy tests;
   default = harmonia;
 }
