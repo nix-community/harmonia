@@ -96,8 +96,8 @@ use tokio::io::{AsyncBufRead, AsyncRead};
 use tracing::{error, trace};
 
 use super::radix_tree::{RLookup, RMatch, RTree};
-use harmonia_store_core::io::{AsyncBytesRead, DrainInto};
-use harmonia_store_core::wire::{ZEROS, calc_aligned};
+use crate::wire::{ZEROS, calc_aligned};
+use harmonia_io::{AsyncBytesRead, DrainInto};
 
 // https://github.com/rust-lang/rust/issues/131415
 #[allow(unsafe_code)]

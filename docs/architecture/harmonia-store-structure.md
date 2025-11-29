@@ -40,25 +40,25 @@ Pure core layer enables:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  Application Layer                                    │
+│  Application Layer                                   │
 │  - harmonia-cache (HTTP cache server)                │
 │  - harmonia-daemon (Store daemon server)             │
 │  - harmonia-client (Daemon client library)           │
-│                                                       │
+│                                                      │
 │  Role: Business logic, user-facing APIs              │
 └──────────────────────────────────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────┐
-│  Protocol Layer                                       │
-│  - harmonia-protocol                                  │
+│  Protocol Layer                                      │
+│  - harmonia-protocol                                 │
 │    · Wire protocol types (handshake, operations)     │
 │    · Serialization/deserialization                   │
 │    · Derive macros for protocol messages             │
-│                                                       │
+│                                                      │
 │  Role: Define how store operations are communicated  │
 └──────────────────────────────────────────────────────┘
                          ↓
-┌────────────────────────────┬─────────────────────────────┐
+┌────────────────────────────┬──────────────────────────────┐
 │  Format Layer              │  Database Layer              │
 │  - harmonia-nar            │  - harmonia-store-db         │
 │    · NAR packing/unpacking │    · SQLite store metadata   │
@@ -66,26 +66,31 @@ Pure core layer enables:
 │    · Streaming NAR ops     │    · DerivationOutputs       │
 │                            │    · Realisations (CA)       │
 │  Role: Archive format      │  Role: Store metadata access │
-└────────────────────────────┴─────────────────────────────┘
+└────────────────────────────┴──────────────────────────────┘
                          ↓
-┌──────────────────────────────────────────────────────┐
-│  Core Layer (Pure Semantics)                         │
-│  - harmonia-store-core                               │
-│    · Store path types and validation                 │
-│    · Content addressing (hashes, hash types)         │
-│    · Derivation parsing and building                 │
-│    · Reference graph computation                     │
-│    · Signature verification                          │
-│                                                       │
-│  Role: Define WHAT operations mean, not HOW to do IO │
-└──────────────────────────────────────────────────────┘
+┌───────────────────────────────────────┬──────────────────────────────────────┐
+│  Core Layer (Pure Semantics)          │  I/O Primitives Layer                │
+│  - harmonia-store-core                │  - harmonia-io                       │
+│    · Store path types and validation  │    · Async byte stream reading       │
+│    · Content addressing (hashes)      │    · Buffer management (BytesReader) │
+│    · Derivation parsing and building  │    · Wire protocol primitives        │
+│    · Reference graph computation      │    · Streaming utilities             │
+│    · Signature verification           │                                      │
+│                                       │                                      │
+│  Role: WHAT operations mean           │  Role: Reusable async I/O blocks     │
+│  (no IO, no async, pure functions)    │  (no store semantics)                │
+└───────────────────────────────────────┴──────────────────────────────────────┘
 ```
 
 ## Crate Responsibilities
 
 ### harmonia-store-core (Core)
 
-**Purpose**: Pure store semantics, agnostic to IO
+**Purpose**:
+Pure store semantics, agnostic to IO / implementation strategy in general.
+This is the "business logic" of Nix, pure and simple.
+It should be usable with a wide variety of implementation strategies, not forcing any decisions.
+It should also be widely usable by other tools which need to engage with Nix (e.g. tools that create dynamic derivations from other build systems' build plans).
 
 **Contents** (from Nix.rs):
 - `hash/` - Hash types, algorithms, content addressing
@@ -105,6 +110,44 @@ Pure core layer enables:
 pub fn parse_store_path(path: &str) -> Result<StorePath, ParseError>;
 pub fn compute_hash(content: &[u8], hash_type: HashType) -> Hash;
 pub fn verify_signature(path: &StorePath, sig: &Signature) -> bool;
+```
+
+### harmonia-io (I/O Primitives)
+
+**Purpose**:
+Somewhat the opposite of harmonia-store-core
+Reusable async I/O building blocks, very much geared towards specific protocols that nix happens to use today (e.g. NAR).
+But on the flip side, while it is implementation-specific, it is somewhat purpose-/interface-agnostic --- nothing in here is really "Nix-specific", nothing in here is "business logic".
+
+`harmonia-store-core` and `harmonia-io` are jointly used together to support the other crates, which actually make a Nix implementation / various applications.
+
+**Contents** (from Nix.rs):
+- `AsyncBytesRead` - Async trait for reading byte streams with buffering
+- `BytesReader` - Buffered async byte reader with configurable buffer sizes
+- `Lending` / `LentReader` - Reader lending for composable stream processing
+- `DrainInto` - Drain remaining bytes from a reader
+- `TeeWriter` - Write to two destinations simultaneously
+- `wire` - Wire protocol primitives (padding, alignment, zero bytes)
+
+**Key Characteristic**: Foundation for streaming I/O
+- Provides building blocks used by harmonia-nar, harmonia-protocol, and higher layers
+- Independent of harmonia-store-core (no store semantics)
+- Async-first design with bounded memory usage
+
+**Example API**:
+```rust
+// Async byte reading with buffering
+pub trait AsyncBytesRead: AsyncRead {
+    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<Bytes>>;
+    fn consume(self: Pin<&mut Self>, amt: usize);
+}
+
+// Wire protocol utilities
+pub mod wire {
+    pub const ZEROS: [u8; 8] = [0u8; 8];
+    pub const fn calc_padding(len: u64) -> usize;
+    pub const fn calc_aligned(len: u64) -> u64;
+}
 ```
 
 ### harmonia-store-db (Database)
@@ -297,28 +340,31 @@ response.send_stream(nar_stream).await?;
 ### 3. Clear Dependency Graph
 
 ```
-harmonia-store-core (no dependencies on other harmonia crates)
+    harmonia-io              harmonia-store-core
+    (no harmonia deps)       (no harmonia deps)
+         ↑                         ↑
+         │                         │
+         ├─────────────────────────┤
+         │                         │
+    harmonia-nar              harmonia-store-db
+    (depends on: io)          (depends on: store-core)
          ↑
          │
-    harmonia-nar (depends on: store-core for types)
+ harmonia-protocol (depends on: io, store-core, nar)
          ↑
-         │
- harmonia-protocol (depends on: store-core for types)
-         ↑
-         ├────────────────┐
-         │                │
-  harmonia-daemon   harmonia-client
-  (depends on:      (depends on:
-   store-core,     store-core,
-   nar,              protocol)
-   protocol)
-         │                │
-         └────────┬───────┘
-                  │
-           harmonia-cache
-           (depends on:
-            client,
-            nar for direct serving)
+         ├────────────────────────────┐
+         │                            │
+  harmonia-daemon             harmonia-store-remote
+  (depends on:                (depends on:
+   io, store-core,            io, store-core,
+   nar, protocol)             protocol, nar)
+         │                            │
+         └────────────┬───────────────┘
+                      │
+               harmonia-cache
+               (depends on:
+                store-remote,
+                nar for direct serving)
 ```
 
 ### 4. Performance Optimization
@@ -341,9 +387,10 @@ response.send_stream(nar_stream).await?;                   // harmonia-cache
 
 | hnix-store | Harmonia | Notes |
 |------------|----------|-------|
+| (internal) | harmonia-io | Async I/O primitives (extracted for reuse) |
 | hnix-store-core | harmonia-store-core | Pure semantics, types |
 | hnix-store-nar | harmonia-nar | Archive format |
-| hnix-store-json | harmonia-protocol | Wire protocol (not just JSON) |
+| hnix-store-json | harmonia-protocol | Wire protocol (not just JSON). (JSON is actually in harmonia-store-core, because Rust doesn't support orphan instances.) |
 | hnix-store-remote | harmonia-client | Daemon client |
 | hnix-store-db | harmonia-store-db | SQLite DB for store metadata |
 | hnix-store-readonly | (future) | Could add as separate crate |
@@ -351,6 +398,14 @@ response.send_stream(nar_stream).await?;                   // harmonia-cache
 **Key Difference**: Harmonia has a separate `harmonia-daemon` server implementation, whereas hnix-store focuses on client-side store abstractions.
 
 ## Implementation Guidelines
+
+### I/O Primitives Layer Rules
+
+1. **No store semantics**: Generic async I/O utilities only
+2. **Async-first**: Designed for non-blocking I/O
+3. **Bounded memory**: Configurable buffer sizes, no unbounded growth
+4. **Composable**: Traits and utilities that work together
+5. **Zero-copy where possible**: Minimize data copying
 
 ### Core Layer Rules
 
@@ -393,11 +448,20 @@ response.send_stream(nar_stream).await?;                   // harmonia-cache
 When reviewing code, ensure:
 
 **Core layer** (harmonia-store-core):
+- [ ] No I/O, should be all pure.
+- [ ] Hardly any `std::io`, therefore
 - [ ] No `use tokio::fs` or network imports
 - [ ] No `async` in public API
 - [ ] All functions are deterministic
 - [ ] Comprehensive unit tests
 - [ ] Property-based tests for core operations
+
+**I/O primitives layer** (harmonia-io):
+- [ ] No store-specific types or logic
+- [ ] Uses generic async I/O traits
+- [ ] Buffer sizes are configurable
+- [ ] Memory usage is bounded
+- [ ] Tests use mock I/O (tokio-test)
 
 **Format layer** (harmonia-nar):
 - [ ] Uses generic AsyncRead/AsyncWrite traits

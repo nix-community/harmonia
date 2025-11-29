@@ -43,7 +43,7 @@ use harmonia_protocol::ser::{NixWrite, NixWriter};
 use harmonia_protocol::types::{AddToStoreItem, DaemonPath};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
-use harmonia_store_core::io::{AsyncBufReadCompat, BytesReader};
+use harmonia_io::{AsyncBufReadCompat, BytesReader};
 use harmonia_store_core::log::LogMessage;
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
 use harmonia_store_core::signature::Signature;

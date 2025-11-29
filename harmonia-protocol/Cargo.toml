@@ -30,6 +30,7 @@ tokio-util = { workspace = true, features = ["io"] }
 tracing = { workspace = true }
 
 # Internal dependencies
+harmonia-io = { path = "../harmonia-io" }
 harmonia-store-core = { path = "../harmonia-store-core" }
 harmonia-protocol-derive = { path = "../harmonia-protocol-derive" }
 harmonia-nar = { path = "../harmonia-nar" }

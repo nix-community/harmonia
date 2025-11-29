@@ -44,21 +44,10 @@ where
     }
 }
 
-// Wire utilities (duplicated from harmonia-protocol to avoid circular deps)
-pub mod wire {
-    pub const ZEROS: [u8; 8] = [0u8; 8];
-
+// Wire utilities
+pub(crate) mod wire {
     pub const fn base64_len(len: usize) -> usize {
         ((4 * len / 3) + 3) & !3
-    }
-
-    pub const fn calc_aligned(len: u64) -> u64 {
-        len.wrapping_add(7) & !7
-    }
-
-    pub const fn calc_padding(len: u64) -> usize {
-        let aligned = calc_aligned(len);
-        aligned.wrapping_sub(len) as usize
     }
 }
 
@@ -67,7 +56,6 @@ pub mod base32;
 pub mod derivation;
 pub mod derived_path;
 pub mod hash;
-pub mod io;
 pub mod log;
 pub mod placeholder;
 pub mod realisation;

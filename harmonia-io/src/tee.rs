@@ -6,7 +6,7 @@ use std::task::{Context, Poll, ready};
 use pin_project_lite::pin_project;
 use tokio::io::AsyncWrite;
 
-use crate::io::DEFAULT_BUF_SIZE;
+use crate::DEFAULT_BUF_SIZE;
 
 pin_project! {
     pub struct TeeWriter<W1, W2> {

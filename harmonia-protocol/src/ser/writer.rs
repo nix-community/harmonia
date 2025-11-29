@@ -12,9 +12,9 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::ProtocolVersion;
-use harmonia_store_core::io::{DEFAULT_BUF_SIZE, RESERVED_BUF_SIZE};
+use harmonia_io::wire::{ZEROS, calc_padding};
+use harmonia_io::{DEFAULT_BUF_SIZE, RESERVED_BUF_SIZE};
 use harmonia_store_core::store_path::StoreDir;
-use harmonia_store_core::wire::{ZEROS, calc_padding};
 
 use super::{Error, NixWrite};
 

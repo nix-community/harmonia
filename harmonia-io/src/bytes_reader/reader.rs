@@ -10,7 +10,7 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, ReadBuf};
 
 use super::buffer::BufferMut;
-use crate::io::AsyncBytesRead;
+use crate::AsyncBytesRead;
 
 pub const DEFAULT_RESERVED_BUF_SIZE: usize = 8192;
 pub const DEFAULT_MAX_BUF_SIZE: usize = 1024 * 1024 * 8;
@@ -235,7 +235,7 @@ mod unittests {
     use tokio::io::AsyncReadExt as _;
     use tokio_test::io::Builder;
 
-    use crate::io::{BytesReader, TryReadBytesLimited, TryReadU64};
+    use crate::{BytesReader, TryReadBytesLimited, TryReadU64};
 
     #[test_log::test(tokio::test)]
     async fn test_read_u64_partial() {

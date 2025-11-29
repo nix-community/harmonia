@@ -10,7 +10,7 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::ProtocolVersion;
-use harmonia_store_core::io::{
+use harmonia_io::{
     AsyncBytesRead, BytesReader, DEFAULT_MAX_BUF_SIZE, DEFAULT_RESERVED_BUF_SIZE,
     TryReadBytesLimited, TryReadU64,
 };
@@ -220,9 +220,9 @@ mod unittests {
         de::NixRead,
         ser::{NixWrite, NixWriter},
     };
+    use harmonia_io::BytesReader;
     use harmonia_store_core::btree_set;
     use harmonia_store_core::hash::NarHash;
-    use harmonia_store_core::io::BytesReader;
 
     #[tokio::test]
     async fn test_read_u64() {

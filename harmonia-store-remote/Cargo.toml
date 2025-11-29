@@ -17,6 +17,7 @@ repository.workspace = true
 
 [dependencies]
 # Harmonia crates
+harmonia-io = { path = "../harmonia-io" }
 harmonia-store-core = { path = "../harmonia-store-core" }
 harmonia-protocol = { path = "../harmonia-protocol" }
 harmonia-nar = { path = "../harmonia-nar" }

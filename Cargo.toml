@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "harmonia-client",
+  "harmonia-io",
   "harmonia-store-core",
   "harmonia-store-db",
   "harmonia-store-remote",

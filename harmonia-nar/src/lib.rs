@@ -27,7 +27,11 @@
 //! 3. **Format-focused**: Only concerned with archive structure
 //! 4. **Composable**: Can be used independently of daemon
 
-pub use harmonia_store_core::ByteString;
+/// Byte string type alias.
+pub type ByteString = bytes::Bytes;
+
+/// Wire protocol utilities for NAR format.
+pub use harmonia_io::wire;
 
 pub mod padded_reader;
 

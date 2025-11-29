@@ -1005,6 +1005,7 @@ version = "2.1.0"
 dependencies = [
  "env_logger",
  "futures",
+ "harmonia-io",
  "harmonia-nar",
  "harmonia-protocol",
  "harmonia-store-core",
@@ -1019,6 +1020,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "harmonia-io"
+version = "2.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "hex-literal",
+ "parking_lot",
+ "pin-project-lite",
+ "proptest",
+ "rstest",
+ "test-log",
+ "test-strategy",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
 name = "harmonia-nar"
 version = "2.1.0"
 dependencies = [
@@ -1026,6 +1045,7 @@ dependencies = [
  "bytes",
  "derive_more",
  "futures",
+ "harmonia-io",
  "harmonia-store-core",
  "pin-project-lite",
  "pretty_assertions",
@@ -1051,6 +1071,7 @@ dependencies = [
  "bytes",
  "derive_more",
  "futures",
+ "harmonia-io",
  "harmonia-nar",
  "harmonia-protocol-derive",
  "harmonia-store-core",
@@ -1150,6 +1171,7 @@ version = "2.1.0"
 dependencies = [
  "async-stream",
  "futures",
+ "harmonia-io",
  "harmonia-nar",
  "harmonia-protocol",
  "harmonia-store-core",
