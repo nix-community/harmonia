@@ -37,7 +37,6 @@ env_logger = "0.11"
 toml = "0.9"
 thiserror = "2"
 hex = "0.4"
-ed25519-dalek = "2.1"
 prometheus = { version = "0.14", default-features = false }
 nix = { version = "0.30", features = ["signal"] }
 
