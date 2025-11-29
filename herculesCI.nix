@@ -15,10 +15,22 @@
     in
     {
       onPush.default.outputs.effects = withSystem "x86_64-linux" (
-        { pkgs, ... }:
+        { pkgs, lib, ... }:
         let
           # config.systems is a list in flake-parts
           systems = config.systems;
+
+          # codecov-cli depends on test-results-parser which has an unfree license
+          # Override just the license instead of using allowUnfree (expensive)
+          codecov-cli = pkgs.codecov-cli.override {
+            python3Packages = pkgs.python3Packages.overrideScope (
+              _final: prev: {
+                test-results-parser = prev.test-results-parser.overrideAttrs {
+                  meta.license = lib.licenses.free;
+                };
+              }
+            );
+          };
 
           # Get test outputs for all systems (list -> attrset)
           testOutputs = builtins.listToAttrs (
@@ -56,7 +68,7 @@
                       builtins.map (system: ''
                         echo "Uploading coverage for ${system}..."
                         if [[ -f "${testOutputs.${system}}/${system}.json" ]]; then
-                          ${pkgs.codecov-cli}/bin/codecovcli do-upload \
+                          ${codecov-cli}/bin/codecovcli do-upload \
                             --token "$CODECOV_TOKEN" \
                             --slug "nix-community/harmonia" \
                             --git-service github \
