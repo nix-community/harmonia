@@ -22,15 +22,19 @@ futures = { workspace = true }
 libc = "0.2"
 num_enum = { workspace = true }
 pin-project-lite = { workspace = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = "3.16"
+test-strategy = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util"] }
 tokio-util = { workspace = true, features = ["io"] }
 tracing = { workspace = true }
 
 # Internal dependencies
+harmonia-utils-test = { path = "../harmonia-utils-test", optional = true }
 harmonia-utils-io = { path = "../harmonia-utils-io" }
 harmonia-utils-hash = { path = "../harmonia-utils-hash" }
 harmonia-store-core = { path = "../harmonia-store-core" }
@@ -41,7 +45,7 @@ harmonia-nar = { path = "../harmonia-nar" }
 harmonia-store-core = { path = "../harmonia-store-core", features = ["test"] }
 harmonia-nar = { path = "../harmonia-nar", features = ["test"] }
 proptest = { workspace = true }
-proptest-derive = "0.5"
+proptest-derive = { workspace = true }
 rstest = { workspace = true }
 test-strategy = { workspace = true }
 tokio-test = "0.4"
@@ -49,7 +53,7 @@ hex-literal = "1.1"
 test-log = "0.2"
 
 [features]
-test = []
+test = ["proptest", "proptest-derive", "test-strategy", "harmonia-utils-test", "harmonia-utils-hash/test"]
 
 [lints]
 workspace = true

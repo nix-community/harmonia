@@ -14,11 +14,11 @@ use std::str::FromStr;
 
 use crate::daemon_wire::logger::RawLogMessageType;
 use crate::de::{NixDeserialize, NixRead};
+use crate::log::{Activity, ActivityResult, LogMessage, StopActivity};
 use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput};
 use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
-use harmonia_store_core::log::{Activity, ActivityResult, LogMessage, StopActivity};
 use harmonia_store_core::realisation::Realisation;
 use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathName,
@@ -382,41 +382,41 @@ nix_serialize_remote!(
 // Verbosity
 nix_deserialize_remote!(
     #[nix(from = "u16")]
-    harmonia_store_core::log::Verbosity
+    crate::log::Verbosity
 );
 nix_serialize_remote!(
     #[nix(into = "u16")]
-    harmonia_store_core::log::Verbosity
+    crate::log::Verbosity
 );
 
 // ActivityType
 nix_deserialize_remote!(
     #[nix(try_from = "u16")]
-    harmonia_store_core::log::ActivityType
+    crate::log::ActivityType
 );
 nix_serialize_remote!(
     #[nix(into = "u16")]
-    harmonia_store_core::log::ActivityType
+    crate::log::ActivityType
 );
 
 // ResultType
 nix_deserialize_remote!(
     #[nix(try_from = "u16")]
-    harmonia_store_core::log::ResultType
+    crate::log::ResultType
 );
 nix_serialize_remote!(
     #[nix(into = "u16")]
-    harmonia_store_core::log::ResultType
+    crate::log::ResultType
 );
 
 // FieldType
 nix_deserialize_remote!(
     #[nix(try_from = "u16")]
-    harmonia_store_core::log::FieldType
+    crate::log::FieldType
 );
 nix_serialize_remote!(
     #[nix(into = "u16")]
-    harmonia_store_core::log::FieldType
+    crate::log::FieldType
 );
 
 // StopActivity (simple struct - manual impl)
@@ -443,7 +443,7 @@ impl NixDeserialize for StopActivity {
 }
 
 // Field (tagged enum) - manual impls because remote macros don't support tags
-use harmonia_store_core::log::{Field, FieldType};
+use crate::log::{Field, FieldType};
 
 impl NixSerialize for Field {
     async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>

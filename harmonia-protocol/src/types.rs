@@ -20,10 +20,10 @@ use crate::daemon_wire::types2::{
     ValidPathInfo,
 };
 use crate::daemon_wire::{IgnoredTrue, IgnoredZero};
+use crate::log::Verbosity;
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
-use harmonia_store_core::log::Verbosity;
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
 use harmonia_store_core::signature::Signature;
 #[cfg(test)]

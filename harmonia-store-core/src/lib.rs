@@ -32,21 +32,8 @@
 // Type alias for byte strings
 pub type ByteString = bytes::Bytes;
 
-// Serde helpers for ByteString
-pub(crate) fn serialize_byte_string<S>(value: &ByteString, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    use serde::Serialize;
-    match std::str::from_utf8(value) {
-        Ok(s) => s.serialize(serializer),
-        Err(_) => value.serialize(serializer),
-    }
-}
-
 pub mod derivation;
 pub mod derived_path;
-pub mod log;
 pub mod placeholder;
 pub mod realisation;
 pub mod signature;

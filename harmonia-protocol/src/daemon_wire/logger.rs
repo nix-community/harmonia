@@ -20,14 +20,12 @@ use tracing::trace;
 use crate::daemon_wire::IgnoredZero;
 use crate::daemon_wire::types::Operation;
 use crate::de::{NixDeserialize as NixDeserializeTrait, NixRead};
+use crate::log::{Activity, ActivityResult, LogMessage, Message, StopActivity, Verbosity};
 use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite, NixWriter};
 use crate::types::{
     DaemonError, DaemonErrorKind, DaemonInt, DaemonResult, DaemonString, RemoteError,
 };
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
-use harmonia_store_core::log::{
-    Activity, ActivityResult, LogMessage, Message, StopActivity, Verbosity,
-};
 
 pub const STDERR_LAST: u64 = 0x616c7473; // 'alts' in ASCII
 pub const STDERR_ERROR: u64 = 0x63787470; // 'cxtp' in ASCII
