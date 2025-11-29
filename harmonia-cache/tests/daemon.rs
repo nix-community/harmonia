@@ -127,11 +127,19 @@ log_level = "debug"
         let config_file = write_toml_config(&daemon_config)?;
         let config_path = config_file.path().to_path_buf();
 
-        // Start harmonia-daemon - use cargo run since it's a different package
-        let child = Command::new("cargo")
-            .args(["run", "-p", "harmonia-daemon", "--"])
-            .env("HARMONIA_DAEMON_CONFIG", &config_path)
-            .spawn()?;
+        // Start harmonia-daemon
+        // Use HARMONIA_DAEMON_BIN env var if set (for coverage), otherwise cargo run
+        let child = if let Ok(bin_path) = std::env::var("HARMONIA_DAEMON_BIN") {
+            Command::new(bin_path)
+                .env("HARMONIA_DAEMON_CONFIG", &config_path)
+                .spawn()?
+        } else {
+            // Fall back to cargo run for normal development
+            Command::new("cargo")
+                .args(["run", "-p", "harmonia-daemon", "--"])
+                .env("HARMONIA_DAEMON_CONFIG", &config_path)
+                .spawn()?
+        };
 
         let pid = child.id();
         println!(
@@ -178,8 +186,11 @@ pub async fn start_harmonia_cache(config: &str, port: u16) -> Result<Box<dyn Sen
     let config_file = write_toml_config(config)?;
     let config_path = config_file.path().to_path_buf();
 
-    // Start harmonia-cache using cargo's built-in binary path (same package)
-    let cache_process = Command::new(env!("CARGO_BIN_EXE_harmonia-cache"))
+    // Start harmonia-cache
+    // Use HARMONIA_CACHE_BIN env var if set (for coverage), otherwise cargo's built-in path
+    let bin_path = std::env::var("HARMONIA_CACHE_BIN")
+        .unwrap_or_else(|_| env!("CARGO_BIN_EXE_harmonia-cache").to_string());
+    let cache_process = Command::new(&bin_path)
         .env("CONFIG_FILE", &config_path)
         .env("RUST_LOG", "debug")
         .spawn()?;
@@ -335,6 +346,24 @@ impl ProcessGuard {
 impl Drop for ProcessGuard {
     fn drop(&mut self) {
         if let Some(mut child) = self.child.take() {
+            // Use SIGTERM for graceful shutdown to allow coverage data to be flushed
+            // (SIGKILL would terminate immediately without flushing profraw data)
+            use nix::sys::signal::{Signal, kill};
+            use nix::unistd::Pid;
+
+            let pid = Pid::from_raw(child.id() as i32);
+            let _ = kill(pid, Signal::SIGTERM);
+
+            // Wait up to 5 seconds for graceful shutdown (actix needs time to clean up)
+            for _ in 0..50 {
+                match child.try_wait() {
+                    Ok(Some(_)) => return, // Process exited gracefully
+                    Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                    Err(_) => break,
+                }
+            }
+
+            // If still running after grace period, force kill
             let _ = child.kill();
             let _ = child.wait();
         }
