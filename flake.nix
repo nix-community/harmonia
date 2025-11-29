@@ -1,7 +1,8 @@
 {
   description = "Nix binary cache implemented in rust using libnix-store";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable-small";
+  # TODO: switch back to nixos-unstable-small after https://github.com/NixOS/nixpkgs/pull/466280 is merged
+  inputs.nixpkgs.url = "github:Mic92/nixpkgs/harmonia-coverage";
   inputs.flake-parts = {
     url = "github:hercules-ci/flake-parts";
     inputs.nixpkgs-lib.follows = "nixpkgs";
@@ -32,17 +33,20 @@
           self',
           ...
         }:
+        let
+          packageSet = pkgs.callPackages ./packages.nix {
+            crane = inputs.crane;
+            nix-src = inputs.nix;
+          };
+        in
         {
-          packages =
-            let
-              packageSet = pkgs.callPackages ./packages.nix {
-                crane = inputs.crane;
-                nix-src = inputs.nix;
-              };
-            in
-            {
-              inherit (packageSet) clippy default harmonia;
-            };
+          packages = {
+            inherit (packageSet)
+              clippy
+              default
+              harmonia
+              ;
+          };
           checks =
             let
               testArgs = {
@@ -52,7 +56,10 @@
               packages = lib.mapAttrs' (n: lib.nameValuePair "package-${n}") self'.packages;
               devShells = lib.mapAttrs' (n: lib.nameValuePair "devShell-${n}") self'.devShells;
             in
-            lib.optionalAttrs pkgs.stdenv.isLinux {
+            {
+              inherit (packageSet) tests;
+            }
+            // lib.optionalAttrs pkgs.stdenv.isLinux {
               nix-daemon = import ./tests/nix-daemon.nix testArgs;
               nix-daemon-retry = import ./tests/nix-daemon-retry.nix testArgs;
               harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
