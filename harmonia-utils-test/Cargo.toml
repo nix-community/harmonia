@@ -17,6 +17,7 @@ readme = "README.md"
 bytes = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

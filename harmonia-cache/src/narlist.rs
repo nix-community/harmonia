@@ -204,7 +204,8 @@ mod test {
 
     #[tokio::test]
     async fn test_get_nar_list() -> Result<()> {
-        let temp_dir = tempfile::tempdir().io_context("Failed to create temp dir")?;
+        let temp_dir = harmonia_utils_test::CanonicalTempDir::new()
+            .io_context("Failed to create canonical temp dir")?;
         let dir = temp_dir.path().join("store");
         fs::create_dir(&dir).io_context("Failed to create temp dir")?;
         fs::write(dir.join("file"), b"somecontent").io_context("Failed to write file")?;

@@ -1,13 +1,13 @@
 use std::fs;
 use std::io::Write;
 use std::process::Command;
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::NamedTempFile;
 
 mod daemon;
 
 use daemon::{
-    Daemon, DaemonConfig, DaemonInstance, HarmoniaDaemon, NixDaemon, pick_unused_port,
-    start_harmonia_cache,
+    CanonicalTempDir, Daemon, DaemonConfig, DaemonInstance, HarmoniaDaemon, NixDaemon,
+    pick_unused_port, start_harmonia_cache,
 };
 
 // Compile in the test keys from the repo
@@ -34,7 +34,7 @@ async fn test_signing_with_daemon(daemon: &DaemonInstance) -> Result<()> {
     );
 
     // Create temporary directory for harmonia's working files
-    let temp_dir = TempDir::new()?;
+    let temp_dir = CanonicalTempDir::new()?;
 
     // Create log directory
     fs::create_dir_all(daemon.state_dir.join("log"))?;
@@ -211,7 +211,7 @@ async fn test_signing_with_nix_daemon() -> Result<()> {
         return Ok(());
     }
 
-    let temp_dir = TempDir::new()?;
+    let temp_dir = CanonicalTempDir::new()?;
 
     let daemon_config = DaemonConfig {
         socket_path: temp_dir.path().join("nix-daemon.sock"),
@@ -225,7 +225,7 @@ async fn test_signing_with_nix_daemon() -> Result<()> {
 
 #[tokio::test]
 async fn test_signing_with_harmonia_daemon() -> Result<()> {
-    let temp_dir = TempDir::new()?;
+    let temp_dir = CanonicalTempDir::new()?;
 
     let daemon_config = DaemonConfig {
         socket_path: temp_dir.path().join("harmonia-daemon.sock"),

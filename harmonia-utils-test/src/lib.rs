@@ -9,9 +9,36 @@
 //!
 //! This crate provides proptest strategies and macros for testing Harmonia crates.
 
-use std::{path::PathBuf, time::Duration};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use proptest::prelude::*;
+use tempfile::TempDir;
+
+/// A wrapper around TempDir that provides a canonicalized path.
+/// This resolves symlinks like /var -> /private/var on macOS,
+/// which is required for Nix store operations.
+pub struct CanonicalTempDir {
+    _inner: TempDir,
+    path: PathBuf,
+}
+
+impl CanonicalTempDir {
+    /// Create a new temporary directory with a canonicalized path.
+    pub fn new() -> std::io::Result<Self> {
+        let inner = TempDir::new()?;
+        let path = inner.path().canonicalize()?;
+        Ok(Self {
+            _inner: inner,
+            path,
+        })
+    }
+
+    /// Get the canonicalized path to the temporary directory.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
 
 /// Byte string type alias.
 pub type ByteString = bytes::Bytes;

@@ -358,8 +358,9 @@ mod test {
 
     #[tokio::test]
     async fn test_dump_store() -> Result<()> {
-        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let dir = temp_dir.path();
+        let temp_dir =
+            harmonia_utils_test::CanonicalTempDir::new().expect("Failed to create temp dir");
+        let dir = temp_dir.path().to_path_buf();
         fs::write(dir.join("file"), b"somecontent").io_context("Failed to write test file")?;
 
         fs::create_dir(dir.join("some_empty_dir")).io_context("Failed to create test empty dir")?;
@@ -375,7 +376,7 @@ mod test {
         std::os::unix::fs::symlink("sometarget", dir.join("symlink"))
             .io_context("Failed to create test symlink")?;
 
-        let nar_dump = dump_to_vec(dir.to_path_buf()).await?;
+        let nar_dump = dump_to_vec(dir.clone()).await?;
         let res = Command::new("nix-store")
             .arg("--dump")
             .arg(dir)

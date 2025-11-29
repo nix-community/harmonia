@@ -25,6 +25,7 @@ serde = { workspace = true }
 futures = { workspace = true }
 
 [dev-dependencies]
+harmonia-utils-test = { path = "../harmonia-utils-test" }
 tempfile = "3"
 
 [lints]

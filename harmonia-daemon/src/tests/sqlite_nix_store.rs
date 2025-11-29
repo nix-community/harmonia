@@ -5,13 +5,13 @@ use crate::handler::LocalStoreHandler;
 use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_db::StoreDb;
+use harmonia_utils_test::CanonicalTempDir;
 use std::process::Command;
-use tempfile::TempDir;
 
 #[test]
 fn test_sqlite_with_nix_initialized_store() {
-    // Create temporary directories
-    let temp_dir = TempDir::new().unwrap();
+    // Create temporary directories (canonicalized for macOS /var symlink)
+    let temp_dir = CanonicalTempDir::new().unwrap();
     let store_dir = temp_dir.path().join("store");
     let state_dir = temp_dir.path().join("var/nix");
 
@@ -134,8 +134,8 @@ fn test_sqlite_with_nix_initialized_store() {
 
 #[tokio::test]
 async fn test_handler_with_nix_store() {
-    // Create temporary directories
-    let temp_dir = TempDir::new().unwrap();
+    // Create temporary directories (canonicalized for macOS /var symlink)
+    let temp_dir = CanonicalTempDir::new().unwrap();
     let store_dir = temp_dir.path().join("store");
     let state_dir = temp_dir.path().join("var/nix");
 
