@@ -57,6 +57,9 @@
                   buildPhase = ''
                     set -euo pipefail
 
+                    # Set HOME for codecov-cli (runs in sandbox without it)
+                    export HOME=/tmp
+
                     # Read codecov token from secrets
                     CODECOV_TOKEN=$(${pkgs.jq}/bin/jq -r '.codecov.data.token // empty' "$HERCULES_CI_SECRETS_JSON")
 
