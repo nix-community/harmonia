@@ -34,11 +34,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["sync", "fs", "io-util", "rt", "rt-multi-thread", "macros", "time", "net", "signal"] }
 env_logger = "0.11"
-anyhow = "1.0"
 toml = "0.9"
 thiserror = "2"
 hex = "0.4"
-ed25519-dalek = "2.1"
 prometheus = { version = "0.14", default-features = false }
 nix = { version = "0.30", features = ["signal"] }
 
@@ -62,7 +60,7 @@ syn = "2.0"
 
 # Dev dependencies for property-based testing
 proptest = "1.6"
-rstest = "0.25"
+rstest = "0.26"
 tempfile = "3.10"
 test-strategy = "0.4"
 pretty_assertions = "1.4"
