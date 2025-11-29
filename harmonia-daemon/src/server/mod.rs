@@ -676,10 +676,9 @@ where
             let fut = self.reader.try_read_value::<Request>().boxed();
             trace!("Request Size {}", size_of_val(fut.deref()));
             let res = fut.await?;
-            if res.is_none() {
+            let Some(request) = res else {
                 break;
-            }
-            let request = res.unwrap();
+            };
             let op = request.operation();
             let span = request.span();
             async {

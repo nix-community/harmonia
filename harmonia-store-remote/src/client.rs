@@ -479,7 +479,9 @@ where
             let _ = sender.send((reader, result));
         };
         async {
-            let (reader, result) = receiver.await.unwrap();
+            let (reader, result) = receiver
+                .await
+                .expect("stderr processing stream dropped before sending result");
             let reader = reader.get_mut().lend(NarBytesReader::new);
             match result {
                 Ok(_) => Ok(AsyncBufReadCompat::new(reader)),

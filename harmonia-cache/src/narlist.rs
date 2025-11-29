@@ -125,7 +125,9 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
                     });
                 }
             } else {
-                let entry = stack.pop().unwrap();
+                let entry = stack
+                    .pop()
+                    .expect("stack should not be empty inside loop iteration");
                 if let Some(frame) = stack.last_mut() {
                     let name = match entry.path.file_name() {
                         Some(name) => name.to_string_lossy().into_owned(),
@@ -147,7 +149,7 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
             }
         }
 
-        root.unwrap()
+        root.expect("root should be set after processing directory stack")
     } else {
         return Err(ServeError::ServeFailed {
             source: std::io::Error::other(format!(
