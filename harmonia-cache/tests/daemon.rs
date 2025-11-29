@@ -380,3 +380,196 @@ impl Drop for ProcessAndFileGuard {
         // ProcessGuard's drop will be called automatically
     }
 }
+
+/// Builder for test cache instances
+#[derive(Default)]
+pub struct TestCacheBuilder {
+    priority: Option<u32>,
+    signing_keys: Vec<String>,
+    tls_cert: Option<String>,
+    tls_key: Option<String>,
+    daemon: Option<DaemonInstance>,
+}
+
+impl TestCacheBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn priority(mut self, priority: u32) -> Self {
+        self.priority = Some(priority);
+        self
+    }
+
+    pub fn signing_key(mut self, key: &str) -> Self {
+        self.signing_keys.push(key.trim().to_string());
+        self
+    }
+
+    pub fn tls(mut self, cert: &str, key: &str) -> Self {
+        self.tls_cert = Some(cert.to_string());
+        self.tls_key = Some(key.to_string());
+        self
+    }
+
+    pub fn daemon(mut self, daemon: DaemonInstance) -> Self {
+        self.daemon = Some(daemon);
+        self
+    }
+
+    pub async fn build(self) -> Result<TestCache> {
+        let temp_dir = CanonicalTempDir::new()?;
+        let port = pick_unused_port().ok_or("No available ports")?;
+
+        let (store_dir, daemon_socket) = if let Some(ref daemon) = self.daemon {
+            (daemon.store_dir.clone(), Some(daemon.socket_path.clone()))
+        } else {
+            (temp_dir.path().join("store"), None)
+        };
+
+        // Write signing keys to temp files
+        let mut key_files = Vec::new();
+        for key in &self.signing_keys {
+            let mut file = NamedTempFile::new()?;
+            use std::io::Write;
+            write!(file, "{key}")?;
+            file.flush()?;
+            key_files.push(file);
+        }
+
+        // Write TLS files if configured
+        let tls_files = match (&self.tls_cert, &self.tls_key) {
+            (Some(cert), Some(key)) => {
+                let cert_path = temp_dir.path().join("tls-cert.pem");
+                let key_path = temp_dir.path().join("tls-key.pem");
+                std::fs::write(&cert_path, cert)?;
+                std::fs::write(&key_path, key)?;
+                Some((cert_path, key_path))
+            }
+            _ => None,
+        };
+
+        // Build config
+        let mut config = format!(
+            "bind = \"127.0.0.1:{port}\"\n\
+             virtual_nix_store = \"{store}\"\n\
+             real_nix_store = \"{store}\"\n",
+            store = store_dir.display(),
+        );
+
+        if let Some(socket) = &daemon_socket {
+            config.push_str(&format!("daemon_socket = \"{}\"\n", socket.display()));
+        }
+
+        if let Some(p) = self.priority {
+            config.push_str(&format!("priority = {p}\n"));
+        }
+
+        if !key_files.is_empty() {
+            let paths: Vec<_> = key_files
+                .iter()
+                .map(|f| format!("\"{}\"", f.path().display()))
+                .collect();
+            config.push_str(&format!("sign_key_paths = [{}]\n", paths.join(", ")));
+        }
+
+        if let Some((ref cert_path, ref key_path)) = tls_files {
+            config.push_str(&format!(
+                "tls_cert_path = \"{}\"\ntls_key_path = \"{}\"\n",
+                cert_path.display(),
+                key_path.display()
+            ));
+        }
+
+        let guard = start_harmonia_cache(&config, port).await?;
+
+        Ok(TestCache {
+            port,
+            tls: tls_files.is_some(),
+            tls_cert_path: tls_files.map(|(c, _)| c),
+            _temp_dir: temp_dir,
+            _guard: guard,
+            _key_files: key_files,
+            _daemon: self.daemon,
+        })
+    }
+}
+
+/// A running test cache instance with helper methods
+pub struct TestCache {
+    pub port: u16,
+    tls: bool,
+    tls_cert_path: Option<PathBuf>,
+    _temp_dir: CanonicalTempDir,
+    _guard: Box<dyn Send>,
+    _key_files: Vec<NamedTempFile>,
+    _daemon: Option<DaemonInstance>,
+}
+
+impl TestCache {
+    pub fn builder() -> TestCacheBuilder {
+        TestCacheBuilder::new()
+    }
+
+    /// Start a minimal cache (no daemon, no keys)
+    pub async fn start() -> Result<Self> {
+        Self::builder().build().await
+    }
+
+    pub fn url(&self, path: &str) -> String {
+        let scheme = if self.tls { "https" } else { "http" };
+        format!("{scheme}://127.0.0.1:{}{path}", self.port)
+    }
+
+    fn curl_args(&self) -> Vec<&str> {
+        let mut args = vec!["--fail", "--max-time", "5", "--silent"];
+        if self.tls {
+            args.push("--insecure");
+        }
+        args
+    }
+
+    pub fn curl(&self, path: &str) -> Result<String> {
+        let url = self.url(path);
+        let output = Command::new("curl")
+            .args(self.curl_args())
+            .arg(&url)
+            .output()?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Request to {} failed: {}",
+                path,
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+
+        Ok(String::from_utf8(output.stdout)?)
+    }
+
+    pub fn curl_with_headers(&self, path: &str) -> Result<String> {
+        let url = self.url(path);
+        let output = Command::new("curl")
+            .args(self.curl_args())
+            .arg("--include")
+            .arg(&url)
+            .output()?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Request to {} failed: {}",
+                path,
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+
+        Ok(String::from_utf8(output.stdout)?)
+    }
+
+    /// Get the TLS certificate path (for curl --cacert)
+    pub fn tls_cert_path(&self) -> Option<&PathBuf> {
+        self.tls_cert_path.as_ref()
+    }
+}
