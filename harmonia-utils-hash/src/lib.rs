@@ -275,7 +275,7 @@ impl Context {
     /// [`Hash`]: struct@Hash
     pub fn finish(self) -> Hash {
         match self.1 {
-            InnerContext::MD5(ctx) => Hash::new(self.0, ctx.compute().as_ref()),
+            InnerContext::MD5(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
             InnerContext::Ring(ctx) => ctx.finish().try_into().unwrap(),
         }
     }
