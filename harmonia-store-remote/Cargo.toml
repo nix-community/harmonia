@@ -30,13 +30,9 @@ async-stream = "0.3"
 
 # Utilities
 tracing = { workspace = true }
-thiserror = { workspace = true }
 
 # Metrics (optional but commonly used)
 prometheus = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }
 
 [lints]
 workspace = true

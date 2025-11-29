@@ -916,7 +916,6 @@ dependencies = [
  "actix-web",
  "askama_escape",
  "async-compression",
- "base64",
  "env_logger",
  "futures",
  "harmonia-nar",
@@ -928,7 +927,6 @@ dependencies = [
  "mime",
  "nix",
  "percent-encoding",
- "pkg-config",
  "prometheus",
  "rustls",
  "rustls-pemfile",
@@ -938,7 +936,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tokio-util",
  "toml",
  "url",
@@ -954,7 +951,6 @@ version = "2.1.0"
 dependencies = [
  "env_logger",
  "futures",
- "harmonia-nar",
  "harmonia-protocol",
  "harmonia-store-core",
  "harmonia-store-db",
@@ -1041,16 +1037,6 @@ dependencies = [
 [[package]]
 name = "harmonia-ssh-store"
 version = "2.1.0"
-dependencies = [
- "bytes",
- "futures",
- "harmonia-protocol",
- "harmonia-store-core",
- "rstest",
- "tempfile",
- "thiserror",
- "tokio",
-]
 
 [[package]]
 name = "harmonia-store-core"
@@ -1059,17 +1045,13 @@ dependencies = [
  "bytes",
  "data-encoding",
  "derive_more",
- "futures",
  "harmonia-protocol",
  "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
  "harmonia-utils-test",
  "hex-literal",
- "md5",
  "num_enum",
- "once_cell",
  "paste",
- "pin-project-lite",
  "pretty_assertions",
  "proptest",
  "proptest-derive",
@@ -1112,8 +1094,6 @@ dependencies = [
  "harmonia-store-core",
  "harmonia-utils-io",
  "prometheus",
- "tempfile",
- "thiserror",
  "tokio",
  "tracing",
 ]
