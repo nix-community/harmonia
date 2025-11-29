@@ -15,8 +15,9 @@
     in
     {
       onPush.default.outputs.effects = withSystem "x86_64-linux" (
-        { pkgs, lib, ... }:
+        { pkgs, ... }:
         let
+          inherit (pkgs) lib;
           # config.systems is a list in flake-parts
           systems = config.systems;
 
