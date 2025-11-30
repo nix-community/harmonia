@@ -48,6 +48,14 @@
               default
               harmonia
               ;
+            # Benchmark closure - a decent-sized Python environment for download benchmarks
+            bench-closure = pkgs.python3.withPackages (
+              ps: with ps; [
+                numpy
+                pandas
+                requests
+              ]
+            );
           };
           checks =
             let

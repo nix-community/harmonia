@@ -68,6 +68,29 @@ cargo llvm-cov nextest --workspace --html
 # Open target/llvm-cov/html/index.html
 ```
 
+## Benchmarks
+
+Run the closure download benchmark:
+
+```bash
+cargo bench --package harmonia-bench
+
+# With verbose output
+cargo bench --package harmonia-bench -- --nocapture
+```
+
+This benchmarks downloading a Python closure through harmonia-cache. By default it builds harmonia with the `profiling` profile (release + debug symbols for flamegraphs).
+
+Environment variables:
+- `HARMONIA_FLAKE` - Use a nix-built harmonia instead of cargo build
+- `BENCH_CLOSURE_FLAKE` - Override the benchmark closure (default: `.#bench-closure`)
+
+View results:
+
+```bash
+open target/criterion/closure/download/report/index.html
+```
+
 ## Code Style
 
 ### Formatting

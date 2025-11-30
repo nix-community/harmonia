@@ -14,6 +14,7 @@ members = [
   "harmonia-cache",
   "harmonia-daemon",
   "harmonia-utils-test",
+  "harmonia-bench",
 ]
 resolver = "2"
 
@@ -70,3 +71,8 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+
+# Profiling profile: release optimizations with debug info for flamegraphs/perf
+[profile.profiling]
+inherits = "release"
+debug = true
