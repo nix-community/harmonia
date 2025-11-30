@@ -20,13 +20,17 @@ jobs:
             extra-substituters = https://cache.thalheim.io/
             extra-trusted-public-keys = cache.thalheim.io-1:R7msbosLEZKrxk/lKxf9BTjOOH7Ax3H0Qj0/6wiHOgc=
 
-      - name: Run benchmark
+      - name: Install Bencher CLI
         uses: bencherdev/bencher@main
-        with:
-          command: cargo bench --package harmonia-bench
-          project: harmonia
-          testbed: github-actions
-          adapter: rust_criterion
+
+      - name: Run benchmark
+        run: |
+          bencher run \
+            --project harmonia \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --testbed github-actions \
+            --adapter rust_criterion \
+            --err \
+            'cargo bench --package harmonia-bench'
         env:
-          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
           HARMONIA_FLAKE: .#harmonia
