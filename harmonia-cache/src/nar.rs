@@ -326,36 +326,6 @@ mod test {
         Ok(result)
     }
 
-    // Useful for debugging
-    #[allow(dead_code)]
-    fn pretty_hex_dump(bytes: &[u8]) {
-        let mut i = 0;
-        while i < bytes.len() {
-            let mut line = String::new();
-            for j in 0..16 {
-                if i + j < bytes.len() {
-                    line.push_str(&format!("{:02x} ", bytes[i + j]));
-                } else {
-                    line.push_str("   ");
-                }
-            }
-            line.push_str(" | ");
-            for j in 0..16 {
-                if i + j < bytes.len() {
-                    if bytes[i + j] >= 32 && bytes[i + j] < 127 {
-                        line.push(bytes[i + j] as char);
-                    } else {
-                        line.push('.');
-                    }
-                } else {
-                    line.push(' ');
-                }
-            }
-            println!("{line}");
-            i += 16;
-        }
-    }
-
     #[tokio::test]
     async fn test_dump_store() -> Result<()> {
         let temp_dir =
@@ -385,9 +355,7 @@ mod test {
         assert_eq!(res.status.code(), Some(0));
         println!("nar_dump len: {}", nar_dump.len());
         println!("nix-store --dump len: {}", res.stdout.len());
-        // pretty_hex_dump(&nar_dump);
         // println!("nix-store --dump:");
-        // pretty_hex_dump(&res.stdout);
         assert_eq!(res.stdout, nar_dump);
 
         Ok(())

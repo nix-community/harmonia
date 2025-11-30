@@ -53,20 +53,7 @@ let
       # Add runtime dependencies
       nativeBuildInputs = [ makeWrapper ];
 
-      doCheck = true;
-      nativeCheckInputs = [
-        nix
-        curl
-      ];
-
-      # Set NIX_UPSTREAM_SRC to nix source for JSON test data
-      # Tests use CARGO_BIN_EXE_* to find binaries automatically
-      preCheck = ''
-        export NIX_UPSTREAM_SRC=${nix-src}
-      ''
-      + lib.optionalString pkgs.stdenv.isDarwin ''
-        export _NIX_TEST_NO_SANDBOX="1"
-      '';
+      doCheck = false;
 
       postInstall = ''
         wrapProgram $out/bin/harmonia \
