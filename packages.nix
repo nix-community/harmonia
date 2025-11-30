@@ -44,6 +44,22 @@ let
   # Build *just* the cargo dependencies
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
+  # Coverage RUSTFLAGS matching what `cargo llvm-cov show-env` produces
+  coverageRustflags = "-C instrument-coverage --cfg=coverage --cfg=trybuild_no_target";
+
+  # Build dependencies with coverage instrumentation for reuse in coverage tests
+  cargoArtifactsCov = craneLib.buildDepsOnly (
+    commonArgs
+    // {
+      pnameSuffix = "-cov";
+      CARGO_BUILD_RUSTFLAGS = coverageRustflags;
+      # Discard profraw from build scripts/proc-macros (sandbox is read-only anyway)
+      LLVM_PROFILE_FILE = "/dev/null";
+      # Build debug profile to match `cargo build` / `cargo test` defaults
+      CARGO_PROFILE = "";
+    }
+  );
+
   # Build the actual crate
   harmonia = craneLib.buildPackage (
     commonArgs
@@ -76,9 +92,12 @@ let
   tests = craneLib.mkCargoDerivation (
     commonArgs
     // {
-      inherit cargoArtifacts;
+      cargoArtifacts = cargoArtifactsCov;
       pnameSuffix = "-llvm-cov";
       doInstallCargoArtifacts = false;
+
+      # Use same RUSTFLAGS as cargoArtifactsCov to avoid rebuilding dependencies
+      CARGO_BUILD_RUSTFLAGS = coverageRustflags;
 
       nativeBuildInputs = [
         nix
@@ -88,7 +107,7 @@ let
       ];
 
       # Custom build command following nomad pattern:
-      # 1. Build binaries with instrumentation
+      # 1. Build binaries with instrumentation (deps already built via cargoArtifactsCov)
       # 2. Run tests with instrumented binaries via env vars
       # 3. Generate report separately with --codecov
       buildPhaseCargoCommand = ''
@@ -99,10 +118,13 @@ let
           export _NIX_TEST_NO_SANDBOX="1"
         ''}
 
-        # Get coverage environment (LLVM_PROFILE_FILE, RUSTFLAGS, etc.)
-        eval "$(cargo llvm-cov show-env --export-prefix)"
+        # Set up coverage profile output (but don't override RUSTFLAGS - already set via CARGO_BUILD_RUSTFLAGS)
+        export LLVM_PROFILE_FILE="$PWD/target/harmonia-%p-%8m.profraw"
+        export CARGO_LLVM_COV=1
+        export CARGO_LLVM_COV_TARGET_DIR="$PWD/target"
 
         # Build workspace binaries with coverage instrumentation
+        # Dependencies already built with same flags via cargoArtifactsCov
         cargo build --workspace
 
         # Point integration tests to instrumented binaries for coverage
