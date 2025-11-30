@@ -63,7 +63,6 @@
             }
             // lib.optionalAttrs pkgs.stdenv.isLinux {
               nix-daemon = import ./tests/nix-daemon.nix testArgs;
-              nix-daemon-retry = import ./tests/nix-daemon-retry.nix testArgs;
               harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
             }
             // packages

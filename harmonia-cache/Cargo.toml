@@ -43,6 +43,7 @@ prometheus = { workspace = true }
 [dev-dependencies]
 harmonia-utils-test = { path = "../harmonia-utils-test" }
 nix = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
 
 [lints]
 workspace = true

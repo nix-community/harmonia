@@ -577,14 +577,6 @@ impl TestCache {
 /// Set up a custom Nix environment with all required directories and env vars.
 /// Returns environment variables for nix commands.
 pub fn setup_nix_env(root: &std::path::Path) -> Vec<(String, String)> {
-    // Create required directories
-    std::fs::create_dir_all(root.join("store")).expect("Failed to create store dir");
-    std::fs::create_dir_all(root.join("var/log/nix/drvs")).expect("Failed to create log dir");
-    std::fs::create_dir_all(root.join("var/nix/profiles")).expect("Failed to create profiles dir");
-    std::fs::create_dir_all(root.join("var/nix/db")).expect("Failed to create db dir");
-    std::fs::create_dir_all(root.join("etc")).expect("Failed to create etc dir");
-    std::fs::create_dir_all(root.join("cache")).expect("Failed to create cache dir");
-
     vec![
         (
             "NIX_STORE_DIR".to_string(),
