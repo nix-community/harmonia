@@ -15,6 +15,7 @@
       cargo
       cargo-watch
       cargo-llvm-cov
+      cargo-nextest
       # LLVM tools needed for cargo-llvm-cov
       llvmPackages.bintools-unwrapped
     ];
