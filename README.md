@@ -296,6 +296,10 @@ scrape_configs:
       - targets: ['your-harmonia-host:5000']
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and code style guidelines. For architecture details, see [docs/architecture](docs/architecture/).
+
 ## Inspiration
 
 - [eris](https://github.com/thoughtpolice/eris)
