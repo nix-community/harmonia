@@ -122,6 +122,28 @@ fn test_derivation_outputs() {
     assert_eq!(derivers, vec![drv.path]);
 }
 
+/// Verify CA realisations roundtrip through the BuildTraceV3 table.
+#[test]
+fn test_realisation_roundtrip() {
+    let db = StoreDb::open_memory().unwrap();
+
+    let drv = "dddddddddddddddddddddddddddddddd-hello.drv";
+    let out = make_path("oooooooooooooooooooooooooooooooo", "hello");
+
+    assert!(db.query_realisation(drv, "out").unwrap().is_none());
+
+    db.register_realisation(drv, "out", &out, Some("k:sig1 k:sig2"))
+        .unwrap();
+
+    let r = db.query_realisation(drv, "out").unwrap().unwrap();
+    assert_eq!(r.drv_path, drv);
+    assert_eq!(r.output_name, "out");
+    assert_eq!(r.output_path, out);
+    assert_eq!(r.signatures.as_deref(), Some("k:sig1 k:sig2"));
+
+    assert!(db.query_realisation(drv, "dev").unwrap().is_none());
+}
+
 /// Verify path invalidation cascades correctly.
 #[test]
 fn test_invalidation_cascade() {

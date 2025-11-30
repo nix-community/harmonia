@@ -7,6 +7,7 @@ use bytes::Bytes;
 use thiserror::Error;
 
 use crate::ProtocolVersion;
+use crate::version::FeatureSet;
 use harmonia_store_core::store_path::StoreDir;
 
 use super::NixRead;
@@ -85,6 +86,7 @@ impl From<Operation> for OperationType {
 
 pub struct Builder {
     version: ProtocolVersion,
+    features: FeatureSet,
     store_dir: StoreDir,
     ops: VecDeque<Operation>,
 }
@@ -93,6 +95,7 @@ impl Builder {
     pub fn new() -> Builder {
         Builder {
             version: Default::default(),
+            features: crate::version::supported_features(),
             store_dir: Default::default(),
             ops: VecDeque::new(),
         }
@@ -137,6 +140,7 @@ impl Builder {
     pub fn build(&mut self) -> Mock {
         Mock {
             version: self.version,
+            features: self.features.clone(),
             store_dir: self.store_dir.clone(),
             ops: self.ops.clone(),
         }
@@ -151,6 +155,7 @@ impl Default for Builder {
 
 pub struct Mock {
     version: ProtocolVersion,
+    features: FeatureSet,
     store_dir: StoreDir,
     ops: VecDeque<Operation>,
 }
@@ -164,6 +169,10 @@ impl NixRead for Mock {
 
     fn store_dir(&self) -> &StoreDir {
         &self.store_dir
+    }
+
+    fn features(&self) -> &FeatureSet {
+        &self.features
     }
 
     async fn try_read_number(&mut self) -> Result<Option<u64>, Self::Error> {

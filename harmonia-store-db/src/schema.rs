@@ -46,36 +46,21 @@ create table if not exists DerivationOutputs (
 create index if not exists IndexDerivationOutputs on DerivationOutputs(path);
 "#;
 
-/// Content-addressed derivations schema (Realisations, RealisationsRefs)
+/// Content-addressed derivations schema (BuildTraceV3).
+///
+/// Upstream Nix versions the CA tables independently (Realisations →
+/// BuildTraceV3) so users can switch experiment versions without migration; we
+/// only target the current revision.
 pub const CA_SCHEMA_SQL: &str = r#"
-create table if not exists Realisations (
+create table if not exists BuildTraceV3 (
     id integer primary key autoincrement not null,
     drvPath text not null,
     outputName text not null,
-    outputPath integer not null,
-    signatures text,
-    foreign key (outputPath) references ValidPaths(id) on delete cascade
+    outputPath text not null,
+    signatures text
 );
 
-create index if not exists IndexRealisations on Realisations(drvPath, outputName);
-
-create trigger if not exists DeleteSelfRefsViaRealisations before delete on ValidPaths
-  begin
-    delete from RealisationsRefs where realisationReference in (
-      select id from Realisations where outputPath = old.id
-    );
-  end;
-
-create table if not exists RealisationsRefs (
-    referrer integer not null,
-    realisationReference integer,
-    foreign key (referrer) references Realisations(id) on delete cascade,
-    foreign key (realisationReference) references Realisations(id) on delete restrict
-);
-
-create index if not exists IndexRealisationsRefsRealisationReference on RealisationsRefs(realisationReference);
-create index if not exists IndexRealisationsRefs on RealisationsRefs(referrer);
-create index if not exists IndexRealisationsRefsOnOutputPath on Realisations(outputPath);
+create index if not exists IndexBuildTraceV3 on BuildTraceV3(drvPath, outputName);
 "#;
 
 /// Schema version (matches Nix 2.0+)

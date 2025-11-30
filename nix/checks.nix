@@ -6,13 +6,6 @@
   packageSet,
   treefmt,
 }:
-let
-  testArgs = {
-    inherit pkgs self;
-  };
-  packages = lib.mapAttrs' (n: lib.nameValuePair "package-${n}") self.packages.${system};
-  devShells = lib.mapAttrs' (n: lib.nameValuePair "devShell-${n}") self.devShells.${system};
-in
 {
   inherit (packageSet) tests clippy;
   treefmt = treefmt.config.build.check self;
@@ -26,10 +19,13 @@ in
     ]
   );
 }
-// lib.optionalAttrs pkgs.stdenv.isLinux {
-  nix-daemon = import ./tests/nix-daemon.nix testArgs;
-  harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
-  chroot-store = import ./tests/chroot-store.nix testArgs;
-}
-// packages
-// devShells
+// lib.optionalAttrs pkgs.stdenv.isLinux (
+  lib.mapAttrs' (
+    name: _:
+    lib.nameValuePair (lib.removeSuffix ".nix" name) (
+      import (./tests + "/${name}") { inherit pkgs self; }
+    )
+  ) (builtins.readDir ./tests)
+)
+// lib.mapAttrs' (n: lib.nameValuePair "package-${n}") self.packages.${system}
+// lib.mapAttrs' (n: lib.nameValuePair "devShell-${n}") self.devShells.${system}

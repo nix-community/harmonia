@@ -19,7 +19,7 @@ use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput};
 use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
-use harmonia_store_core::realisation::Realisation;
+use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathName,
 };
@@ -337,16 +337,100 @@ impl NixDeserialize for ActivityResult {
     }
 }
 
-// ========== Realisation ==========
+// ========== Realisation / DrvOutput ==========
+//
+// Wire format requires the `realisation-with-path-not-hash` feature.
+// Harmonia only advertises/accepts the new format; if the peer did not
+// negotiate the feature these serializers fail explicitly so the protocol
+// doesn't get desynced.
+
+fn require_realisation_feature_ser<W: NixWrite>(writer: &W) -> Result<(), W::Error> {
+    use crate::ser::Error;
+    if writer.has_feature(crate::version::FEATURE_REALISATION_WITH_PATH) {
+        Ok(())
+    } else {
+        Err(W::Error::unsupported_data(format_args!(
+            "peer is missing the '{}' protocol feature, needed to support content-addressing derivations",
+            crate::version::FEATURE_REALISATION_WITH_PATH
+        )))
+    }
+}
+
+fn require_realisation_feature_de<R: ?Sized + NixRead>(reader: &R) -> Result<(), R::Error> {
+    use crate::de::Error;
+    if reader.has_feature(crate::version::FEATURE_REALISATION_WITH_PATH) {
+        Ok(())
+    } else {
+        Err(R::Error::invalid_data(format_args!(
+            "peer is missing the '{}' protocol feature, needed to support content-addressing derivations",
+            crate::version::FEATURE_REALISATION_WITH_PATH
+        )))
+    }
+}
+
+impl NixSerialize for DrvOutput {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: NixWrite,
+    {
+        require_realisation_feature_ser(writer)?;
+        writer.write_value(&self.drv_path).await?;
+        writer.write_value(&self.output_name).await
+    }
+}
+
+impl NixDeserialize for DrvOutput {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + NixRead + Send,
+    {
+        let Some(drv_path) = reader.try_read_value::<StorePath>().await? else {
+            return Ok(None);
+        };
+        require_realisation_feature_de(reader)?;
+        let output_name = reader.read_value().await?;
+        Ok(Some(DrvOutput {
+            drv_path,
+            output_name,
+        }))
+    }
+}
+
+impl NixSerialize for UnkeyedRealisation {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: NixWrite,
+    {
+        require_realisation_feature_ser(writer)?;
+        writer.write_value(&self.out_path).await?;
+        writer.write_value(&self.signatures).await
+    }
+}
+
+impl NixDeserialize for UnkeyedRealisation {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + NixRead + Send,
+    {
+        let Some(out_path) = reader.try_read_value::<StorePath>().await? else {
+            return Ok(None);
+        };
+        require_realisation_feature_de(reader)?;
+        let signatures = reader.read_value().await?;
+        Ok(Some(UnkeyedRealisation {
+            out_path,
+            signatures,
+        }))
+    }
+}
 
 impl NixSerialize for Realisation {
     async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
     where
         W: NixWrite,
     {
-        use crate::ser::Error;
-        let s = serde_json::to_string(&self).map_err(W::Error::custom)?;
-        writer.write_slice(s.as_bytes()).await
+        writer.write_value(&self.id).await?;
+        writer.write_value(&self.value).await
     }
 }
 
@@ -355,13 +439,46 @@ impl NixDeserialize for Realisation {
     where
         R: ?Sized + NixRead + Send,
     {
+        let Some(id) = reader.try_read_value::<DrvOutput>().await? else {
+            return Ok(None);
+        };
+        let value = reader.read_value().await?;
+        Ok(Some(Realisation { id, value }))
+    }
+}
+
+/// `Option<UnkeyedRealisation>` uses a 0/1 tag word like upstream's
+/// `WorkerProto::Serialise<std::optional<UnkeyedRealisation>>`.
+impl NixSerialize for Option<UnkeyedRealisation> {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: NixWrite,
+    {
+        match self {
+            None => writer.write_number(0).await,
+            Some(v) => {
+                writer.write_number(1).await?;
+                writer.write_value(v).await
+            }
+        }
+    }
+}
+
+impl NixDeserialize for Option<UnkeyedRealisation> {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + NixRead + Send,
+    {
         use crate::de::Error;
-        if let Some(buf) = reader.try_read_bytes().await? {
-            Ok(Some(
-                serde_json::from_slice(&buf).map_err(R::Error::custom)?,
-            ))
-        } else {
-            Ok(None)
+        let Some(tag) = reader.try_read_number().await? else {
+            return Ok(None);
+        };
+        match tag {
+            0 => Ok(Some(None)),
+            1 => Ok(Some(Some(reader.read_value().await?))),
+            _ => Err(R::Error::invalid_data(
+                "invalid optional build trace from remote",
+            )),
         }
     }
 }
@@ -576,16 +693,6 @@ nix_serialize_remote!(
     harmonia_store_core::store_path::StorePathHash
 );
 
-// DrvOutput
-nix_deserialize_remote!(
-    #[nix(from_str)]
-    harmonia_store_core::realisation::DrvOutput
-);
-nix_serialize_remote!(
-    #[nix(display)]
-    harmonia_store_core::realisation::DrvOutput
-);
-
 // StoreDir - uses the store_dir from the NixRead/NixWrite context
 impl crate::de::NixDeserialize for harmonia_store_core::store_path::StoreDir {
     async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
@@ -605,77 +712,49 @@ impl crate::ser::NixSerialize for harmonia_store_core::store_path::StoreDir {
 
 #[cfg(test)]
 mod tests {
-
-    use crate::de::NixRead;
     use crate::ser::NixWrite;
-    use harmonia_store_core::realisation::Realisation;
-    use rstest::rstest;
-    use std::collections::BTreeMap;
+    use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 
-    macro_rules! set {
-        () => { std::collections::BTreeSet::new() };
-        ($($x:expr),+ $(,)?) => {{
-            let mut ret = std::collections::BTreeSet::new();
-            $(
-                ret.insert($x.parse().unwrap());
-            )+
-            ret
-        }};
-    }
-
-    macro_rules! btree_map {
-        () => { BTreeMap::new() };
-        ($($k:expr => $v:expr),+ $(,)?) => {{
-            let mut ret = BTreeMap::new();
-            $(
-                ret.insert($k.parse().unwrap(), $v.parse().unwrap());
-            )+
-            ret
-        }};
-    }
-
-    #[tokio::test]
-    #[rstest]
-    #[case(
+    fn sample_realisation() -> Realisation {
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out".parse().unwrap(),
-            out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
-            signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
-            dependent_realisations: btree_map![
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev",
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin",
+            id: DrvOutput {
+                drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+                output_name: "out".parse().unwrap(),
+            },
+            value: UnkeyedRealisation {
+                out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3"
+                    .parse()
+                    .unwrap(),
+                signatures: ["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==".parse().unwrap()].into(),
+            },
+        }
+    }
 
-            ],
-        },
-        "{\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"],\"dependentRealisations\":{\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev\",\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin\"}}",
-    )]
-    async fn nix_write_realisation(#[case] value: Realisation, #[case] expected: &str) {
+    /// Pins the exact wire bytes for interop with upstream Nix; the
+    /// `wire_roundtrip` proptests only check self-consistency.
+    #[tokio::test]
+    async fn nix_write_realisation() {
+        let value = sample_realisation();
         let mut mock = crate::ser::mock::Builder::new()
-            .write_slice(expected.as_bytes())
+            .write_display("/nix/store/g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv")
+            .write_display("out")
+            .write_display("/nix/store/7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3")
+            .write_number(1)
+            .write_display("cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==")
             .build();
         mock.write_value(&value).await.unwrap();
     }
 
     #[tokio::test]
-    #[rstest]
-    #[case(
-        Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out".parse().unwrap(),
-            out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
-            signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
-            dependent_realisations: btree_map![
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev",
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin",
-
-            ],
-        },
-        "{\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"],\"dependentRealisations\":{\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev\",\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin\"}}",
-    )]
-    async fn nix_read_realisation(#[case] expected: Realisation, #[case] value: &str) {
-        let mut mock = crate::de::mock::Builder::new()
-            .read_slice(value.as_bytes())
+    async fn nix_write_drv_output_missing_feature() {
+        let value = sample_realisation().id;
+        let mut mock = crate::ser::mock::Builder::new()
+            .features(Default::default())
             .build();
-        let actual: Realisation = mock.read_value().await.unwrap();
-        assert_eq!(actual, expected);
+        let err = mock.write_value(&value).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(crate::version::FEATURE_REALISATION_WITH_PATH)
+        );
     }
 }

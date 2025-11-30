@@ -37,16 +37,17 @@ use harmonia_protocol::log::LogMessage;
 use harmonia_protocol::ser::{NixWrite, NixWriter};
 use harmonia_protocol::types::{AddToStoreItem, DaemonPath};
 use harmonia_protocol::valid_path_info::ValidPathInfo;
+use harmonia_protocol::version::{FeatureSet, supported_features};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
-use harmonia_store_core::realisation::{DrvOutput, Realisation};
+use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
 use harmonia_utils_io::{AsyncBufReadCompat, BytesReader};
 
-const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::from_parts(1, 37);
+const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::from_parts(1, 38);
 const NIX_VERSION: &str = "2.24.0 (Harmonia)";
 
 pub struct RecoverableError {
@@ -518,7 +519,7 @@ where
     fn query_realisation<'a>(
         &'a mut self,
         output_id: &'a DrvOutput,
-    ) -> impl ResultLog<Output = DaemonResult<BTreeSet<Realisation>>> + Send + 'a {
+    ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedRealisation>>> + Send + 'a {
         let ret = Box::pin(self.0.query_realisation(output_id));
         trace!("QueryRealisation Size {}", size_of_val(ret.deref()));
         ret
@@ -624,9 +625,26 @@ where
         }
         self.reader.set_version(version);
         self.writer.set_version(version);
+
+        // Exchange features (protocol >= 1.38).
+        let mut features = FeatureSet::new();
+        if version.minor() >= 38 {
+            let client_features: FeatureSet =
+                self.reader.read_value().await.with_field("features")?;
+            let local = supported_features();
+            self.writer
+                .write_value(&local)
+                .await
+                .with_field("features")?;
+            self.writer.flush().await?;
+            features = local.intersection(&client_features).cloned().collect();
+        }
+        self.reader.set_features(features.clone());
+        self.writer.set_features(features.clone());
         debug!(
             ?version,
             ?client_version,
+            ?features,
             "Server Version is {}, Client version is {}",
             version,
             client_version
@@ -993,7 +1011,9 @@ where
                 self.writer.write_value(&value).await?;
             }
             AddMultipleToStore(req) => {
-                let builder = NixReader::builder().set_version(self.reader.version());
+                let builder = NixReader::builder()
+                    .set_version(self.reader.version())
+                    .set_features(self.reader.features().clone());
                 let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
                 let mut framed = FramedReader::new(buf_reader);
                 let source = builder.build_buffered(&mut framed);

@@ -175,25 +175,16 @@ impl StoreDb {
         &self,
         drv_path: &str,
         output_name: &str,
-        output_path_id: i64,
+        output_path: &str,
         signatures: Option<&str>,
     ) -> Result<i64> {
         self.conn.execute(
             r#"
-            INSERT INTO Realisations (drvPath, outputName, outputPath, signatures)
+            INSERT INTO BuildTraceV3 (drvPath, outputName, outputPath, signatures)
             VALUES (?1, ?2, ?3, ?4)
             "#,
-            params![drv_path, output_name, output_path_id, signatures],
+            params![drv_path, output_name, output_path, signatures],
         )?;
         Ok(self.conn.last_insert_rowid())
-    }
-
-    /// Add a reference between realisations.
-    pub fn add_realisation_reference(&self, referrer_id: i64, reference_id: i64) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO RealisationsRefs (referrer, realisationReference) VALUES (?1, ?2)",
-            params![referrer_id, reference_id],
-        )?;
-        Ok(())
     }
 }

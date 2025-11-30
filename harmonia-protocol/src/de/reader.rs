@@ -10,6 +10,7 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::ProtocolVersion;
+use crate::version::FeatureSet;
 use harmonia_store_core::store_path::StoreDir;
 use harmonia_utils_io::{
     AsyncBytesRead, BytesReader, DEFAULT_MAX_BUF_SIZE, DEFAULT_RESERVED_BUF_SIZE,
@@ -22,6 +23,7 @@ pub struct NixReaderBuilder {
     reserved_buf_size: usize,
     max_buf_size: usize,
     version: ProtocolVersion,
+    features: FeatureSet,
     store_dir: StoreDir,
 }
 
@@ -31,6 +33,7 @@ impl Default for NixReaderBuilder {
             reserved_buf_size: DEFAULT_RESERVED_BUF_SIZE,
             max_buf_size: DEFAULT_MAX_BUF_SIZE,
             version: Default::default(),
+            features: Default::default(),
             store_dir: Default::default(),
         }
     }
@@ -52,6 +55,11 @@ impl NixReaderBuilder {
         self
     }
 
+    pub fn set_features(mut self, features: FeatureSet) -> Self {
+        self.features = features;
+        self
+    }
+
     pub fn set_store_dir(mut self, store_dir: &StoreDir) -> Self {
         self.store_dir = store_dir.clone();
         self
@@ -66,6 +74,7 @@ impl NixReaderBuilder {
             reserved_buf_size: self.reserved_buf_size,
             max_buf_size: self.max_buf_size,
             version: self.version,
+            features: self.features,
             store_dir: self.store_dir,
         }
     }
@@ -90,6 +99,7 @@ pin_project! {
         reserved_buf_size: usize,
         max_buf_size: usize,
         version: ProtocolVersion,
+        features: FeatureSet,
         store_dir: StoreDir,
     }
 }
@@ -112,6 +122,18 @@ where
 impl<R> NixReader<R> {
     pub fn set_version(&mut self, version: ProtocolVersion) {
         self.version = version;
+    }
+
+    pub fn set_features(&mut self, features: FeatureSet) {
+        self.features = features;
+    }
+
+    pub fn features(&self) -> &FeatureSet {
+        &self.features
+    }
+
+    pub fn version(&self) -> ProtocolVersion {
+        self.version
     }
 
     pub fn get_ref(&self) -> &R {
@@ -145,6 +167,10 @@ where
 
     fn store_dir(&self) -> &StoreDir {
         &self.store_dir
+    }
+
+    fn features(&self) -> &FeatureSet {
+        &self.features
     }
 
     async fn try_read_number(&mut self) -> Result<Option<u64>, Self::Error> {

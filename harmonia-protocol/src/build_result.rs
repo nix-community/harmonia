@@ -14,7 +14,7 @@ use crate::de::{Error as _, NixDeserialize as NixDeserializeTrait, NixRead};
 use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
 use crate::types::{DaemonInt, DaemonString, DaemonTime};
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::realisation::Realisation;
+use harmonia_store_core::realisation::UnkeyedRealisation;
 
 /// Success status values for BuildResult.
 ///
@@ -82,7 +82,7 @@ pub struct BuildResultSuccess {
     pub status: SuccessStatus,
     /// For derivations, a mapping from output names to realisations.
     #[serde(default)]
-    pub built_outputs: BTreeMap<OutputName, Realisation>,
+    pub built_outputs: BTreeMap<OutputName, UnkeyedRealisation>,
 }
 
 /// Failed build result data.
@@ -159,7 +159,16 @@ impl NixDeserializeTrait for BuildResult {
         let stop_time: DaemonTime = reader.read_value().await?;
         let cpu_user: Option<Microseconds> = reader.read_value().await?;
         let cpu_system: Option<Microseconds> = reader.read_value().await?;
-        let built_outputs: BTreeMap<OutputName, Realisation> = reader.read_value().await?;
+        let built_outputs: BTreeMap<OutputName, UnkeyedRealisation> =
+            if reader.has_feature(crate::version::FEATURE_REALISATION_WITH_PATH) {
+                reader.read_value().await?
+            } else {
+                // Legacy peers send a StringMap of JSON realisations. We don't
+                // implement the back-compat parsing; just drain the map and
+                // discard, since harmonia never builds.
+                let _ignored: BTreeMap<String, String> = reader.read_value().await?;
+                BTreeMap::new()
+            };
 
         let inner = if let Ok(status) = SuccessStatus::try_from(status_raw) {
             BuildResultInner::Success(BuildResultSuccess {
@@ -199,14 +208,14 @@ impl NixSerializeTrait for BuildResult {
             u16,
             &DaemonString,
             bool,
-            &BTreeMap<OutputName, Realisation>,
+            &BTreeMap<OutputName, UnkeyedRealisation>,
         ) = match &self.inner {
             BuildResultInner::Success(s) => {
                 static EMPTY_STRING: DaemonString = DaemonString::new();
                 (s.status.into(), &EMPTY_STRING, false, &s.built_outputs)
             }
             BuildResultInner::Failure(f) => {
-                static EMPTY_MAP: BTreeMap<OutputName, Realisation> = BTreeMap::new();
+                static EMPTY_MAP: BTreeMap<OutputName, UnkeyedRealisation> = BTreeMap::new();
                 (
                     f.status.into(),
                     &f.error_msg,
@@ -224,9 +233,119 @@ impl NixSerializeTrait for BuildResult {
         writer.write_value(&self.stop_time).await?;
         writer.write_value(&self.cpu_user).await?;
         writer.write_value(&self.cpu_system).await?;
-        writer.write_value(built_outputs).await?;
+        if writer.has_feature(crate::version::FEATURE_REALISATION_WITH_PATH) {
+            writer.write_value(built_outputs).await?;
+        } else {
+            // Legacy peers expect a StringMap of JSON realisations keyed by
+            // `sha256:<hex>!<out>`. The hash modulo no longer exists; old
+            // clients only extract `outputName` and `outPath`, so a dummy hash
+            // suffices.
+            let dummy_hash =
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+            writer.write_value(&built_outputs.len()).await?;
+            for (output_name, realisation) in built_outputs {
+                let id = format!("{dummy_hash}!{output_name}");
+                let json = format!(r#"{{"id":"{id}","outPath":"{}"}}"#, realisation.out_path);
+                writer.write_slice(id.as_bytes()).await?;
+                writer.write_slice(json.as_bytes()).await?;
+            }
+        }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod arbitrary {
+    use super::*;
+    use proptest::prelude::*;
+
+    impl Arbitrary for SuccessStatus {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+        fn arbitrary_with(_: ()) -> Self::Strategy {
+            use SuccessStatus::*;
+            prop_oneof![
+                Just(Built),
+                Just(Substituted),
+                Just(AlreadyValid),
+                Just(ResolvesToAlreadyValid),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for FailureStatus {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+        fn arbitrary_with(_: ()) -> Self::Strategy {
+            use FailureStatus::*;
+            prop_oneof![
+                Just(PermanentFailure),
+                Just(InputRejected),
+                Just(OutputRejected),
+                Just(TransientFailure),
+                Just(CachedFailure),
+                Just(TimedOut),
+                Just(MiscFailure),
+                Just(DependencyFailed),
+                Just(LogLimitExceeded),
+                Just(NotDeterministic),
+                Just(NoSubstituters),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for BuildResult {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+        fn arbitrary_with(_: ()) -> Self::Strategy {
+            let success = (
+                any::<SuccessStatus>(),
+                proptest::collection::btree_map(
+                    any::<OutputName>(),
+                    any::<UnkeyedRealisation>(),
+                    0..4,
+                ),
+            )
+                .prop_map(|(status, built_outputs)| {
+                    BuildResultInner::Success(BuildResultSuccess {
+                        status,
+                        built_outputs,
+                    })
+                });
+            let failure = (any::<FailureStatus>(), any::<Vec<u8>>(), any::<bool>()).prop_map(
+                |(status, error_msg, is_non_deterministic)| {
+                    BuildResultInner::Failure(BuildResultFailure {
+                        status,
+                        error_msg: error_msg.into(),
+                        is_non_deterministic,
+                    })
+                },
+            );
+            (
+                prop_oneof![success, failure],
+                any::<DaemonInt>(),
+                any::<DaemonTime>(),
+                any::<DaemonTime>(),
+                any::<Option<Microseconds>>(),
+                any::<Option<Microseconds>>(),
+            )
+                .prop_map(
+                    |(inner, times_built, start_time, stop_time, cpu_user, cpu_system)| {
+                        BuildResult {
+                            inner,
+                            times_built,
+                            start_time,
+                            stop_time,
+                            cpu_user,
+                            cpu_system,
+                        }
+                    },
+                )
+                .boxed()
+        }
     }
 }
 
@@ -320,5 +439,70 @@ impl<'de> Deserialize<'de> for BuildResultInner {
                 .map(BuildResultInner::Failure)
                 .map_err(D::Error::custom)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use tokio::io::AsyncWriteExt as _;
+
+    use super::*;
+    use crate::de::{NixRead, NixReader};
+    use crate::ser::{NixWrite, NixWriter};
+
+    fn sample_success() -> BuildResult {
+        BuildResult {
+            inner: BuildResultInner::Success(BuildResultSuccess {
+                status: SuccessStatus::Built,
+                built_outputs: [(
+                    "out".parse().unwrap(),
+                    UnkeyedRealisation {
+                        out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
+                        signatures: Default::default(),
+                    },
+                )]
+                .into(),
+            }),
+            times_built: 1,
+            start_time: 30,
+            stop_time: 50,
+            cpu_user: Some(500.into()),
+            cpu_system: Some(604.into()),
+        }
+    }
+
+    async fn write(features: crate::version::FeatureSet, v: &BuildResult) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut w = NixWriter::builder().set_features(features).build(&mut buf);
+        w.write_value(v).await.unwrap();
+        w.flush().await.unwrap();
+        drop(w);
+        buf
+    }
+
+    async fn read(features: crate::version::FeatureSet, buf: Vec<u8>) -> BuildResult {
+        let mut r = NixReader::builder()
+            .set_features(features)
+            .build_buffered(Cursor::new(buf));
+        r.read_value().await.unwrap()
+    }
+
+    /// Without the feature, the writer must emit the legacy StringMap form
+    /// (so an old peer keeps decoding), and our reader must be able to drain
+    /// it without desyncing the stream — built_outputs are simply dropped.
+    #[tokio::test]
+    async fn wire_roundtrip_without_feature_degrades_gracefully() {
+        let v = sample_success();
+        let buf = write(Default::default(), &v).await;
+        assert!(buf.windows(4).any(|w| w == b"!out"));
+        let back = read(Default::default(), buf).await;
+        let BuildResultInner::Success(s) = &back.inner else {
+            panic!("expected success")
+        };
+        assert!(s.built_outputs.is_empty());
+        assert_eq!(back.times_built, v.times_built);
+        assert_eq!(back.start_time, v.start_time);
     }
 }

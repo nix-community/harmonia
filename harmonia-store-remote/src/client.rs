@@ -5,7 +5,7 @@
 // This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
 // Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 use std::pin::Pin;
@@ -23,7 +23,6 @@ use tokio::sync::oneshot;
 use tracing::{debug, info, trace};
 
 // From harmonia-protocol
-use harmonia_protocol::ProtocolVersion;
 use harmonia_protocol::daemon_wire::logger::{
     FutureResultExt, ProcessStderr, RawLogMessage, ResultLog, ResultLogExt,
 };
@@ -41,12 +40,14 @@ use harmonia_protocol::types::{
     DaemonResultExt as _, DaemonStore, HandshakeDaemonStore, TrustLevel,
 };
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
+use harmonia_protocol::version::{FeatureSet, supported_features};
+use harmonia_protocol::{FEATURE_REALISATION_WITH_PATH, ProtocolVersion};
 
 // From harmonia-store-core
 use harmonia_protocol::log::{LogMessage, Message, Verbosity};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
-use harmonia_store_core::realisation::{DrvOutput, Realisation};
+use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddressMethodAlgorithm, StoreDir, StorePath, StorePathHash, StorePathSet,
@@ -240,9 +241,23 @@ where
                 .with_field("clientVersion")?;
             reader.set_version(version);
             writer.set_version(version);
+
+            // Exchange features (protocol >= 1.38).
+            let mut features = FeatureSet::new();
+            if version.minor() >= 38 {
+                let local = supported_features();
+                writer.write_value(&local).await.with_field("features")?;
+                writer.flush().await.with_field("features")?;
+                let daemon_features: FeatureSet =
+                    reader.read_value().await.with_field("features")?;
+                features = local.intersection(&daemon_features).cloned().collect();
+            }
+            reader.set_features(features.clone());
+            writer.set_features(features.clone());
             info!(
                 ?version,
                 ?server_version,
+                ?features,
                 "Client Version is {}, server version is {}",
                 version,
                 server_version
@@ -285,6 +300,7 @@ where
                         host,
                         reader,
                         writer,
+                        features,
                         daemon_nix_version,
                         remote_trusts_us,
                     })
@@ -303,6 +319,7 @@ pub struct DaemonClient<R, W> {
     host: String,
     reader: NixReader<Lending<BytesReader<R>, NarBytesReader<BytesReader<R>>>>,
     writer: NixWriter<W>,
+    features: FeatureSet,
     daemon_nix_version: Option<String>,
     remote_trusts_us: TrustLevel,
 }
@@ -320,6 +337,10 @@ impl<R, W> DaemonClient<R, W> {
 
     pub fn daemon_nix_version(&self) -> Option<&str> {
         self.daemon_nix_version.as_deref()
+    }
+
+    pub fn has_feature(&self, feature: &str) -> bool {
+        self.features.contains(feature)
     }
 }
 
@@ -639,8 +660,10 @@ where
             let driver = async {
                 let id = self.id;
                 let version = self.writer.version();
+                let features = self.writer.features().clone();
                 let mut writer = NixWriter::builder()
                     .set_version(version)
+                    .set_features(features)
                     .build(FramedWriter::new(&mut self.writer));
 
                 debug!(id, "Write write stream");
@@ -874,8 +897,14 @@ where
     fn query_realisation<'a>(
         &'a mut self,
         output_id: &'a DrvOutput,
-    ) -> impl ResultLog<Output = DaemonResult<BTreeSet<Realisation>>> + Send + 'a {
+    ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedRealisation>>> + Send + 'a {
         async move {
+            if !self.has_feature(FEATURE_REALISATION_WITH_PATH) {
+                return Err(DaemonErrorKind::Custom(format!(
+                    "the daemon is missing the '{FEATURE_REALISATION_WITH_PATH}' protocol feature, needed to support content-addressing derivations"
+                ))
+                .into());
+            }
             self.writer
                 .write_value(&Operation::QueryRealisation)
                 .await?;

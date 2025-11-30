@@ -418,8 +418,6 @@ pub struct QueryMissingResult {
     pub nar_size: u64,
 }
 
-pub type QueryRealisationResponse = Vec<Realisation>;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
 pub struct AddMultipleToStoreRequest {
     pub repair: bool,
