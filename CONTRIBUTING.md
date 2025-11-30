@@ -123,24 +123,6 @@ nix build .#clippy -L
 - Use `tokio` for async runtime
 - Prefer `log` macros for logging
 
-## Project Structure
-
-Harmonia is a Cargo workspace with these crates:
-
-| Crate | Description |
-|-------|-------------|
-| `harmonia-cache` | HTTP binary cache server |
-| `harmonia-daemon` | Nix daemon implementation |
-| `harmonia-client` | Client library |
-| `harmonia-protocol` | Nix daemon wire protocol |
-| `harmonia-protocol-derive` | Proc macros for protocol serialization |
-| `harmonia-nar` | NAR archive handling |
-| `harmonia-store-core` | Store path types and signatures |
-| `harmonia-store-db` | SQLite store database |
-| `harmonia-store-remote` | Remote store connections |
-| `harmonia-ssh-store` | SSH store implementation |
-| `harmonia-utils-*` | Shared utilities (hash, io, encoding) |
-
 ## Pull Requests
 
 1. Fork and create a feature branch
