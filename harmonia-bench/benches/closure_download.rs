@@ -235,6 +235,8 @@ fn benchmark_closure_download(c: &mut Criterion) {
                     .status()
                     .unwrap();
                 assert!(status.success(), "nix copy failed");
+                // TODO: remove this artificial delay after testing bencher
+                std::thread::sleep(Duration::from_secs(1));
                 total += start.elapsed();
             }
             total
