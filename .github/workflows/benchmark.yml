@@ -13,6 +13,9 @@ jobs:
        github.event.context == 'buildbot/nix-build')
     steps:
       - uses: actions/checkout@v6
+        with:
+          # For status events, checkout the commit the status was reported on
+          ref: ${{ github.event.sha || github.sha }}
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -28,6 +31,8 @@ jobs:
           bencher run \
             --project harmonia \
             --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch '${{ github.event.branches[0].name || github.ref_name }}' \
+            --hash '${{ github.event.sha || github.sha }}' \
             --testbed github-actions \
             --adapter rust_criterion \
             --err \
