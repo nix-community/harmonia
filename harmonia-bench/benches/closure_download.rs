@@ -184,9 +184,9 @@ fn benchmark_closure_download(c: &mut Criterion) {
     eprintln!("Harmonia server running on port {}", port);
 
     let mut group = c.benchmark_group("closure");
-    // Downloading closure takes a while, adjust timing
+    // Downloading closure takes a while, use minimal iterations
     group.sample_size(10);
-    group.measurement_time(Duration::from_secs(60));
+    group.measurement_time(Duration::from_secs(5));
 
     group.bench_function("download", |b| {
         b.iter_custom(|iters| {
