@@ -38,6 +38,7 @@ jobs:
             --hash '${{ github.event.sha || github.sha }}' \
             --testbed github-actions \
             --adapter rust_criterion \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
             --err \
             'cargo bench --package harmonia-bench'
         env:
