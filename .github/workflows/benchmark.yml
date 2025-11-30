@@ -1,0 +1,32 @@
+name: Benchmark
+on:
+  status:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    # Only run on successful buildbot builds
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.state == 'success' &&
+       github.event.context == 'buildbot/nix-build')
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://cache.thalheim.io/
+            extra-trusted-public-keys = cache.thalheim.io-1:R7msbosLEZKrxk/lKxf9BTjOOH7Ax3H0Qj0/6wiHOgc=
+
+      - name: Run benchmark
+        uses: bencherdev/bencher@main
+        with:
+          command: cargo bench --package harmonia-bench
+          project: harmonia
+          testbed: github-actions
+          adapter: rust_criterion
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          HARMONIA_FLAKE: .#harmonia
