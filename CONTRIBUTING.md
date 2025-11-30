@@ -140,7 +140,18 @@ nix build .#clippy -L
 
 PRs are tested by buildbot-nix which runs:
 - `nix flake check` (clippy, tests, NixOS VM tests)
-- Coverage upload to Codecov
+
+### CodeRabbit
+
+[CodeRabbit](https://coderabbit.ai/) provides AI-powered code reviews on PRs. It automatically comments with suggestions for improvements, potential bugs, and style issues.
+
+### Codecov
+
+[Codecov](https://codecov.io/gh/nix-community/harmonia) tracks test coverage. Coverage reports are uploaded automatically after successful builds. PRs show coverage changes inline.
+
+### Bencher
+
+[Bencher](https://bencher.dev/perf/harmonia) tracks benchmark performance over time. Benchmarks run automatically when buildbot reports a successful build. Results are uploaded to detect performance regressions.
 
 All checks must pass before merging.
 
