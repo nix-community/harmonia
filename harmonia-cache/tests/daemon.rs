@@ -573,3 +573,112 @@ impl TestCache {
         self.tls_cert_path.as_ref()
     }
 }
+
+/// Set up a custom Nix environment with all required directories and env vars.
+/// Returns environment variables for nix commands.
+pub fn setup_nix_env(root: &std::path::Path) -> Vec<(String, String)> {
+    // Create required directories
+    std::fs::create_dir_all(root.join("store")).expect("Failed to create store dir");
+    std::fs::create_dir_all(root.join("var/log/nix/drvs")).expect("Failed to create log dir");
+    std::fs::create_dir_all(root.join("var/nix/profiles")).expect("Failed to create profiles dir");
+    std::fs::create_dir_all(root.join("var/nix/db")).expect("Failed to create db dir");
+    std::fs::create_dir_all(root.join("etc")).expect("Failed to create etc dir");
+    std::fs::create_dir_all(root.join("cache")).expect("Failed to create cache dir");
+
+    vec![
+        (
+            "NIX_STORE_DIR".to_string(),
+            root.join("store").to_string_lossy().to_string(),
+        ),
+        (
+            "NIX_DATA_DIR".to_string(),
+            root.join("share").to_string_lossy().to_string(),
+        ),
+        (
+            "NIX_LOG_DIR".to_string(),
+            root.join("var/log/nix").to_string_lossy().to_string(),
+        ),
+        (
+            "NIX_STATE_DIR".to_string(),
+            root.join("var/nix").to_string_lossy().to_string(),
+        ),
+        (
+            "NIX_CONF_DIR".to_string(),
+            root.join("etc").to_string_lossy().to_string(),
+        ),
+        (
+            "XDG_CACHE_HOME".to_string(),
+            root.join("cache").to_string_lossy().to_string(),
+        ),
+        (
+            "NIX_CONFIG".to_string(),
+            "substituters =\nconnect-timeout = 0\nsandbox = false".to_string(),
+        ),
+        ("_NIX_TEST_NO_SANDBOX".to_string(), "1".to_string()),
+        ("NIX_REMOTE".to_string(), "".to_string()),
+    ]
+}
+
+/// Build a simple derivation that outputs "hello" to the build log.
+/// Returns the derivation filename (hash-name.drv).
+pub fn build_hello_derivation(env_vars: &[(String, String)]) -> Result<String> {
+    // Use nix-build with a simple derivation expression
+    let expr = r#"
+        derivation {
+            name = "test-log";
+            system = builtins.currentSystem;
+            builder = "/bin/sh";
+            args = ["-c" "echo hello; echo done > $out"];
+        }
+    "#;
+
+    let mut cmd = Command::new("nix-build");
+    cmd.args(["--expr", expr, "--no-out-link"]);
+
+    // Clear NIX_REMOTE and set our custom env
+    cmd.env_remove("NIX_REMOTE");
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+
+    let output = cmd.output()?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "nix-build failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+
+    // The output is the store path, but we need the .drv path
+    // Use nix-store -qd to get the derivation
+    let store_path = String::from_utf8(output.stdout)?.trim().to_string();
+
+    let mut cmd = Command::new("nix-store");
+    cmd.args(["-qd", &store_path]);
+    cmd.env_remove("NIX_REMOTE");
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+
+    let output = cmd.output()?;
+    if !output.status.success() {
+        return Err(format!(
+            "nix-store -qd failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+
+    let drv_path = String::from_utf8(output.stdout)?.trim().to_string();
+
+    // Extract just the hash-name.drv part from the full path
+    let drv_name = std::path::Path::new(&drv_path)
+        .file_name()
+        .ok_or("No filename in drv path")?
+        .to_string_lossy()
+        .to_string();
+
+    Ok(drv_name)
+}
