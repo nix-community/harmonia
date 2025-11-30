@@ -97,11 +97,17 @@ fn benchmark_closure_download(c: &mut Criterion) {
                 );
 
                 // Initialize store
-                Command::new("nix-store")
+                let init_output = Command::new("nix-store")
                     .args(["--init", "--store", &store])
                     .env_remove("NIX_REMOTE")
-                    .status()
-                    .unwrap();
+                    .output()
+                    .expect("failed to run nix-store --init");
+                assert!(
+                    init_output.status.success(),
+                    "nix-store --init failed with status {}: {}",
+                    init_output.status,
+                    String::from_utf8_lossy(&init_output.stderr)
+                );
 
                 // Time the download
                 let start = Instant::now();
