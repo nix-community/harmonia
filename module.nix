@@ -52,52 +52,52 @@ in
       };
 
       cache = {
-        enable = lib.mkEnableOption (lib.mdDoc "Harmonia: Nix binary cache written in Rust");
+        enable = lib.mkEnableOption ("Harmonia: Nix binary cache written in Rust");
 
         signKeyPath = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
           default = null;
-          description = lib.mdDoc "DEPRECATED: Use `services.harmonia-dev.cache.signKeyPaths` instead. Path to the signing key to use for signing the cache";
+          description = "DEPRECATED: Use `services.harmonia-dev.cache.signKeyPaths` instead. Path to the signing key to use for signing the cache";
         };
 
         signKeyPaths = lib.mkOption {
           type = lib.types.listOf lib.types.path;
           default = [ ];
-          description = lib.mdDoc "Paths to the signing keys to use for signing the cache";
+          description = "Paths to the signing keys to use for signing the cache";
         };
 
         settings = lib.mkOption {
           type = lib.types.submodule { freeformType = format.type; };
 
-          description = lib.mdDoc "Settings to merge with the default configuration";
+          description = "Settings to merge with the default configuration";
         };
       };
 
       daemon = {
-        enable = lib.mkEnableOption (lib.mdDoc "Harmonia daemon: Nix daemon protocol implementation");
+        enable = lib.mkEnableOption ("Harmonia daemon: Nix daemon protocol implementation");
 
         socketPath = lib.mkOption {
           type = lib.types.str;
           default = "/run/harmonia-daemon/socket";
-          description = lib.mdDoc "Path where the daemon socket will be created";
+          description = "Path where the daemon socket will be created";
         };
 
         storeDir = lib.mkOption {
           type = lib.types.str;
           default = "/nix/store";
-          description = lib.mdDoc "Path to the Nix store directory";
+          description = "Path to the Nix store directory";
         };
 
         dbPath = lib.mkOption {
           type = lib.types.str;
           default = "/nix/var/nix/db/db.sqlite";
-          description = lib.mdDoc "Path to the Nix database";
+          description = "Path to the Nix database";
         };
 
         logLevel = lib.mkOption {
           type = lib.types.str;
           default = "info";
-          description = lib.mdDoc "Log level for the daemon";
+          description = "Log level for the daemon";
         };
       };
     };
