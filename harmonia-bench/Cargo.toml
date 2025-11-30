@@ -3,16 +3,11 @@ name = "harmonia-bench"
 version.workspace = true
 edition.workspace = true
 
-[lib]
-doctest = false
-
-[dependencies]
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "net"] }
 nix.workspace = true
-
-[dev-dependencies]
-criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "closure_download"
