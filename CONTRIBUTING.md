@@ -1,0 +1,156 @@
+# Contributing to Harmonia
+
+## Development Environment
+
+Enter the development shell:
+
+```bash
+nix develop
+```
+
+This provides:
+- Rust toolchain (rustc, cargo, rustfmt, clippy)
+- cargo-watch, cargo-nextest, cargo-llvm-cov
+- rust-analyzer for IDE support
+- mold linker on Linux for faster builds
+
+## Building
+
+Build the entire project:
+
+```bash
+cargo build --workspace
+```
+
+Or use Nix:
+
+```bash
+nix build
+```
+
+## Running Tests
+
+### Quick iteration with cargo
+
+```bash
+# Run all tests with nextest (faster, parallel)
+cargo nextest run --workspace
+
+# Run a specific test
+cargo nextest run --workspace test_name
+
+# Run tests in a specific crate
+cargo nextest run -p harmonia-cache
+
+# Watch mode during development
+cargo watch -x 'nextest run --workspace'
+```
+
+### Full test suite with Nix
+
+```bash
+# Run unit/integration tests with coverage
+nix build .#checks.x86_64-linux.tests -L
+
+# Run NixOS VM tests (Linux only)
+nix build .#checks.x86_64-linux.nix-daemon -L
+nix build .#checks.x86_64-linux.harmonia-daemon -L
+```
+
+### Coverage
+
+Coverage reports are generated automatically in CI. To generate locally:
+
+```bash
+export LLVM_COV=$(which llvm-cov)
+export LLVM_PROFDATA=$(which llvm-profdata)
+cargo llvm-cov nextest --workspace --html
+# Open target/llvm-cov/html/index.html
+```
+
+## Code Style
+
+### Formatting
+
+Format all code before committing:
+
+```bash
+nix fmt
+```
+
+This runs treefmt which handles:
+- **Rust**: rustfmt (2024 edition)
+- **Nix**: nixfmt
+- **C/C++**: clang-format
+
+### Linting
+
+```bash
+# Clippy with warnings as errors
+cargo clippy --all-targets --all-features -- -D warnings
+
+# Or via Nix (same as CI)
+nix build .#clippy -L
+```
+
+### Code Guidelines
+
+- No `unsafe` code (enforced via `#![deny(unsafe_code)]` workspace-wide)
+- Use `thiserror` for error types
+- Use `tokio` for async runtime
+- Prefer `log` macros for logging
+
+## Project Structure
+
+Harmonia is a Cargo workspace with these crates:
+
+| Crate | Description |
+|-------|-------------|
+| `harmonia-cache` | HTTP binary cache server |
+| `harmonia-daemon` | Nix daemon implementation |
+| `harmonia-client` | Client library |
+| `harmonia-protocol` | Nix daemon wire protocol |
+| `harmonia-protocol-derive` | Proc macros for protocol serialization |
+| `harmonia-nar` | NAR archive handling |
+| `harmonia-store-core` | Store path types and signatures |
+| `harmonia-store-db` | SQLite store database |
+| `harmonia-store-remote` | Remote store connections |
+| `harmonia-ssh-store` | SSH store implementation |
+| `harmonia-utils-*` | Shared utilities (hash, io, encoding) |
+
+## Pull Requests
+
+1. Fork and create a feature branch
+2. Make your changes
+3. Ensure all checks pass:
+   ```bash
+   nix fmt          # Format code
+   cargo clippy --all-targets --all-features -- -D warnings
+   cargo nextest run --workspace
+   ```
+4. Write meaningful commit messages explaining *why*, not just *what*
+5. Open a PR against `master`
+
+## CI
+
+PRs are tested by buildbot-nix which runs:
+- `nix flake check` (clippy, tests, NixOS VM tests)
+- Coverage upload to Codecov
+
+All checks must pass before merging.
+
+## NixOS Module Development
+
+The NixOS module is in `module.nix`. To test changes:
+
+```bash
+# Test with nix-daemon backend
+nix build .#checks.x86_64-linux.nix-daemon -L
+
+# Test with harmonia-daemon backend
+nix build .#checks.x86_64-linux.harmonia-daemon -L
+```
+
+## Questions?
+
+Open an issue at https://github.com/nix-community/harmonia/issues
