@@ -26,11 +26,24 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Find PR number
+        id: find-pr
+        run: |
+          SHA="${{ github.event.sha || github.sha }}"
+          PR_NUMBER=$(gh pr list --search "$SHA" --state all --json number --jq '.[0].number // empty')
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Bencher CLI
         uses: bencherdev/bencher@main
 
       - name: Run benchmark
         run: |
+          CI_NUMBER_ARG=""
+          if [ -n "${{ steps.find-pr.outputs.number }}" ]; then
+            CI_NUMBER_ARG="--ci-number ${{ steps.find-pr.outputs.number }}"
+          fi
           bencher run \
             --project harmonia \
             --token '${{ secrets.BENCHER_API_TOKEN }}' \
@@ -39,6 +52,7 @@ jobs:
             --testbed github-actions \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            $CI_NUMBER_ARG \
             --err \
             'cargo bench --package harmonia-bench'
         env:
