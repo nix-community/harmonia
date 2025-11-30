@@ -103,6 +103,7 @@ let
         nix
         curl
         pkgs.cargo-llvm-cov
+        pkgs.cargo-nextest
         pkgs.jq
       ];
 
@@ -131,8 +132,8 @@ let
         export HARMONIA_DAEMON_BIN="$PWD/target/debug/harmonia-daemon"
         export HARMONIA_CACHE_BIN="$PWD/target/debug/harmonia-cache"
 
-        # Run tests (they will use the instrumented binaries and write profraw data)
-        cargo test --workspace
+        # Run tests with nextest (they will use the instrumented binaries and write profraw data)
+        cargo nextest run --workspace
 
         # Generate coverage report in codecov JSON format
         cargo llvm-cov report --codecov --output-path coverage-raw.json
