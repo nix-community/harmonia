@@ -9,7 +9,7 @@
 //!
 //! This crate provides base encoding/decoding for the Nix store:
 //! - Nix base32 (special 32-character alphabet, LSB first, reversed)
-//! - Standard hex (base16)
+//! - Standard base16
 //! - Standard base64
 
 pub mod base32;
@@ -24,7 +24,7 @@ pub const fn base64_len(len: usize) -> usize {
 
 #[derive(derive_more::Display, Debug, PartialEq, Clone, Copy)]
 pub enum Base {
-    #[display("hex")]
+    #[display("base16")]
     Hex,
     #[display("nixbase32")]
     NixBase32,
@@ -48,12 +48,12 @@ impl<'de> Deserialize<'de> for Base {
     {
         let s = String::deserialize(deserializer)?;
         match s.as_str() {
-            "base16" | "hex" => Ok(Base::Hex),
+            "base16" => Ok(Base::Hex),
             "base64" => Ok(Base::Base64),
             "nix32" | "nixbase32" => Ok(Base::NixBase32),
             _ => Err(serde::de::Error::unknown_variant(
                 &s,
-                &["base16", "hex", "base64", "nix32", "nixbase32"],
+                &["base16", "base64", "nix32", "nixbase32"],
             )),
         }
     }
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn test_base_serde() {
         // Test serialization
-        assert_eq!(serde_json::to_string(&Base::Hex).unwrap(), "\"hex\"");
+        assert_eq!(serde_json::to_string(&Base::Hex).unwrap(), "\"base16\"");
         assert_eq!(
             serde_json::to_string(&Base::NixBase32).unwrap(),
             "\"nixbase32\""
@@ -123,7 +123,10 @@ mod tests {
         assert_eq!(serde_json::to_string(&Base::Base64).unwrap(), "\"base64\"");
 
         // Test deserialization with canonical names
-        assert_eq!(serde_json::from_str::<Base>("\"hex\"").unwrap(), Base::Hex);
+        assert_eq!(
+            serde_json::from_str::<Base>("\"base16\"").unwrap(),
+            Base::Hex
+        );
         assert_eq!(
             serde_json::from_str::<Base>("\"nixbase32\"").unwrap(),
             Base::NixBase32
@@ -134,10 +137,6 @@ mod tests {
         );
 
         // Test deserialization with aliases
-        assert_eq!(
-            serde_json::from_str::<Base>("\"base16\"").unwrap(),
-            Base::Hex
-        );
         assert_eq!(
             serde_json::from_str::<Base>("\"nix32\"").unwrap(),
             Base::NixBase32

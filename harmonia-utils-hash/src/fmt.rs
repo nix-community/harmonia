@@ -1461,7 +1461,7 @@ mod unittests {
         #[rstest]
         #[should_panic = "hash 'sha25:a9993e364706816aba3e25717850c26c9cd0d89d' has unsupported digest algorithm 'sha25'"]
         #[case::unknown_algorithm("sha25:a9993e364706816aba3e25717850c26c9cd0d89d")]
-        #[should_panic = "hash 'sha1:Ka9993e364706816aba3e25717850c26c9cd0d89' has invalid symbol at 5 when decoding as hex"]
+        #[should_panic = "hash 'sha1:Ka9993e364706816aba3e25717850c26c9cd0d89' has invalid symbol at 5 when decoding as base16"]
         #[case::bad_symbol("sha1:Ka9993e364706816aba3e25717850c26c9cd0d89")]
         #[should_panic = "hash 'sha1:a9993e364706816aba3e25717850c26c9cd0d89' has wrong length for hash type 'sha1'"]
         #[case::wrong_length("sha1:a9993e364706816aba3e25717850c26c9cd0d89")]
@@ -1671,7 +1671,7 @@ mod unittests {
         }
 
         #[rstest]
-        #[should_panic = "hash 'sha1:k9993e364706816aba3e25717850c26c9cd0d89d' has invalid symbol at 5 when decoding as hex"]
+        #[should_panic = "hash 'sha1:k9993e364706816aba3e25717850c26c9cd0d89d' has invalid symbol at 5 when decoding as base16"]
         #[case::bad_hex_symbol("sha1:k9993e364706816aba3e25717850c26c9cd0d89d")]
         #[should_panic = "hash 'sha1:!pcd173cq987hw957sx6m0868wv3x6d9' has invalid symbol at 5 when decoding as nixbase32"]
         #[case::bad_nixbase32_symbol("sha1:!pcd173cq987hw957sx6m0868wv3x6d9")]

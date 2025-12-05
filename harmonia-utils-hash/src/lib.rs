@@ -93,8 +93,8 @@ impl Serialize for Hash {
     {
         let raw = RawHash {
             algorithm: self.algorithm,
-            format: Base::Base64,
-            hash: format!("{:#}", self.as_base64()),
+            format: Base::Hex,
+            hash: format!("{:#}", self.as_base16()),
         };
         raw.serialize(serializer)
     }
@@ -539,10 +539,10 @@ mod unittests {
 
     #[rstest]
     #[case::sha256_base64(&SHA256_ABC, "sha256", "base64", "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=")]
-    #[case::sha256_hex(&SHA256_ABC, "sha256", "hex", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
+    #[case::sha256_hex(&SHA256_ABC, "sha256", "base16", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
     #[case::sha256_nix32(&SHA256_ABC, "sha256", "nix32", "1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s")]
     #[case::sha1_base64(&SHA1_ABC, "sha1", "base64", "qZk+NkcGgWq6PiVxeFDCbJzQ2J0=")]
-    #[case::sha1_hex(&SHA1_ABC, "sha1", "hex", "a9993e364706816aba3e25717850c26c9cd0d89d")]
+    #[case::sha1_hex(&SHA1_ABC, "sha1", "base16", "a9993e364706816aba3e25717850c26c9cd0d89d")]
     #[case::sha1_nix32(&SHA1_ABC, "sha1", "nix32", "kpcd173cq987hw957sx6m0868wv3x6d9")]
     fn test_serde_hash(
         #[case] hash: &Hash,
@@ -559,7 +559,7 @@ mod unittests {
 
         let serialized = serde_json::to_value(hash).unwrap();
         assert_eq!(serialized["algorithm"], algo_str);
-        assert_eq!(serialized["format"], "base64"); // Always serializes as base64
+        assert_eq!(serialized["format"], "base16"); // Always serializes as base16
 
         // Test deserialization with different formats
         let deserialized: Hash = serde_json::from_value(json).unwrap();
