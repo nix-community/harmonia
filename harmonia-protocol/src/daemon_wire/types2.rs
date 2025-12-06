@@ -1,4 +1,7 @@
-pub use crate::build_result::{BuildResult, BuildStatus, KeyedBuildResult, KeyedBuildResults};
+pub use crate::build_result::{
+    BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, FailureStatus,
+    SuccessStatus,
+};
 
 use std::fmt;
 use std::str::FromStr;
@@ -26,9 +29,21 @@ use harmonia_store_core::store_path::{
 use super::IgnoredZero;
 use super::types::Operation;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    NixDeserialize,
+    NixSerialize,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[nix(from = "i64", into = "i64")]
-pub struct Microseconds(i64);
+#[serde(transparent)]
+pub struct Microseconds(pub i64);
 
 impl From<i64> for Microseconds {
     fn from(value: i64) -> Self {
@@ -319,6 +334,13 @@ pub struct UnkeyedSubstitutablePathInfo {
 pub struct SubstitutablePathInfo {
     pub path: StorePath,
     pub info: UnkeyedSubstitutablePathInfo,
+}
+
+pub type KeyedBuildResults = Vec<KeyedBuildResult>;
+#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
+pub struct KeyedBuildResult {
+    pub path: DerivedPath,
+    pub result: BuildResult,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
