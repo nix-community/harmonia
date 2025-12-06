@@ -1231,7 +1231,10 @@ name = "harmonia-utils-test"
 version = "2.1.0"
 dependencies = [
  "bytes",
+ "paste",
  "proptest",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
