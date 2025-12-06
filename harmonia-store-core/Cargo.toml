@@ -50,5 +50,9 @@ paste = "1.0"
 [features]
 test = ["proptest", "proptest-derive", "test-strategy", "harmonia-utils-test", "harmonia-utils-hash/test"]
 
+[[test]]
+name = "json_upstream"
+path = "tests/json_upstream/mod.rs"
+
 [lints]
 workspace = true
