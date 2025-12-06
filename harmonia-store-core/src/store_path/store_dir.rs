@@ -7,7 +7,7 @@ use thiserror::Error;
 use harmonia_utils_hash;
 
 use super::create::Fingerprint;
-use super::{ContentAddress, StorePath, StorePathName};
+use super::{ContentAddress, StorePath, StorePathError, StorePathName};
 
 #[derive(Debug, Error, PartialEq, Eq, Hash)]
 #[error("path '{}' is not a store dir", .path.display())]
@@ -90,6 +90,23 @@ impl StoreDir {
         };
         let finger_print_s = self.display(&fingerprint).to_string();
         StorePath::from_hash(&harmonia_utils_hash::Sha256::digest(finger_print_s), name)
+    }
+
+    /// Strip the store directory prefix from a path string, returning the base name.
+    ///
+    /// Given a full store path like `/nix/store/hash-name`, returns `hash-name`.
+    pub fn strip_prefix<'s>(&self, s: &'s str) -> Result<&'s str, StorePathError> {
+        let path = Path::new(s);
+        if !path.is_absolute() {
+            return Err(StorePathError::NonAbsolute(path.to_owned()));
+        }
+        let name = s
+            .strip_prefix(self.to_str())
+            .ok_or_else(|| StorePathError::NotInStore(path.into()))?;
+        if name.as_bytes().first() != Some(&b'/') {
+            return Err(StorePathError::NotInStore(path.into()));
+        }
+        Ok(&name[1..])
     }
 }
 

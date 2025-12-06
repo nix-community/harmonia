@@ -5,68 +5,53 @@ use std::sync::Arc;
 use proptest::prelude::{Arbitrary, BoxedStrategy};
 use serde::{Deserialize, Serialize};
 
-use crate::store_path::{FromStoreDirStr, ParseStorePathError, StoreDirDisplay, StorePath};
+use crate::store_path::{
+    FromStoreDirStr, ParseStorePathError, StoreDir, StoreDirDisplay, StorePath, StorePathError,
+};
 
 use super::{OutputName, OutputSpec};
 
-trait StoreDirDisplaySep {
-    fn fmt(
-        &self,
-        store_dir: &crate::store_path::StoreDir,
-        sep: char,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result;
+trait DisplaySep {
+    fn fmt(&self, sep: char, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 }
 
-impl<D> StoreDirDisplaySep for &D
+impl<D> DisplaySep for &D
 where
-    D: StoreDirDisplaySep,
+    D: DisplaySep,
 {
-    fn fmt(
-        &self,
-        store_dir: &crate::store_path::StoreDir,
-        sep: char,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
-        (**self).fmt(store_dir, sep, f)
+    fn fmt(&self, sep: char, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(sep, f)
     }
 }
 
-impl<D> StoreDirDisplaySep for Arc<D>
+impl<D> DisplaySep for Arc<D>
 where
-    D: StoreDirDisplaySep,
+    D: DisplaySep,
 {
-    fn fmt(
-        &self,
-        store_dir: &crate::store_path::StoreDir,
-        sep: char,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
-        (**self).fmt(store_dir, sep, f)
+    fn fmt(&self, sep: char, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(sep, f)
     }
 }
 
-trait FromStoreDirStrSep: Sized {
-    type Error: std::error::Error;
-
-    fn from_store_dir_str_sep(
-        store_dir: &crate::store_path::StoreDir,
-        sep: char,
-        s: &str,
-    ) -> Result<Self, Self::Error>;
+trait FromStrSep: Sized {
+    fn from_str_sep(sep: char, s: &str) -> Result<Self, StorePathError>;
 }
 
 struct DisplayPath<'d, D>(char, &'d D);
+impl<D> std::fmt::Display for DisplayPath<'_, D>
+where
+    D: DisplaySep,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.1.fmt(self.0, f)
+    }
+}
 impl<D> StoreDirDisplay for DisplayPath<'_, D>
 where
-    D: StoreDirDisplaySep,
+    D: DisplaySep,
 {
-    fn fmt(
-        &self,
-        store_dir: &crate::store_path::StoreDir,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
-        self.1.fmt(store_dir, self.0, f)
+    fn fmt(&self, store_dir: &StoreDir, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{store_dir}/{self}")
     }
 }
 // Used indirectly through FromStoreDirStr trait implementation
@@ -74,18 +59,16 @@ where
 struct ParsePath<const C: char, D>(pub D);
 impl<const C: char, D> FromStoreDirStr for ParsePath<C, D>
 where
-    D: FromStoreDirStrSep,
-    <D as FromStoreDirStrSep>::Error: std::error::Error,
+    D: FromStrSep,
 {
-    type Error = D::Error;
+    type Error = ParseStorePathError;
 
-    fn from_store_dir_str(
-        store_dir: &crate::store_path::StoreDir,
-        s: &str,
-    ) -> Result<Self, Self::Error> {
-        Ok(ParsePath(
-            <D as FromStoreDirStrSep>::from_store_dir_str_sep(store_dir, C, s)?,
-        ))
+    fn from_store_dir_str(store_dir: &StoreDir, s: &str) -> Result<Self, Self::Error> {
+        store_dir
+            .strip_prefix(s)
+            .and_then(|base| D::from_str_sep(C, base))
+            .map(ParsePath)
+            .map_err(|e| ParseStorePathError::new(s, e))
     }
 }
 
@@ -145,7 +128,7 @@ impl Arbitrary for SingleDerivedPath {
 }
 
 impl SingleDerivedPath {
-    pub fn to_legacy_format(&self) -> impl StoreDirDisplay + '_ {
+    pub fn to_legacy_format(&self) -> impl StoreDirDisplay + std::fmt::Display + '_ {
         DisplayPath('!', self)
     }
 
@@ -161,69 +144,64 @@ impl SingleDerivedPath {
     }
 }
 
-impl StoreDirDisplaySep for SingleDerivedPath {
-    fn fmt(
-        &self,
-        store_dir: &crate::store_path::StoreDir,
-        sep: char,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+impl DisplaySep for SingleDerivedPath {
+    fn fmt(&self, sep: char, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SingleDerivedPath::Opaque(store_path) => write!(f, "{}", store_dir.display(store_path)),
+            SingleDerivedPath::Opaque(store_path) => write!(f, "{}", store_path),
             SingleDerivedPath::Built { drv_path, output } => {
-                let path = DisplayPath(sep, drv_path.deref());
-                write!(f, "{}{}{}", store_dir.display(&path), sep, output)
+                write!(f, "{}{}{}", DisplayPath(sep, drv_path.deref()), sep, output)
             }
         }
     }
 }
 
 impl StoreDirDisplay for SingleDerivedPath {
-    fn fmt(
-        &self,
-        store_dir: &crate::store_path::StoreDir,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
-        let path = DisplayPath('^', self);
-        write!(f, "{}", store_dir.display(&path))
+    fn fmt(&self, store_dir: &StoreDir, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{store_dir}/{self}")
     }
 }
 
-impl FromStoreDirStrSep for SingleDerivedPath {
-    type Error = ParseStorePathError;
+impl std::fmt::Display for SingleDerivedPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", DisplayPath('^', self))
+    }
+}
 
-    fn from_store_dir_str_sep(
-        store_dir: &crate::store_path::StoreDir,
-        sep: char,
-        s: &str,
-    ) -> Result<Self, Self::Error> {
+impl FromStrSep for SingleDerivedPath {
+    fn from_str_sep(sep: char, s: &str) -> Result<Self, StorePathError> {
         let mut it = s.rsplitn(2, sep);
-        let path = it.next().unwrap();
+        let last = it.next().unwrap();
         if let Some(prefix) = it.next() {
-            let drv_path = SingleDerivedPath::from_store_dir_str_sep(store_dir, sep, prefix)?;
-            let output = path
-                .parse()
-                .map_err(|error: crate::store_path::StorePathNameError| {
-                    ParseStorePathError::new(s, error)
-                })?;
+            let drv_path = SingleDerivedPath::from_str_sep(sep, prefix)?;
+            let output = last.parse()?;
             Ok(SingleDerivedPath::Built {
                 drv_path: Arc::new(drv_path),
                 output,
             })
         } else {
-            Ok(SingleDerivedPath::Opaque(store_dir.parse(path)?))
+            Ok(SingleDerivedPath::Opaque(
+                last.parse().map_err(|e: ParseStorePathError| e.error)?,
+            ))
         }
+    }
+}
+
+impl std::str::FromStr for SingleDerivedPath {
+    type Err = ParseStorePathError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_str_sep('^', s).map_err(|e| ParseStorePathError::new(s, e))
     }
 }
 
 impl FromStoreDirStr for SingleDerivedPath {
     type Error = ParseStorePathError;
 
-    fn from_store_dir_str(
-        store_dir: &crate::store_path::StoreDir,
-        s: &str,
-    ) -> Result<Self, Self::Error> {
-        SingleDerivedPath::from_store_dir_str_sep(store_dir, '^', s)
+    fn from_store_dir_str(store_dir: &StoreDir, s: &str) -> Result<Self, Self::Error> {
+        store_dir
+            .strip_prefix(s)
+            .and_then(|base| Self::from_str_sep('^', base))
+            .map_err(|e| ParseStorePathError::new(s, e))
     }
 }
 
@@ -259,72 +237,69 @@ impl Arbitrary for DerivedPath {
 }
 
 impl DerivedPath {
-    pub fn to_legacy_format(&self) -> impl StoreDirDisplay + '_ {
+    pub fn to_legacy_format(&self) -> impl StoreDirDisplay + std::fmt::Display + '_ {
         DisplayPath('!', self)
     }
 }
 
-impl StoreDirDisplaySep for DerivedPath {
-    fn fmt(
-        &self,
-        store_dir: &crate::store_path::StoreDir,
-        sep: char,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+impl DisplaySep for DerivedPath {
+    fn fmt(&self, sep: char, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DerivedPath::Opaque(store_path) => write!(f, "{}", store_dir.display(store_path)),
+            DerivedPath::Opaque(store_path) => write!(f, "{}", store_path),
             DerivedPath::Built { drv_path, outputs } => {
-                let path = DisplayPath(sep, drv_path);
-                write!(f, "{}{}{}", store_dir.display(&path), sep, outputs)
+                write!(f, "{}{}{}", DisplayPath(sep, drv_path), sep, outputs)
             }
         }
     }
 }
 
 impl StoreDirDisplay for DerivedPath {
-    fn fmt(
-        &self,
-        store_dir: &crate::store_path::StoreDir,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
-        let path = DisplayPath('^', self);
-        write!(f, "{}", store_dir.display(&path))
+    fn fmt(&self, store_dir: &StoreDir, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{store_dir}/{self}")
     }
 }
 
-impl FromStoreDirStrSep for DerivedPath {
-    type Error = ParseStorePathError;
+impl std::fmt::Display for DerivedPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", DisplayPath('^', self))
+    }
+}
 
-    fn from_store_dir_str_sep(
-        store_dir: &crate::store_path::StoreDir,
-        sep: char,
-        s: &str,
-    ) -> Result<Self, Self::Error> {
+impl FromStrSep for DerivedPath {
+    fn from_str_sep(sep: char, s: &str) -> Result<Self, StorePathError> {
         let mut it = s.rsplitn(2, sep);
-        let path = it.next().unwrap();
+        let last = it.next().unwrap();
         if let Some(prefix) = it.next() {
-            let drv_path = SingleDerivedPath::from_store_dir_str_sep(store_dir, sep, prefix)?;
-            let outputs = path
-                .parse()
-                .map_err(|error| ParseStorePathError::new(s, error))?;
+            let drv_path = SingleDerivedPath::from_str_sep(sep, prefix)?;
+            let outputs = last.parse()?;
             Ok(DerivedPath::Built {
                 drv_path: Arc::new(drv_path),
                 outputs,
             })
         } else {
-            Ok(DerivedPath::Opaque(store_dir.parse(path)?))
+            Ok(DerivedPath::Opaque(
+                last.parse().map_err(|e: ParseStorePathError| e.error)?,
+            ))
         }
+    }
+}
+
+impl std::str::FromStr for DerivedPath {
+    type Err = ParseStorePathError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_str_sep('^', s).map_err(|e| ParseStorePathError::new(s, e))
     }
 }
 
 impl FromStoreDirStr for DerivedPath {
     type Error = ParseStorePathError;
 
-    fn from_store_dir_str(
-        store_dir: &crate::store_path::StoreDir,
-        s: &str,
-    ) -> Result<Self, Self::Error> {
-        DerivedPath::from_store_dir_str_sep(store_dir, '^', s)
+    fn from_store_dir_str(store_dir: &StoreDir, s: &str) -> Result<Self, Self::Error> {
+        store_dir
+            .strip_prefix(s)
+            .and_then(|base| Self::from_str_sep('^', base))
+            .map_err(|e| ParseStorePathError::new(s, e))
     }
 }
 
@@ -332,13 +307,12 @@ pub struct LegacyDerivedPath(pub DerivedPath);
 impl FromStoreDirStr for LegacyDerivedPath {
     type Error = ParseStorePathError;
 
-    fn from_store_dir_str(
-        store_dir: &crate::store_path::StoreDir,
-        s: &str,
-    ) -> Result<Self, Self::Error> {
-        Ok(LegacyDerivedPath(DerivedPath::from_store_dir_str_sep(
-            store_dir, '!', s,
-        )?))
+    fn from_store_dir_str(store_dir: &StoreDir, s: &str) -> Result<Self, Self::Error> {
+        store_dir
+            .strip_prefix(s)
+            .and_then(|base| DerivedPath::from_str_sep('!', base))
+            .map(LegacyDerivedPath)
+            .map_err(|e| ParseStorePathError::new(s, e))
     }
 }
 
@@ -385,11 +359,11 @@ mod unittests {
         error: StorePathError::Symbol(41, b'!'),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!out^bin", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv!out".into(),
+        path: "/nix/store/00000000000000000000000000000000-test.drv!out^bin".into(),
         error: StorePathError::Symbol(41, b'!'),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin!out^lib", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv^out^bin!out".into(),
+        path: "/nix/store/00000000000000000000000000000000-test.drv^out^bin!out^lib".into(),
         error: StorePathError::Symbol(3, b'!'),
     }))]
     fn parse_path(#[case] input: &str, #[case] expected: Result<DerivedPath, ParseStorePathError>) {
@@ -434,11 +408,11 @@ mod unittests {
         error: StorePathError::Symbol(41, b'^'),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out!bin", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv^out".into(),
+        path: "/nix/store/00000000000000000000000000000000-test.drv^out!bin".into(),
         error: StorePathError::Symbol(41, b'^'),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!out!bin^out!lib", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv!out!bin^out".into(),
+        path: "/nix/store/00000000000000000000000000000000-test.drv!out!bin^out!lib".into(),
         error: StorePathError::Symbol(3, b'^'),
     }))]
     fn parse_legacy_path(
@@ -478,11 +452,11 @@ mod unittests {
         error: StorePathError::Symbol(41, b'!'),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv!out^bin", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv!out".into(),
+        path: "/nix/store/00000000000000000000000000000000-test.drv!out^bin".into(),
         error: StorePathError::Symbol(41, b'!'),
     }))]
     #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin!out^lib", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv^out^bin!out".into(),
+        path: "/nix/store/00000000000000000000000000000000-test.drv^out^bin!out^lib".into(),
         error: StorePathError::Symbol(3, b'!'),
     }))]
     fn parse_single_path(

@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use std::fmt;
 use std::hash as std_hash;
 use std::ops::Deref;
-use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -24,33 +23,7 @@ pub struct StorePath {
     name: StorePathName,
 }
 
-fn strip_store<'s>(s: &'s str, store_dir: &StoreDir) -> Result<&'s str, StorePathError> {
-    let path = Path::new(s);
-    if !path.is_absolute() {
-        return Err(StorePathError::NonAbsolute(path.to_owned()));
-    }
-    let name = s
-        .strip_prefix(store_dir.to_str())
-        .ok_or_else(|| StorePathError::NotInStore(path.into()))?;
-    if name.as_bytes()[0] != b'/' {
-        return Err(StorePathError::NotInStore(path.into()));
-    }
-
-    Ok(&name[1..])
-}
-
 impl StorePath {
-    fn new(s: &str, store_dir: &StoreDir) -> Result<Self, ParseStorePathError> {
-        let name = strip_store(s, store_dir).map_err(|error| ParseStorePathError {
-            path: s.to_owned(),
-            error,
-        })?;
-        name.parse::<Self>().map_err(|error| ParseStorePathError {
-            path: s.to_owned(),
-            error: error.error,
-        })
-    }
-
     pub fn from_bytes(buf: &[u8]) -> Result<Self, StorePathError> {
         if buf.len() < STORE_PATH_HASH_ENCODED_SIZE + 1 {
             return Err(StorePathError::HashLength);
@@ -206,8 +179,12 @@ impl AsRef<StorePathHash> for StorePath {
 impl FromStoreDirStr for StorePath {
     type Error = ParseStorePathError;
 
-    fn from_store_dir_str(store_dir: &super::StoreDir, s: &str) -> Result<Self, Self::Error> {
-        StorePath::new(s, store_dir)
+    fn from_store_dir_str(store_dir: &StoreDir, s: &str) -> Result<Self, Self::Error> {
+        store_dir
+            .strip_prefix(s)
+            .map(str::as_bytes)
+            .and_then(Self::from_bytes)
+            .map_err(|error| ParseStorePathError::new(s, error))
     }
 }
 
