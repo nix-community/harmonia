@@ -40,17 +40,6 @@ fn strip_store<'s>(s: &'s str, store_dir: &StoreDir) -> Result<&'s str, StorePat
 }
 
 impl StorePath {
-    fn new(s: &str, store_dir: &StoreDir) -> Result<Self, ParseStorePathError> {
-        let name = strip_store(s, store_dir).map_err(|error| ParseStorePathError {
-            path: s.to_owned(),
-            error,
-        })?;
-        name.parse::<Self>().map_err(|error| ParseStorePathError {
-            path: s.to_owned(),
-            error: error.error,
-        })
-    }
-
     pub fn from_bytes(buf: &[u8]) -> Result<Self, StorePathError> {
         if buf.len() < STORE_PATH_HASH_ENCODED_SIZE + 1 {
             return Err(StorePathError::HashLength);
@@ -206,8 +195,11 @@ impl AsRef<StorePathHash> for StorePath {
 impl FromStoreDirStr for StorePath {
     type Error = ParseStorePathError;
 
-    fn from_store_dir_str(store_dir: &super::StoreDir, s: &str) -> Result<Self, Self::Error> {
-        StorePath::new(s, store_dir)
+    fn from_store_dir_str(store_dir: &StoreDir, s: &str) -> Result<Self, Self::Error> {
+        strip_store(s, store_dir)
+            .map(str::as_bytes)
+            .and_then(Self::from_bytes)
+            .map_err(|error| ParseStorePathError::new(s, error))
     }
 }
 
