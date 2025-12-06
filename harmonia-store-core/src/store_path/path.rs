@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use std::fmt;
 use std::hash as std_hash;
 use std::ops::Deref;
-use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -22,21 +21,6 @@ use super::StoreDirDisplay;
 pub struct StorePath {
     hash: StorePathHash,
     name: StorePathName,
-}
-
-fn strip_store<'s>(s: &'s str, store_dir: &StoreDir) -> Result<&'s str, StorePathError> {
-    let path = Path::new(s);
-    if !path.is_absolute() {
-        return Err(StorePathError::NonAbsolute(path.to_owned()));
-    }
-    let name = s
-        .strip_prefix(store_dir.to_str())
-        .ok_or_else(|| StorePathError::NotInStore(path.into()))?;
-    if name.as_bytes()[0] != b'/' {
-        return Err(StorePathError::NotInStore(path.into()));
-    }
-
-    Ok(&name[1..])
 }
 
 impl StorePath {
@@ -196,7 +180,8 @@ impl FromStoreDirStr for StorePath {
     type Error = ParseStorePathError;
 
     fn from_store_dir_str(store_dir: &StoreDir, s: &str) -> Result<Self, Self::Error> {
-        strip_store(s, store_dir)
+        store_dir
+            .strip_prefix(s)
             .map(str::as_bytes)
             .and_then(Self::from_bytes)
             .map_err(|error| ParseStorePathError::new(s, error))
