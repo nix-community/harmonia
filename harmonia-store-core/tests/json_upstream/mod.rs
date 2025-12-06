@@ -74,6 +74,7 @@ macro_rules! test_upstream_json {
 // Submodules organized by type
 mod content_address;
 mod derivation;
+mod derivation_options;
 mod derivation_output;
 mod derived_path;
 mod hash;

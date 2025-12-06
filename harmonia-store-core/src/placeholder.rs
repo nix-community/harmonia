@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use crate::derivation::OutputPathName;
 use crate::derived_path::{OutputName, SingleDerivedPath};
+use crate::drv_ref::DrvRef;
 use crate::store_path::{StoreDir, StoreDirDisplay, StorePath};
 use harmonia_utils_base_encoding::base32;
 use harmonia_utils_hash::Sha256;
@@ -119,6 +120,28 @@ impl TryFrom<String> for Placeholder {
         })?;
 
         Ok(Placeholder::new(hash))
+    }
+}
+
+impl From<&DrvRef<StorePath>> for StorePathOrPlaceholder {
+    fn from(drv_ref: &DrvRef<StorePath>) -> Self {
+        match drv_ref {
+            DrvRef::External(path) => StorePathOrPlaceholder::StorePath(path.clone()),
+            DrvRef::SelfOutput(output) => {
+                StorePathOrPlaceholder::Placeholder(Placeholder::standard_output(output))
+            }
+        }
+    }
+}
+
+impl From<&DrvRef<SingleDerivedPath>> for StorePathOrPlaceholder {
+    fn from(drv_ref: &DrvRef<SingleDerivedPath>) -> Self {
+        match drv_ref {
+            DrvRef::External(path) => path.into(),
+            DrvRef::SelfOutput(output) => {
+                StorePathOrPlaceholder::Placeholder(Placeholder::standard_output(output))
+            }
+        }
     }
 }
 

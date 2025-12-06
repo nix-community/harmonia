@@ -34,6 +34,7 @@ pub type ByteString = bytes::Bytes;
 
 pub mod derivation;
 pub mod derived_path;
+pub mod drv_ref;
 pub mod placeholder;
 pub mod realisation;
 pub mod signature;
