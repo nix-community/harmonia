@@ -4,11 +4,12 @@
 // This crate is derived from Nix-Ninja (https://github.com/pdtpartners/nix-ninja)
 // Upstream commit: 8da02bd560f8bb406b82ae17ca99375f2b841b12
 
+use std::fmt;
 use std::path::PathBuf;
 
 use crate::derivation::OutputPathName;
 use crate::derived_path::{OutputName, SingleDerivedPath};
-use crate::store_path::StorePath;
+use crate::store_path::{StoreDir, StoreDirDisplay, StorePath};
 use harmonia_utils_base_encoding::base32;
 use harmonia_utils_hash::Sha256;
 
@@ -17,6 +18,27 @@ use harmonia_utils_hash::Sha256;
 pub struct Placeholder {
     /// The hash of the placeholder
     hash: Vec<u8>,
+}
+
+/// A `DrvRef` can be turned into either a store path or placeholder for
+/// purposes of embedding in a string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorePathOrPlaceholder {
+    /// An external store path (already known)
+    StorePath(StorePath),
+    /// A placeholder path (for self-references or unbuilt CA outputs)
+    Placeholder(Placeholder),
+}
+
+impl StoreDirDisplay for StorePathOrPlaceholder {
+    fn fmt(&self, store_dir: &StoreDir, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StorePathOrPlaceholder::StorePath(store_path) => store_path.fmt(store_dir, f),
+            StorePathOrPlaceholder::Placeholder(placeholder) => {
+                write!(f, "{}", placeholder.render().display())
+            }
+        }
+    }
 }
 
 impl Placeholder {
@@ -68,6 +90,20 @@ impl Placeholder {
         let hash = sha256_hash(clear_text.as_bytes());
         Self::new(hash)
     }
+
+    /// Generate a placeholder for an output of a derivation that may itself be a placeholder.
+    ///
+    /// This dispatches to `ca_output` for store paths or `dynamic_output` for placeholders.
+    pub fn output(drv: &StorePathOrPlaceholder, output_name: &OutputName) -> Self {
+        match drv {
+            StorePathOrPlaceholder::StorePath(store_path) => {
+                Self::ca_output(store_path, output_name)
+            }
+            StorePathOrPlaceholder::Placeholder(placeholder) => {
+                Self::dynamic_output(placeholder, output_name)
+            }
+        }
+    }
 }
 
 impl TryFrom<String> for Placeholder {
@@ -106,20 +142,16 @@ fn sha256_hash(data: &[u8]) -> Vec<u8> {
     Sha256::digest(data).digest_bytes().to_vec()
 }
 
-/// Compute placeholder for a SingleDerivedPath
-pub fn compute_built_placeholder(drv_path: &SingleDerivedPath, output: &OutputName) -> Placeholder {
-    match drv_path {
-        SingleDerivedPath::Opaque(store_path) => {
-            // Base case: regular ca_output placeholder
-            Placeholder::ca_output(store_path, output)
-        }
-        SingleDerivedPath::Built {
-            drv_path: inner_drv_path,
-            output: inner_output,
-        } => {
-            // Recursive case: create dynamic_output placeholder
-            let inner_placeholder = compute_built_placeholder(inner_drv_path, inner_output);
-            Placeholder::dynamic_output(&inner_placeholder, output)
+impl From<&SingleDerivedPath> for StorePathOrPlaceholder {
+    fn from(path: &SingleDerivedPath) -> Self {
+        match path {
+            SingleDerivedPath::Opaque(store_path) => {
+                StorePathOrPlaceholder::StorePath(store_path.clone())
+            }
+            SingleDerivedPath::Built { drv_path, output } => {
+                let drv: StorePathOrPlaceholder = drv_path.as_ref().into();
+                StorePathOrPlaceholder::Placeholder(Placeholder::output(&drv, output))
+            }
         }
     }
 }
@@ -184,12 +216,11 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_built_placeholder_opaque() {
+    fn test_single_derived_path_opaque_to_store_path_or_placeholder() {
         let store_path: StorePath = "00000000000000000000000000000000-test".parse().unwrap();
-        let output: OutputName = "out".parse().unwrap();
-        let placeholder =
-            compute_built_placeholder(&SingleDerivedPath::Opaque(store_path), &output);
-        assert!(!placeholder.render().to_string_lossy().is_empty());
+        let path = SingleDerivedPath::Opaque(store_path.clone());
+        let result: StorePathOrPlaceholder = (&path).into();
+        assert_eq!(result, StorePathOrPlaceholder::StorePath(store_path));
     }
 
     #[test]
@@ -201,8 +232,9 @@ mod tests {
             drv_path: Arc::new(SingleDerivedPath::Opaque(store_path)),
             output: "inner".parse().unwrap(),
         };
+        let drv: StorePathOrPlaceholder = (&inner_path).into();
         let output: OutputName = "outer".parse().unwrap();
-        let placeholder = compute_built_placeholder(&inner_path, &output);
+        let placeholder = Placeholder::output(&drv, &output);
         assert!(!placeholder.render().to_string_lossy().is_empty());
     }
 }
