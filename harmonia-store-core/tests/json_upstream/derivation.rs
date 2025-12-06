@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
-use harmonia_store_core::derived_path::SingleDerivedPath;
+use harmonia_store_core::derived_path::{OutputName, SingleDerivedPath};
 use harmonia_store_core::placeholder::Placeholder;
 
 test_upstream_json!(
@@ -118,9 +118,12 @@ test_upstream_json!(
             args: vec![bytes::Bytes::from("-c"), bytes::Bytes::from("echo hello > $out")],
             env: {
                 let mut map = BTreeMap::new();
-                let out_placeholder = Placeholder::standard_output("out").render();
-                let bin_placeholder = Placeholder::standard_output("bin").render();
-                let dev_placeholder = Placeholder::standard_output("dev").render();
+                let out: OutputName = "out".parse().unwrap();
+                let bin: OutputName = "bin".parse().unwrap();
+                let dev: OutputName = "dev".parse().unwrap();
+                let out_placeholder = Placeholder::standard_output(&out).render();
+                let bin_placeholder = Placeholder::standard_output(&bin).render();
+                let dev_placeholder = Placeholder::standard_output(&dev).render();
                 map.insert(
                     bytes::Bytes::from("out"),
                     bytes::Bytes::from(out_placeholder.to_string_lossy().to_string()),
@@ -212,8 +215,10 @@ test_upstream_json!(
             ],
             env: {
                 let mut map = BTreeMap::new();
-                let out_placeholder = Placeholder::standard_output("out").render();
-                let dev_placeholder = Placeholder::standard_output("dev").render();
+                let out: OutputName = "out".parse().unwrap();
+                let dev: OutputName = "dev".parse().unwrap();
+                let out_placeholder = Placeholder::standard_output(&out).render();
+                let dev_placeholder = Placeholder::standard_output(&dev).render();
                 map.insert(
                     bytes::Bytes::from("out"),
                     bytes::Bytes::from(out_placeholder.to_string_lossy().to_string()),
