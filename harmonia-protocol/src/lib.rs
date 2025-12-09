@@ -32,6 +32,7 @@ pub mod de;
 pub mod log;
 pub mod ser;
 pub mod types;
+pub mod valid_path_info;
 pub mod version;
 
 pub use version::ProtocolVersion;

@@ -6,10 +6,10 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, copy_buf};
 use tracing::{Instrument, debug, debug_span, instrument, trace};
 
-use crate::daemon_wire::types2::ValidPathInfo;
 use crate::de::NixRead;
 use crate::ser::NixWrite;
 use crate::types::{AddToStoreItem, DaemonError, DaemonResult};
+use crate::valid_path_info::ValidPathInfo;
 use harmonia_nar::archive::NarBytesReader;
 use harmonia_utils_io::{AsyncBufReadCompat, AsyncBytesRead, Lending};
 
@@ -135,10 +135,10 @@ mod unittests {
     use tokio_test::io::Builder;
 
     use super::*;
-    use crate::daemon_wire::types2::ValidPathInfo;
     use crate::de::NixReader;
     use crate::ser::NixWriter;
-    use crate::types::{DaemonResult, UnkeyedValidPathInfo};
+    use crate::types::DaemonResult;
+    use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
     use harmonia_nar::archive::{test_data, write_nar};
     use harmonia_store_core::btree_set;
     use harmonia_utils_hash::NarHash;

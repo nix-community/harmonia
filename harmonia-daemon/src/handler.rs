@@ -17,7 +17,7 @@ use harmonia_protocol::daemon::{
     DaemonError as ProtocolError, DaemonResult, DaemonStore, FutureResultExt, HandshakeDaemonStore,
     ResultLog, TrustLevel,
 };
-use harmonia_protocol::types::UnkeyedValidPathInfo;
+use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
 use harmonia_store_core::store_path::{StorePath, StorePathHash};
 use harmonia_store_db::StoreDb;
 use harmonia_utils_hash::{Hash, NarHash, fmt::Any};
