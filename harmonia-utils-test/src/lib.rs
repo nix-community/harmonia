@@ -43,6 +43,10 @@ impl CanonicalTempDir {
 /// Byte string type alias.
 pub type ByteString = bytes::Bytes;
 
+// Re-export paste for macro hygiene
+#[doc(hidden)]
+pub use paste;
+
 pub mod helpers;
 pub mod json_upstream;
 

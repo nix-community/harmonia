@@ -76,7 +76,7 @@ where
 #[macro_export]
 macro_rules! test_upstream_json {
     ($test_name:ident, $path:expr, $value:expr) => {
-        paste::paste! {
+        $crate::paste::paste! {
             #[test]
             fn [<$test_name _from_json>]() {
                 $crate::json_upstream::test_upstream_json_from_json(&$path, &$value);

@@ -1131,7 +1131,6 @@ dependencies = [
  "harmonia-utils-test",
  "hex-literal",
  "num_enum",
- "paste",
  "proptest",
  "proptest-derive",
  "ring",

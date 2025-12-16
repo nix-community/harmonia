@@ -45,7 +45,6 @@ harmonia-protocol = { path = "../harmonia-protocol", features = ["test"] }
 harmonia-utils-test = { path = "../harmonia-utils-test" }
 test-log = "0.2"
 rstest_reuse = "0.7"
-paste = "1.0"
 
 [features]
 test = ["proptest", "proptest-derive", "test-strategy", "harmonia-utils-test", "harmonia-utils-hash/test"]
