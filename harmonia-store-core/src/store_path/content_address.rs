@@ -158,6 +158,7 @@ impl ContentAddress {
 }
 
 /// Raw content address representation for JSON serialization/deserialization
+/// Uses SRI string format for hash to match upstream Nix JSON format
 #[derive(Serialize, Deserialize)]
 struct RawContentAddress {
     method: ContentAddressMethod,
