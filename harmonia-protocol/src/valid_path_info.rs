@@ -27,6 +27,7 @@ pub struct UnkeyedValidPathInfo {
     #[cfg_attr(test, strategy(arb_signatures()))]
     pub signatures: BTreeSet<Signature>,
     pub ca: Option<ContentAddress>,
+    pub store_dir: StoreDir,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
@@ -86,7 +87,7 @@ impl Serialize for UnkeyedValidPathInfo {
             references: self.references.clone(),
             registration_time: self.registration_time,
             signatures: self.signatures.clone(),
-            store_dir: StoreDir::default(),
+            store_dir: self.store_dir.clone(),
             ultimate: self.ultimate,
             version: 2,
         };
@@ -118,6 +119,7 @@ impl<'de> Deserialize<'de> for UnkeyedValidPathInfo {
             ultimate: raw.ultimate,
             signatures: raw.signatures,
             ca: raw.ca,
+            store_dir: raw.store_dir,
         })
     }
 }

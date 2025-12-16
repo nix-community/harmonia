@@ -203,6 +203,7 @@ mod unittests {
                         ultimate: true,
                         signatures: BTreeSet::new(),
                         ca: None,
+                        store_dir: Default::default(),
                     }
                 },
                 test_data::text_file(),
@@ -223,6 +224,7 @@ mod unittests {
                         ultimate: true,
                         signatures: BTreeSet::new(),
                         ca: None,
+                        store_dir: Default::default(),
                     }
                 },
                 test_data::text_file(),
@@ -239,6 +241,7 @@ mod unittests {
                         ultimate: true,
                         signatures: BTreeSet::new(),
                         ca: None,
+                        store_dir: Default::default(),
                     }
                 },
                 test_data::dir_example()

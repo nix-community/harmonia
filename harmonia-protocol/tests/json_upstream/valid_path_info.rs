@@ -2,6 +2,7 @@
 
 use crate::libstore_test_data_path;
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
+use harmonia_store_core::store_path::StoreDir;
 use harmonia_utils_hash::NarHash;
 use harmonia_utils_test::test_upstream_json;
 use hex_literal::hex;
@@ -23,6 +24,7 @@ fn empty_info() -> UnkeyedValidPathInfo {
         ultimate: false,
         signatures: BTreeSet::new(),
         ca: None,
+        store_dir: StoreDir::default(),
     }
 }
 

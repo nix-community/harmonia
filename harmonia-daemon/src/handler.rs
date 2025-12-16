@@ -18,7 +18,7 @@ use harmonia_protocol::daemon::{
     ResultLog, TrustLevel,
 };
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
-use harmonia_store_core::store_path::{StorePath, StorePathHash};
+use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_store_db::StoreDb;
 use harmonia_utils_hash::{Hash, NarHash, fmt::Any};
 
@@ -27,14 +27,14 @@ use crate::error::DaemonError;
 /// A local store handler that reads from the Nix store database.
 #[derive(Clone)]
 pub struct LocalStoreHandler {
-    store_dir: PathBuf,
+    store_dir: StoreDir,
     db: Arc<Mutex<StoreDb>>,
 }
 
 impl LocalStoreHandler {
     /// Create a new handler with the given store directory and database path.
-    pub async fn new(store_dir: PathBuf, db_path: PathBuf) -> Result<Self, DaemonError> {
-        log::debug!("Opening database at {}", db_path.display(),);
+    pub async fn new(store_dir: StoreDir, db_path: PathBuf) -> Result<Self, DaemonError> {
+        log::debug!("Opening database at {}", db_path.display());
         let db = StoreDb::open(&db_path, harmonia_store_db::OpenMode::ReadOnly).map_err(|e| {
             DaemonError::Database(format!("Failed to open {}: {e}", db_path.display()))
         })?;
@@ -47,7 +47,7 @@ impl LocalStoreHandler {
     /// Convert a harmonia_store_db::ValidPathInfo to the protocol UnkeyedValidPathInfo.
     fn to_protocol_path_info(
         info: harmonia_store_db::ValidPathInfo,
-        _store_dir: &std::path::Path,
+        store_dir: StoreDir,
     ) -> Result<UnkeyedValidPathInfo, ProtocolError> {
         // Parse the hash from database format (e.g., "sha256:...")
         let hash_any = info.hash.parse::<Any<Hash>>().map_err(|e| {
@@ -107,6 +107,7 @@ impl LocalStoreHandler {
             ultimate: info.ultimate,
             signatures,
             ca,
+            store_dir,
         })
     }
 }
@@ -129,7 +130,7 @@ impl DaemonStore for LocalStoreHandler {
         path: &'a StorePath,
     ) -> impl ResultLog<Output = DaemonResult<bool>> + Send + 'a {
         async move {
-            let full_path = format!("{}/{}", self.store_dir.display(), path);
+            let full_path = format!("{}/{}", self.store_dir, path);
             let db = self.db.clone();
             tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
@@ -147,7 +148,7 @@ impl DaemonStore for LocalStoreHandler {
         path: &'a StorePath,
     ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedValidPathInfo>>> + Send + 'a {
         async move {
-            let full_path = format!("{}/{}", self.store_dir.display(), path);
+            let full_path = format!("{}/{}", self.store_dir, path);
             let db = self.db.clone();
             let store_dir = self.store_dir.clone();
             let result = tokio::task::spawn_blocking(move || {
@@ -159,7 +160,7 @@ impl DaemonStore for LocalStoreHandler {
             .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
 
             result
-                .map(|info| Self::to_protocol_path_info(info, &store_dir))
+                .map(|info| Self::to_protocol_path_info(info, store_dir))
                 .transpose()
         }
         .empty_logs()
@@ -172,7 +173,7 @@ impl DaemonStore for LocalStoreHandler {
         async move {
             let hash_str = hash.to_string();
             let db = self.db.clone();
-            let store_dir = self.store_dir.to_string_lossy().to_string();
+            let store_dir = self.store_dir.to_str().to_string();
             let result = tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
                 db.query_path_from_hash_part(&store_dir, &hash_str)
@@ -200,7 +201,7 @@ impl DaemonStore for LocalStoreHandler {
         async move {
             let mut valid = BTreeSet::new();
             for path in paths {
-                let full_path = format!("{}/{}", self.store_dir.display(), path);
+                let full_path = format!("{}/{}", self.store_dir, path);
                 let db = self.db.clone();
                 let is_valid = tokio::task::spawn_blocking(move || {
                     let db = db.blocking_lock();

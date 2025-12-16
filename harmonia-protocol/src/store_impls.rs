@@ -587,6 +587,23 @@ nix_serialize_remote!(
     harmonia_store_core::realisation::DrvOutput
 );
 
+// StoreDir - uses the store_dir from the NixRead/NixWrite context
+impl crate::de::NixDeserialize for harmonia_store_core::store_path::StoreDir {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + crate::de::NixRead + Send,
+    {
+        Ok(Some(reader.store_dir().clone()))
+    }
+}
+
+impl crate::ser::NixSerialize for harmonia_store_core::store_path::StoreDir {
+    async fn serialize<W: crate::ser::NixWrite>(&self, _writer: &mut W) -> Result<(), W::Error> {
+        // StoreDir is never serialized over the wire - it's a local configuration value
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
 

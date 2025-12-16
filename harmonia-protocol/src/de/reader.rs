@@ -471,6 +471,7 @@ mod unittests {
             ultimate: true,
             signatures: BTreeSet::new(),
             ca: None,
+            store_dir: Default::default(),
         };
         writer.write_value(&value).await.unwrap();
         writer.write_number(14).await.unwrap();

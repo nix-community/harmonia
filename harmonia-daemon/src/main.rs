@@ -22,12 +22,12 @@ async fn main() -> Result<(), DaemonError> {
     info!("Store directory: {}", config.store_dir.display());
     info!("Database path: {}", config.db_path.display());
 
-    // Create the local store handler
-    let handler = LocalStoreHandler::new(config.store_dir.clone(), config.db_path).await?;
-
-    // Create StoreDir for protocol serialization
+    // Create StoreDir from config
     let store_dir = harmonia_store_core::store_path::StoreDir::new(&config.store_dir)
         .map_err(|e| DaemonError::config(format!("Invalid store directory: {e}")))?;
+
+    // Create the local store handler
+    let handler = LocalStoreHandler::new(store_dir.clone(), config.db_path).await?;
 
     // Create and start the daemon server
     let server = DaemonServer::new(handler, config.socket_path.clone(), store_dir);

@@ -3,7 +3,7 @@
 
 use crate::handler::LocalStoreHandler;
 use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_core::store_path::{StoreDir, StorePath};
 use harmonia_store_db::StoreDb;
 use harmonia_utils_test::CanonicalTempDir;
 use std::process::Command;
@@ -159,7 +159,8 @@ async fn test_handler_with_nix_store() {
     let db_path = state_dir.join("db/db.sqlite");
 
     // Create handler
-    let handler = LocalStoreHandler::new(store_dir.clone(), db_path)
+    let store_dir = StoreDir::new(store_dir).expect("Failed to create StoreDir");
+    let handler = LocalStoreHandler::new(store_dir, db_path)
         .await
         .expect("Failed to create handler");
 
