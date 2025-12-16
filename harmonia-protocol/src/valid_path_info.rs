@@ -66,8 +66,9 @@ struct RawUnkeyedValidPathInfo {
     references: BTreeSet<StorePath>,
     #[serde(skip_serializing_if = "is_zero", default)]
     registration_time: DaemonTime,
+    // JSON format 2 uses plain strings for signatures
     #[serde(skip_serializing_if = "is_empty", default)]
-    signatures: BTreeSet<Signature>,
+    signatures: BTreeSet<String>,
     store_dir: StoreDir,
     #[serde(skip_serializing_if = "is_false", default)]
     ultimate: bool,
@@ -86,7 +87,8 @@ impl Serialize for UnkeyedValidPathInfo {
             nar_size: self.nar_size,
             references: self.references.clone(),
             registration_time: self.registration_time,
-            signatures: self.signatures.clone(),
+            // Convert Signature to String for JSON format 2
+            signatures: self.signatures.iter().map(|s| s.to_string()).collect(),
             store_dir: self.store_dir.clone(),
             ultimate: self.ultimate,
             version: 2,
