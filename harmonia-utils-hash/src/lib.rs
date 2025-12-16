@@ -7,8 +7,6 @@ use ring::digest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use harmonia_utils_base_encoding::Base;
-
 mod algo;
 pub mod fmt;
 
@@ -78,25 +76,13 @@ impl TryFrom<digest::Digest> for Hash {
     }
 }
 
-/// Raw hash representation for JSON serialization/deserialization
-#[derive(Serialize, Deserialize)]
-struct RawHash {
-    algorithm: Algorithm,
-    format: harmonia_utils_base_encoding::Base,
-    hash: String,
-}
-
 impl Serialize for Hash {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let raw = RawHash {
-            algorithm: self.algorithm,
-            format: Base::Hex,
-            hash: format!("{:#}", self.as_base16()),
-        };
-        raw.serialize(serializer)
+        // Serialize as SRI string: "sha256-base64hash="
+        serializer.serialize_str(&self.as_sri().to_string())
     }
 }
 
@@ -107,15 +93,12 @@ impl<'de> Deserialize<'de> for Hash {
     {
         use serde::de;
 
-        let raw = RawHash::deserialize(deserializer)?;
-
-        // Use the existing parse_with_base function which handles buffer sizing correctly
-        crate::fmt::parse_with_base::<Hash, { LARGEST_ALGORITHM.size() }>(
-            raw.algorithm,
-            &raw.hash,
-            raw.format,
-        )
-        .map_err(de::Error::custom)
+        let s = String::deserialize(deserializer)?;
+        // Try SRI format first, then fall back to Any format for flexibility
+        s.parse::<fmt::SRI<Hash>>()
+            .map(|sri| sri.into_hash())
+            .or_else(|_| s.parse::<fmt::Any<Hash>>().map(|any| any.into_hash()))
+            .map_err(de::Error::custom)
     }
 }
 
@@ -410,6 +393,7 @@ mod unittests {
     use rstest::rstest;
 
     use super::*;
+    use harmonia_utils_base_encoding::Base;
 
     /// value taken from: https://tools.ietf.org/html/rfc1321
     const MD5_EMPTY: Hash = Hash::new(Algorithm::MD5, &hex!("d41d8cd98f00b204e9800998ecf8427e"));
@@ -538,53 +522,23 @@ mod unittests {
     }
 
     #[rstest]
-    #[case::sha256_base64(&SHA256_ABC, "sha256", "base64", "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=")]
-    #[case::sha256_hex(&SHA256_ABC, "sha256", "base16", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
-    #[case::sha256_nix32(&SHA256_ABC, "sha256", "nix32", "1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s")]
-    #[case::sha1_base64(&SHA1_ABC, "sha1", "base64", "qZk+NkcGgWq6PiVxeFDCbJzQ2J0=")]
-    #[case::sha1_hex(&SHA1_ABC, "sha1", "base16", "a9993e364706816aba3e25717850c26c9cd0d89d")]
-    #[case::sha1_nix32(&SHA1_ABC, "sha1", "nix32", "kpcd173cq987hw957sx6m0868wv3x6d9")]
-    fn test_serde_hash(
-        #[case] hash: &Hash,
-        #[case] algo_str: &str,
-        #[case] format_str: &str,
-        #[case] hash_str: &str,
-    ) {
-        // Test serialization
-        let json = serde_json::json!({
-            "algorithm": algo_str,
-            "format": format_str,
-            "hash": hash_str,
-        });
-
+    #[case::sha256(&SHA256_ABC, "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=")]
+    #[case::sha1(&SHA1_ABC, "sha1-qZk+NkcGgWq6PiVxeFDCbJzQ2J0=")]
+    #[case::md5(&MD5_ABC, "md5-kAFQmDzST7DWlj99KOF/cg==")]
+    #[case::sha512(&SHA512_ABC, "sha512-3a81oZNherrMQXNJriBBMRLm+k6JqX6iCp7u5ktV05ohkpkqJ0/BqDa6PCOj/uu9RU1EI2Q86A4qmslPpUyknw==")]
+    fn test_serde_hash_sri(#[case] hash: &Hash, #[case] sri_str: &str) {
+        // Test serialization - should produce SRI string
         let serialized = serde_json::to_value(hash).unwrap();
-        assert_eq!(serialized["algorithm"], algo_str);
-        assert_eq!(serialized["format"], "base16"); // Always serializes as base16
+        assert_eq!(serialized.as_str().unwrap(), sri_str);
 
-        // Test deserialization with different formats
-        let deserialized: Hash = serde_json::from_value(json).unwrap();
+        // Test deserialization from SRI string
+        let deserialized: Hash = serde_json::from_value(serialized).unwrap();
         assert_eq!(&deserialized, hash);
     }
 
     #[test]
-    fn test_serde_hash_invalid_format() {
-        let json = serde_json::json!({
-            "algorithm": "sha256",
-            "format": "invalid",
-            "hash": "test",
-        });
-
-        let result: Result<Hash, _> = serde_json::from_value(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_serde_hash_missing_field() {
-        let json = serde_json::json!({
-            "algorithm": "sha256",
-            "format": "base64",
-        });
-
+    fn test_serde_hash_invalid() {
+        let json = serde_json::json!("invalid-hash-string");
         let result: Result<Hash, _> = serde_json::from_value(json);
         assert!(result.is_err());
     }
