@@ -2,6 +2,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use harmonia_utils_hash;
@@ -139,6 +140,25 @@ impl std::str::FromStr for StoreDir {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         StoreDir::new(s)
+    }
+}
+
+impl Serialize for StoreDir {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.to_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for StoreDir {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = <&str>::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
     }
 }
 

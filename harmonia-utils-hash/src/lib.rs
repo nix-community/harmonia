@@ -140,6 +140,24 @@ impl TryFrom<Hash> for NarHash {
     }
 }
 
+impl Serialize for NarHash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.as_sri().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for NarHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        fmt::SRI::<NarHash>::deserialize(deserializer).map(|sri| sri.into_hash())
+    }
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 #[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
 pub struct Sha256([u8; Algorithm::SHA256.size()]);

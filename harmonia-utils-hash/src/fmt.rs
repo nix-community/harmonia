@@ -444,6 +444,17 @@ impl hash::NarHash {
     pub const fn base64(self) -> Base64<Self> {
         Base64(self)
     }
+
+    #[inline]
+    pub fn as_sri(&self) -> &SRI<Self> {
+        // SAFETY: `NarHash` and `SRI<NarHash>` have the same ABI
+        unsafe { &*(self as *const Self as *const SRI<Self>) }
+    }
+
+    #[inline]
+    pub const fn sri(self) -> SRI<Self> {
+        SRI(self)
+    }
 }
 
 impl private::Sealed for hash::NarHash {}
@@ -1038,6 +1049,25 @@ impl<H: CommonHash> FromStr for SRI<H> {
         } else {
             Err(ParseHashError::new(s, ParseHashErrorKind::NotSRI))
         }
+    }
+}
+
+impl<H: CommonHash> serde::Serialize for SRI<H> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de, H: CommonHash> serde::Deserialize<'de> for SRI<H> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = <&str>::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
