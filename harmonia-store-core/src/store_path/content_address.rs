@@ -7,7 +7,7 @@ use proptest_derive::Arbitrary;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use harmonia_utils_hash::fmt::{NonSRI, ParseHashError, ParseHashErrorKind};
+use harmonia_utils_hash::fmt::{CommonHash, NonSRI, ParseHashError, ParseHashErrorKind};
 use harmonia_utils_hash::{Algorithm, Hash, Sha256, UnknownAlgorithm};
 
 #[derive(

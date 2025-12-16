@@ -11,9 +11,8 @@ use tracing::{Span, debug_span};
 
 use crate::de::{Error as _, NixDeserialize as NixDeserializeTrait, NixRead};
 use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
-use crate::types::{
-    ClientOptions, DaemonInt, DaemonPath, DaemonString, DaemonTime, UnkeyedValidPathInfo,
-};
+use crate::types::{ClientOptions, DaemonInt, DaemonPath, DaemonString, DaemonTime};
+use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::DerivedPath;
@@ -339,13 +338,6 @@ impl Request {
             }
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct ValidPathInfo {
-    pub path: StorePath,
-    pub info: UnkeyedValidPathInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]

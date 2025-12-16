@@ -29,7 +29,6 @@ use harmonia_protocol::daemon_wire::logger::{
 use harmonia_protocol::daemon_wire::types::Operation;
 use harmonia_protocol::daemon_wire::types2::{
     BuildMode, CollectGarbageResponse, GCAction, KeyedBuildResult, QueryMissingResult,
-    ValidPathInfo,
 };
 use harmonia_protocol::daemon_wire::{
     CLIENT_MAGIC, FramedWriter, IgnoredOne, SERVER_MAGIC, write_add_multiple_to_store_stream,
@@ -38,8 +37,9 @@ use harmonia_protocol::de::{NixDeserialize, NixRead as _, NixReader, NixReaderBu
 use harmonia_protocol::ser::{NixWrite, NixWriter, NixWriterBuilder};
 use harmonia_protocol::types::{
     AddToStoreItem, ClientOptions, DaemonError, DaemonErrorKind, DaemonPath, DaemonResult,
-    DaemonResultExt as _, DaemonStore, HandshakeDaemonStore, TrustLevel, UnkeyedValidPathInfo,
+    DaemonResultExt as _, DaemonStore, HandshakeDaemonStore, TrustLevel,
 };
+use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 
 // From harmonia-store-core
 use harmonia_protocol::log::{LogMessage, Message, Verbosity};

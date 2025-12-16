@@ -29,13 +29,14 @@ use harmonia_protocol::daemon::{
         CLIENT_MAGIC, FramedReader, IgnoredOne, SERVER_MAGIC,
         logger::RawLogMessage,
         parse_add_multiple_to_store,
-        types2::{BaseStorePath, CollectGarbageResponse, GCAction, Request, ValidPathInfo},
+        types2::{BaseStorePath, CollectGarbageResponse, GCAction, Request},
     },
 };
 use harmonia_protocol::de::{NixRead, NixReader};
 use harmonia_protocol::log::LogMessage;
 use harmonia_protocol::ser::{NixWrite, NixWriter};
 use harmonia_protocol::types::{AddToStoreItem, DaemonPath};
+use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
@@ -270,7 +271,7 @@ where
         &'a mut self,
         path: &'a StorePath,
     ) -> impl ResultLog<
-        Output = DaemonResult<Option<harmonia_protocol::types::UnkeyedValidPathInfo>>,
+        Output = DaemonResult<Option<harmonia_protocol::valid_path_info::UnkeyedValidPathInfo>>,
     > + Send
     + 'a {
         let ret = Box::pin(self.0.query_path_info(path));

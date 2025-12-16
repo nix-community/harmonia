@@ -43,7 +43,12 @@ impl CanonicalTempDir {
 /// Byte string type alias.
 pub type ByteString = bytes::Bytes;
 
+// Re-export paste for macro hygiene
+#[doc(hidden)]
+pub use paste;
+
 pub mod helpers;
+pub mod json_upstream;
 
 pub fn arb_filename() -> impl Strategy<Value = String> {
     "[a-zA-Z 0-9.?=+]+".prop_filter("Not cur and parent dir", |s| s != "." && s != "..")

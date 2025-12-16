@@ -7,8 +7,6 @@ use bstr::ByteSlice;
 use bytes::Bytes;
 use futures::Stream;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-#[cfg(test)]
-use test_strategy::Arbitrary;
 use thiserror::Error;
 use tokio::io::AsyncBufRead;
 
@@ -17,21 +15,18 @@ use crate::daemon_wire::logger::{FutureResultExt, LogError, ResultLog, ResultLog
 use crate::daemon_wire::types::Operation;
 use crate::daemon_wire::types2::{
     BuildMode, BuildResult, CollectGarbageResponse, GCAction, KeyedBuildResult, QueryMissingResult,
-    ValidPathInfo,
 };
 use crate::daemon_wire::{IgnoredTrue, IgnoredZero};
 use crate::log::Verbosity;
+use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
 use harmonia_store_core::signature::Signature;
-#[cfg(test)]
-use harmonia_store_core::signature::proptests::arb_signatures;
 use harmonia_store_core::store_path::{
-    ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
+    ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
-use harmonia_utils_hash::NarHash;
 
 pub type DaemonString = Bytes;
 pub type DaemonPath = Bytes;
@@ -73,20 +68,6 @@ impl Default for ClientOptions {
             other_settings: Default::default(),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct UnkeyedValidPathInfo {
-    pub deriver: Option<StorePath>,
-    pub nar_hash: NarHash,
-    pub references: BTreeSet<StorePath>,
-    pub registration_time: DaemonTime,
-    pub nar_size: u64,
-    pub ultimate: bool,
-    #[cfg_attr(test, strategy(arb_signatures()))]
-    pub signatures: BTreeSet<Signature>,
-    pub ca: Option<ContentAddress>,
 }
 
 #[derive(

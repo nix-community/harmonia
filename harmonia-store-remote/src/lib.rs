@@ -67,5 +67,5 @@ pub use pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 pub use harmonia_protocol::ProtocolVersion;
 pub use harmonia_protocol::types::{
     DaemonError, DaemonErrorKind, DaemonResult, DaemonStore, HandshakeDaemonStore, TrustLevel,
-    UnkeyedValidPathInfo,
 };
+pub use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;

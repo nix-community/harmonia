@@ -216,12 +216,12 @@ mod unittests {
     use tokio_test::io::Builder;
 
     use super::*;
+    use crate::NarHash;
     use crate::daemon::{
         de::NixRead,
         ser::{NixWrite, NixWriter},
     };
     use harmonia_store_core::btree_set;
-    use harmonia_utils_hash::NarHash;
     use harmonia_utils_io::BytesReader;
 
     #[tokio::test]
@@ -462,7 +462,7 @@ mod unittests {
         let mut writer = NixWriter::new(writer);
         let mut reader = NixReader::new(reader);
         writer.write_number(12).await.unwrap();
-        let value = crate::daemon::UnkeyedValidPathInfo {
+        let value = crate::valid_path_info::UnkeyedValidPathInfo {
             deriver: Some("00000000000000000000000000000000-_.drv".parse().unwrap()),
             nar_hash: NarHash::new(&[0u8; 32]),
             references: btree_set!["00000000000000000000000000000000-_"],
@@ -471,6 +471,7 @@ mod unittests {
             ultimate: true,
             signatures: BTreeSet::new(),
             ca: None,
+            store_dir: Default::default(),
         };
         writer.write_value(&value).await.unwrap();
         writer.write_number(14).await.unwrap();

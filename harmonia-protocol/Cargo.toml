@@ -44,6 +44,8 @@ harmonia-nar = { path = "../harmonia-nar" }
 [dev-dependencies]
 harmonia-store-core = { path = "../harmonia-store-core", features = ["test"] }
 harmonia-nar = { path = "../harmonia-nar", features = ["test"] }
+harmonia-utils-test = { path = "../harmonia-utils-test" }
+paste = "1.0"
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
 rstest = { workspace = true }
@@ -54,6 +56,10 @@ test-log = "0.2"
 
 [features]
 test = ["proptest", "proptest-derive", "test-strategy", "harmonia-utils-test", "harmonia-utils-hash/test"]
+
+[[test]]
+name = "json_upstream"
+path = "tests/json_upstream/mod.rs"
 
 [lints]
 workspace = true

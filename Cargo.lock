@@ -1002,6 +1002,7 @@ dependencies = [
  "harmonia-nar",
  "harmonia-store-core",
  "harmonia-store-remote",
+ "harmonia-utils-hash",
  "harmonia-utils-test",
  "http-range",
  "log",
@@ -1089,6 +1090,7 @@ dependencies = [
  "hex-literal",
  "libc",
  "num_enum",
+ "paste",
  "pin-project-lite",
  "proptest",
  "proptest-derive",
@@ -1131,7 +1133,6 @@ dependencies = [
  "harmonia-utils-test",
  "hex-literal",
  "num_enum",
- "paste",
  "proptest",
  "proptest-derive",
  "ring",
@@ -1231,7 +1232,10 @@ name = "harmonia-utils-test"
 version = "2.1.0"
 dependencies = [
  "bytes",
+ "paste",
  "proptest",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

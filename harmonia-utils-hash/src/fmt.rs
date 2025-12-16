@@ -13,7 +13,9 @@ use crate as hash;
 use crate::InvalidHashError;
 use crate::UnknownAlgorithm;
 
-mod private {
+pub mod private {
+    /// Sealed trait to prevent external implementations of CommonHash.
+    /// External crates can implement this trait only if they need to implement CommonHash.
     pub trait Sealed {}
 }
 
@@ -107,16 +109,31 @@ impl From<UnknownAlgorithm> for ParseHashErrorKind {
     }
 }
 
-pub trait CommonHash: private::Sealed + Sized {
+pub trait CommonHash: Sized {
     fn from_slice(algorithm: hash::Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind>;
     fn implied_algorithm() -> Option<hash::Algorithm>;
     fn algorithm(&self) -> hash::Algorithm;
     fn digest_bytes(&self) -> &[u8];
 
-    fn as_base16(&self) -> &Base16<Self>;
-    fn as_base32(&self) -> &Base32<Self>;
-    fn as_base64(&self) -> &Base64<Self>;
-    fn as_sri(&self) -> &SRI<Self>;
+    #[inline]
+    fn as_base16(&self) -> &Base16<Self> {
+        Base16::from_hash_ref(self)
+    }
+
+    #[inline]
+    fn as_base32(&self) -> &Base32<Self> {
+        Base32::from_hash_ref(self)
+    }
+
+    #[inline]
+    fn as_base64(&self) -> &Base64<Self> {
+        Base64::from_hash_ref(self)
+    }
+
+    #[inline]
+    fn as_sri(&self) -> &SRI<Self> {
+        SRI::from_hash_ref(self)
+    }
 
     #[inline]
     fn base16(self) -> Base16<Self> {
@@ -139,53 +156,6 @@ pub trait CommonHash: private::Sealed + Sized {
     }
 }
 
-impl hash::Hash {
-    #[inline]
-    pub fn as_base16(&self) -> &Base16<Self> {
-        // SAFETY: `Hash` and `Base16<hash::Hash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base16<Self>) }
-    }
-
-    #[inline]
-    pub const fn base16(self) -> Base16<Self> {
-        Base16(self)
-    }
-
-    #[inline]
-    pub fn as_base32(&self) -> &Base32<Self> {
-        // SAFETY: `Hash` and `Base32<hash::Hash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base32<Self>) }
-    }
-
-    #[inline]
-    pub const fn base32(self) -> Base32<Self> {
-        Base32(self)
-    }
-
-    #[inline]
-    pub fn as_base64(&self) -> &Base64<Self> {
-        // SAFETY: `Hash` and `Base64` have the same ABI
-        unsafe { &*(self as *const Self as *const Base64<Self>) }
-    }
-
-    #[inline]
-    pub const fn base64(self) -> Base64<Self> {
-        Base64(self)
-    }
-
-    #[inline]
-    pub fn as_sri(&self) -> &SRI<Self> {
-        // SAFETY: `Hash` and `SRIHash` have the same ABI
-        unsafe { &*(self as *const hash::Hash as *const SRI<Self>) }
-    }
-
-    #[inline]
-    pub const fn sri(self) -> SRI<Self> {
-        SRI(self)
-    }
-}
-
-impl private::Sealed for hash::Hash {}
 impl CommonHash for hash::Hash {
     #[inline]
     fn from_slice(algorithm: hash::Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind> {
@@ -205,30 +175,6 @@ impl CommonHash for hash::Hash {
     #[inline]
     fn digest_bytes(&self) -> &[u8] {
         self.as_ref()
-    }
-
-    #[inline]
-    fn as_base16(&self) -> &Base16<Self> {
-        // SAFETY: `Hash` and `Base16<Hash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base16<Self>) }
-    }
-
-    #[inline]
-    fn as_base32(&self) -> &Base32<Self> {
-        // SAFETY: `Hash` and `Base32<Hash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base32<Self>) }
-    }
-
-    #[inline]
-    fn as_base64(&self) -> &Base64<Self> {
-        // SAFETY: `Hash` and `Base64<Hash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base64<Self>) }
-    }
-
-    #[inline]
-    fn as_sri(&self) -> &SRI<Self> {
-        // SAFETY: `Hash` and `SRI<Hash>` have the same ABI
-        unsafe { &*(self as *const Self as *const SRI<Self>) }
     }
 }
 
@@ -281,42 +227,6 @@ impl sfmt::UpperHex for hash::Hash {
     }
 }
 
-impl hash::Sha256 {
-    #[inline]
-    pub fn as_base16(&self) -> &Base16<Self> {
-        // SAFETY: `Sha256` and `Base16<Sha256>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base16<Self>) }
-    }
-
-    #[inline]
-    pub const fn base16(self) -> Base16<Self> {
-        Base16(self)
-    }
-
-    #[inline]
-    pub fn as_base32(&self) -> &Base32<Self> {
-        // SAFETY: `Sha256` and `Base32<Sha256>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base32<Self>) }
-    }
-
-    #[inline]
-    pub const fn base32(self) -> Base32<Self> {
-        Base32(self)
-    }
-
-    #[inline]
-    pub fn as_base64(&self) -> &Base64<Self> {
-        // SAFETY: `Sha256` and `Base64<Sha256>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base64<Self>) }
-    }
-
-    #[inline]
-    pub const fn base64(self) -> Base64<Self> {
-        Base64(self)
-    }
-}
-
-impl private::Sealed for hash::Sha256 {}
 impl CommonHash for hash::Sha256 {
     #[inline]
     fn from_slice(algorithm: hash::Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind> {
@@ -342,30 +252,6 @@ impl CommonHash for hash::Sha256 {
     #[inline]
     fn digest_bytes(&self) -> &[u8] {
         self.as_ref()
-    }
-
-    #[inline]
-    fn as_base16(&self) -> &Base16<Self> {
-        // SAFETY: `Sha256` and `Base16<Sha256>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base16<Self>) }
-    }
-
-    #[inline]
-    fn as_base32(&self) -> &Base32<Self> {
-        // SAFETY: `Sha256` and `Base32<Sha256>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base32<Self>) }
-    }
-
-    #[inline]
-    fn as_base64(&self) -> &Base64<Self> {
-        // SAFETY: `Sha256` and `Base64<Sha256>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base64<Self>) }
-    }
-
-    #[inline]
-    fn as_sri(&self) -> &SRI<Self> {
-        // SAFETY: `Sha256` and `SRI<Sha256>` have the same ABI
-        unsafe { &*(self as *const Self as *const SRI<Self>) }
     }
 }
 
@@ -405,136 +291,6 @@ impl sfmt::LowerHex for hash::Sha256 {
 impl sfmt::UpperHex for hash::Sha256 {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         for val in self.digest_bytes() {
-            write!(f, "{val:02X}")?;
-        }
-        Ok(())
-    }
-}
-
-impl hash::NarHash {
-    #[inline]
-    pub fn as_base16(&self) -> &Base16<Self> {
-        // SAFETY: `NarHash` and `Base16<NarHash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base16<Self>) }
-    }
-
-    #[inline]
-    pub const fn base16(self) -> Base16<Self> {
-        Base16(self)
-    }
-
-    #[inline]
-    pub fn as_base32(&self) -> &Base32<Self> {
-        // SAFETY: `NarHash` and `Base32<NarHash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base32<Self>) }
-    }
-
-    #[inline]
-    pub const fn base32(self) -> Base32<Self> {
-        Base32(self)
-    }
-
-    #[inline]
-    pub fn as_base64(&self) -> &Base64<Self> {
-        // SAFETY: `NarHash` and `Base64<NarHash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base64<Self>) }
-    }
-
-    #[inline]
-    pub const fn base64(self) -> Base64<Self> {
-        Base64(self)
-    }
-}
-
-impl private::Sealed for hash::NarHash {}
-impl CommonHash for hash::NarHash {
-    #[inline]
-    fn from_slice(algorithm: hash::Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind> {
-        if algorithm != hash::Algorithm::SHA256 {
-            return Err(ParseHashErrorKind::TypeMismatch {
-                expected: hash::Algorithm::SHA256,
-                actual: algorithm,
-            });
-        }
-        hash::NarHash::from_slice(hash).map_err(From::from)
-    }
-
-    #[inline]
-    fn implied_algorithm() -> Option<hash::Algorithm> {
-        Some(hash::Algorithm::SHA256)
-    }
-
-    #[inline]
-    fn algorithm(&self) -> hash::Algorithm {
-        hash::Algorithm::SHA256
-    }
-
-    #[inline]
-    fn digest_bytes(&self) -> &[u8] {
-        self.0.digest_bytes()
-    }
-
-    #[inline]
-    fn as_base16(&self) -> &Base16<Self> {
-        // SAFETY: `NarHash` and `Base16<NarHash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base16<Self>) }
-    }
-
-    #[inline]
-    fn as_base32(&self) -> &Base32<Self> {
-        // SAFETY: `NarHash` and `Base32<NarHash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base32<Self>) }
-    }
-
-    #[inline]
-    fn as_base64(&self) -> &Base64<Self> {
-        // SAFETY: `NarHash` and `Base64<NarHash>` have the same ABI
-        unsafe { &*(self as *const Self as *const Base64<Self>) }
-    }
-
-    #[inline]
-    fn as_sri(&self) -> &SRI<Self> {
-        // SAFETY: `NarHash` and `SRI<NarHash>` have the same ABI
-        unsafe { &*(self as *const Self as *const SRI<Self>) }
-    }
-}
-
-/*
-impl FromStr for hash::NarHash {
-    type Err = hash::ParseHashError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse::<Bare<Base16<Self>>>().map(From::from)
-    }
-}
-
-impl sfmt::Display for hash::NarHash {
-    fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        self.as_base16().as_bare().fmt(f)
-    }
-}
-*/
-
-impl sfmt::Debug for hash::NarHash {
-    fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        f.debug_tuple("NarHash")
-            .field(&format_args!("{}", self.as_base16().as_bare()))
-            .finish()
-    }
-}
-
-impl sfmt::LowerHex for hash::NarHash {
-    fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        for val in self.0.as_ref() {
-            write!(f, "{val:02x}")?;
-        }
-        Ok(())
-    }
-}
-
-impl sfmt::UpperHex for hash::NarHash {
-    fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        for val in self.0.as_ref() {
             write!(f, "{val:02X}")?;
         }
         Ok(())
@@ -597,6 +353,16 @@ pub struct Base16<H>(H);
 impl<H: CommonHash + Sized> Base16<H> {
     pub const fn from_hash(hash: H) -> Self {
         Self(hash)
+    }
+
+    /// Convert a hash reference to a Base16 reference.
+    ///
+    /// # Safety
+    /// This is safe because `Base16<H>` is `#[repr(transparent)]` over `H`.
+    #[inline]
+    pub fn from_hash_ref(hash: &H) -> &Self {
+        // SAFETY: `Base16<H>` has the same ABI as `H` due to #[repr(transparent)]
+        unsafe { &*(hash as *const H as *const Self) }
     }
 
     pub const fn as_hash(&self) -> &H {
@@ -695,6 +461,16 @@ pub struct Base32<H>(H);
 impl<H: CommonHash + Sized> Base32<H> {
     pub const fn from_hash(hash: H) -> Self {
         Self(hash)
+    }
+
+    /// Convert a hash reference to a Base32 reference.
+    ///
+    /// # Safety
+    /// This is safe because `Base32<H>` is `#[repr(transparent)]` over `H`.
+    #[inline]
+    pub fn from_hash_ref(hash: &H) -> &Self {
+        // SAFETY: `Base32<H>` has the same ABI as `H` due to #[repr(transparent)]
+        unsafe { &*(hash as *const H as *const Self) }
     }
 
     pub const fn as_hash(&self) -> &H {
@@ -797,6 +573,16 @@ pub struct Base64<H>(H);
 impl<H: CommonHash> Base64<H> {
     pub const fn from_hash(hash: H) -> Self {
         Self(hash)
+    }
+
+    /// Convert a hash reference to a Base64 reference.
+    ///
+    /// # Safety
+    /// This is safe because `Base64<H>` is `#[repr(transparent)]` over `H`.
+    #[inline]
+    pub fn from_hash_ref(hash: &H) -> &Self {
+        // SAFETY: `Base64<H>` has the same ABI as `H` due to #[repr(transparent)]
+        unsafe { &*(hash as *const H as *const Self) }
     }
 
     pub const fn as_hash(&self) -> &H {
@@ -908,6 +694,11 @@ impl<H> Any<H> {
     pub fn into_hash(self) -> H {
         self.0
     }
+
+    #[inline]
+    pub fn bare(self) -> Bare<Self> {
+        Bare(self)
+    }
 }
 impl<H: CommonHash> Any<H> {
     pub fn parse(algorithm: hash::Algorithm, s: &str) -> Result<H, ParseHashError> {
@@ -993,6 +784,16 @@ impl<H: CommonHash + Sized> SRI<H> {
         Self(hash)
     }
 
+    /// Convert a hash reference to a SRI reference.
+    ///
+    /// # Safety
+    /// This is safe because `SRI<H>` is `#[repr(transparent)]` over `H`.
+    #[inline]
+    pub fn from_hash_ref(hash: &H) -> &Self {
+        // SAFETY: `SRI<H>` has the same ABI as `H` due to #[repr(transparent)]
+        unsafe { &*(hash as *const H as *const Self) }
+    }
+
     pub const fn as_hash(&self) -> &H {
         &self.0
     }
@@ -1041,6 +842,25 @@ impl<H: CommonHash> FromStr for SRI<H> {
     }
 }
 
+impl<H: CommonHash> serde::Serialize for SRI<H> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de, H: CommonHash> serde::Deserialize<'de> for SRI<H> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = <&str>::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct NonSRI<H>(H);
 impl<H> NonSRI<H> {
@@ -1050,6 +870,11 @@ impl<H> NonSRI<H> {
 
     pub fn into_hash(self) -> H {
         self.0
+    }
+
+    #[inline]
+    pub fn bare(self) -> Bare<Self> {
+        Bare(self)
     }
 }
 impl<H: CommonHash> NonSRI<H> {
@@ -1110,6 +935,15 @@ impl<H: CommonHash> FromStr for NonSRI<H> {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(transparent)]
 pub struct Bare<F>(F);
+
+impl<F: Format> Bare<F> {
+    /// Unwraps the inner format wrapper.
+    #[inline]
+    pub fn into_inner(self) -> F {
+        self.0
+    }
+}
+
 impl<F> sfmt::Display for Bare<F>
 where
     F: sfmt::Display,
@@ -1135,122 +969,120 @@ where
     }
 }
 
-macro_rules! impl_fmt_from {
-    ($T:ident<>) => {
-        impl_fmt_from!($T, hash::Hash);
+/// Macro to implement From conversions for format wrappers.
+///
+/// Usage: `impl_hash_format_from!(SRI<MyHash>);` or `impl_hash_format_from!(Base16<MyHash>);`
+#[macro_export]
+macro_rules! impl_hash_format_from {
+    (SRI<$H:ty>) => {
+        impl From<$H> for $crate::fmt::SRI<$H> {
+            #[inline]
+            fn from(value: $H) -> Self {
+                $crate::fmt::SRI::from_hash(value)
+            }
+        }
+
+        impl From<$crate::fmt::SRI<$H>> for $H {
+            #[inline]
+            fn from(value: $crate::fmt::SRI<$H>) -> Self {
+                value.into_hash()
+            }
+        }
     };
-    ($T:ident<$IT:path>) => {
-        impl_fmt_from!($T<$IT>, $IT);
+    (Base16<$H:ty>) => {
+        $crate::impl_hash_format_from!(@format Base16<$H>);
     };
-    ($T:path, $FT:path) => {
-        impl From<$FT> for $T {
+    (Base32<$H:ty>) => {
+        $crate::impl_hash_format_from!(@format Base32<$H>);
+    };
+    (Base64<$H:ty>) => {
+        $crate::impl_hash_format_from!(@format Base64<$H>);
+    };
+    (Any<$H:ty>) => {
+        $crate::impl_hash_format_from!(@format_no_from_hash Any<$H>);
+    };
+    (NonSRI<$H:ty>) => {
+        $crate::impl_hash_format_from!(@format_no_from_hash NonSRI<$H>);
+    };
+    (@format $T:ident<$H:ty>) => {
+        impl From<$H> for $crate::fmt::$T<$H> {
             #[inline]
-            fn from(value: $FT) -> Self {
-                $T(value)
+            fn from(value: $H) -> Self {
+                $crate::fmt::$T::from_hash(value)
             }
         }
 
-        impl From<$T> for $FT {
+        impl From<$crate::fmt::$T<$H>> for $H {
             #[inline]
-            fn from(value: $T) -> Self {
-                value.0
+            fn from(value: $crate::fmt::$T<$H>) -> Self {
+                value.into_hash()
             }
         }
 
-        impl AsRef<$FT> for $T {
+        impl From<$H> for $crate::fmt::Bare<$crate::fmt::$T<$H>> {
             #[inline]
-            fn as_ref(&self) -> &$FT {
-                &self.0
+            fn from(value: $H) -> Self {
+                $crate::fmt::$T::from_hash(value).bare()
             }
         }
 
-        impl std::borrow::Borrow<$FT> for $T {
+        impl From<$crate::fmt::Bare<$crate::fmt::$T<$H>>> for $H {
             #[inline]
-            fn borrow(&self) -> &$FT {
-                &self.0
+            fn from(value: $crate::fmt::Bare<$crate::fmt::$T<$H>>) -> Self {
+                value.into_inner().into_hash()
+            }
+        }
+    };
+    (@format_no_from_hash $T:ident<$H:ty>) => {
+        impl From<$H> for $crate::fmt::$T<$H> {
+            #[inline]
+            fn from(value: $H) -> Self {
+                <$crate::fmt::$T<$H> as $crate::fmt::Format>::from_inner(value)
             }
         }
 
-        impl AsRef<[u8]> for $T {
+        impl From<$crate::fmt::$T<$H>> for $H {
             #[inline]
-            fn as_ref(&self) -> &[u8] {
-                self.0.digest_bytes()
+            fn from(value: $crate::fmt::$T<$H>) -> Self {
+                value.into_hash()
+            }
+        }
+
+        impl From<$H> for $crate::fmt::Bare<$crate::fmt::$T<$H>> {
+            #[inline]
+            fn from(value: $H) -> Self {
+                <$crate::fmt::$T<$H> as $crate::fmt::Format>::from_inner(value).bare()
+            }
+        }
+
+        impl From<$crate::fmt::Bare<$crate::fmt::$T<$H>>> for $H {
+            #[inline]
+            fn from(value: $crate::fmt::Bare<$crate::fmt::$T<$H>>) -> Self {
+                value.into_inner().into_hash()
             }
         }
     };
 }
 
-impl_fmt_from!(hash::NarHash, hash::Sha256);
-impl_fmt_from!(SRI<hash::Hash>);
-impl_fmt_from!(SRI<hash::NarHash>);
-impl_fmt_from!(SRI<hash::Sha256>);
-
-macro_rules! impl_format_from {
-    ($T:ident<$IT:path>) => {
-        impl_format_from!($T<$IT>, $IT);
-    };
-    ($T:ident<$($IT:path)?>, $FT:path) => {
-        impl_fmt_from!($T<$($IT)?>, $FT);
-
-        impl From<$FT> for Bare<$T<$($IT)?>> {
-            #[inline]
-            fn from(value: $FT) -> Self {
-                Bare($T(value))
-            }
-        }
-
-        impl From<Bare<$T<$($IT)?>>> for $FT {
-            #[inline]
-            fn from(value: Bare<$T<$($IT)?>>) -> Self {
-                value.0.0
-            }
-        }
-
-        impl AsRef<$FT> for Bare<$T<$($IT)?>> {
-            #[inline]
-            fn as_ref(&self) -> &$FT {
-                &self.0.0
-            }
-        }
-
-        impl std::borrow::Borrow<$FT> for Bare<$T<$($IT)?>> {
-            #[inline]
-            fn borrow(&self) -> &$FT {
-                &self.0.0
-            }
-        }
-
-        impl AsRef<[u8]> for Bare<$T<$($IT)?>> {
-            #[inline]
-            fn as_ref(&self) -> &[u8] {
-                self.0.as_ref()
-            }
-        }
-    };
-}
-
-impl_format_from!(Base64<hash::Hash>);
-impl_format_from!(Base64<hash::NarHash>);
-impl_format_from!(Base64<hash::Sha256>);
-impl_format_from!(Base32<hash::Hash>);
-impl_format_from!(Base32<hash::NarHash>);
-impl_format_from!(Base32<hash::Sha256>);
-impl_format_from!(Base16<hash::Hash>);
-impl_format_from!(Base16<hash::NarHash>);
-impl_format_from!(Base16<hash::Sha256>);
-impl_format_from!(Any<hash::Hash>);
-impl_format_from!(Any<hash::NarHash>);
-impl_format_from!(Any<hash::Sha256>);
-impl_format_from!(NonSRI<hash::Hash>);
-impl_format_from!(NonSRI<hash::NarHash>);
-impl_format_from!(NonSRI<hash::Sha256>);
+impl_hash_format_from!(SRI<hash::Hash>);
+impl_hash_format_from!(SRI<hash::Sha256>);
+impl_hash_format_from!(Base64<hash::Hash>);
+impl_hash_format_from!(Base64<hash::Sha256>);
+impl_hash_format_from!(Base32<hash::Hash>);
+impl_hash_format_from!(Base32<hash::Sha256>);
+impl_hash_format_from!(Base16<hash::Hash>);
+impl_hash_format_from!(Base16<hash::Sha256>);
+impl_hash_format_from!(Any<hash::Hash>);
+impl_hash_format_from!(Any<hash::Sha256>);
+impl_hash_format_from!(NonSRI<hash::Hash>);
+impl_hash_format_from!(NonSRI<hash::Sha256>);
 
 #[cfg(test)]
 mod unittests {
     use hex_literal::hex;
 
     use super::*;
-    use crate::{Algorithm, Hash, NarHash};
+    use crate::{Algorithm, Hash};
 
     struct HashFormats {
         hash: Hash,
@@ -1471,15 +1303,6 @@ mod unittests {
             let actual = input.parse::<Base16<Hash>>().unwrap_err();
             panic!("{actual}");
         }
-
-        // TypeMismatch
-        #[rstest]
-        #[should_panic = "hash 'sha1:a9993e364706816aba3e25717850c26c9cd0d89d' should have type 'sha256' but got 'sha1'"]
-        #[case::type_mismatch("sha1:a9993e364706816aba3e25717850c26c9cd0d89d")]
-        fn nar_hash_from_str_error(#[case] input: &str) {
-            let actual = input.parse::<Base16<NarHash>>().unwrap_err();
-            panic!("{actual}");
-        }
     }
 
     mod base32 {
@@ -1627,14 +1450,6 @@ mod unittests {
             let actual = input.parse::<SRI<Hash>>().unwrap_err();
             panic!("{actual}");
         }
-
-        #[rstest]
-        #[should_panic = "hash 'sha1-qZk+NkcGgWq6PiVxeFDCbJzQ2J0=' should have type 'sha256' but got 'sha1'"]
-        #[case::type_mismatch("sha1-qZk+NkcGgWq6PiVxeFDCbJzQ2J0=")]
-        fn nar_hash_from_str_error(#[case] input: &str) {
-            let actual = input.parse::<SRI<NarHash>>().unwrap_err();
-            panic!("{actual}");
-        }
     }
 
     mod any {
@@ -1689,14 +1504,6 @@ mod unittests {
         #[case::unknown_algorithm("sha25:12345")]
         fn hash_from_str_error(#[case] input: &str) {
             let actual = input.parse::<Any<Hash>>().unwrap_err();
-            panic!("{actual}");
-        }
-
-        #[rstest]
-        #[should_panic = "hash 'sha1:kpcd173cq987hw957sx6m0868wv3x6d9' should have type 'sha256' but got 'sha1'"]
-        #[case::type_mismatch("sha1:kpcd173cq987hw957sx6m0868wv3x6d9")]
-        fn nar_hash_from_str_error(#[case] input: &str) {
-            let actual = input.parse::<Any<NarHash>>().unwrap_err();
             panic!("{actual}");
         }
     }

@@ -10,6 +10,8 @@ use thiserror::Error;
 mod algo;
 pub mod fmt;
 
+use fmt::CommonHash;
+
 pub use algo::{Algorithm, UnknownAlgorithm};
 
 const LARGEST_ALGORITHM: Algorithm = Algorithm::LARGEST;
@@ -99,44 +101,6 @@ impl<'de> Deserialize<'de> for Hash {
             .map(|sri| sri.into_hash())
             .or_else(|_| s.parse::<fmt::Any<Hash>>().map(|any| any.into_hash()))
             .map_err(de::Error::custom)
-    }
-}
-
-#[derive(Clone, Copy, Eq, Hash, PartialEq, PartialOrd, Ord)]
-#[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
-#[repr(transparent)]
-pub struct NarHash(Sha256);
-
-impl NarHash {
-    pub const fn new(digest: &[u8]) -> NarHash {
-        NarHash(Sha256::new(digest))
-    }
-
-    pub fn from_slice(digest: &[u8]) -> Result<NarHash, InvalidHashError> {
-        Sha256::from_slice(digest).map(NarHash)
-    }
-
-    pub fn digest<D: AsRef<[u8]>>(data: D) -> Self {
-        Self::new(&Algorithm::SHA256.digest(data))
-    }
-
-    #[inline]
-    pub fn digest_bytes(&self) -> &[u8] {
-        self.0.digest_bytes()
-    }
-}
-
-impl From<NarHash> for Hash {
-    fn from(value: NarHash) -> Self {
-        value.0.into()
-    }
-}
-
-impl TryFrom<Hash> for NarHash {
-    type Error = fmt::ParseHashErrorKind;
-
-    fn try_from(value: Hash) -> Result<Self, Self::Error> {
-        Ok(NarHash(value.try_into()?))
     }
 }
 
