@@ -18,6 +18,7 @@ data-encoding = { workspace = true }
 derive_more = { workspace = true }
 harmonia-utils-base-encoding = { path = "../harmonia-utils-base-encoding" }
 md5 = { workspace = true }
+blake3 = { workspace = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 ring = { workspace = true }
