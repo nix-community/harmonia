@@ -135,13 +135,13 @@ mod unittests {
     use tokio_test::io::Builder;
 
     use super::*;
+    use crate::NarHash;
     use crate::de::NixReader;
     use crate::ser::NixWriter;
     use crate::types::DaemonResult;
     use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
     use harmonia_nar::archive::{test_data, write_nar};
     use harmonia_store_core::btree_set;
-    use harmonia_utils_hash::NarHash;
     use harmonia_utils_io::DEFAULT_BUF_SIZE;
 
     #[tokio::test]

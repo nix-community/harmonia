@@ -37,6 +37,7 @@ tokio-util = { version = "0.7.17", features = ["io"] }
 harmonia-store-core = { path = "../harmonia-store-core" }
 harmonia-store-remote = { path = "../harmonia-store-remote" }
 harmonia-nar = { path = "../harmonia-nar" }
+harmonia-utils-hash = { path = "../harmonia-utils-hash" }
 futures = { workspace = true }
 prometheus = { workspace = true }
 

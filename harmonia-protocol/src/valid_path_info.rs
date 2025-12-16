@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use test_strategy::Arbitrary;
 
+use crate::NarHash;
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::signature::Signature;
 #[cfg(test)]
 use harmonia_store_core::signature::proptests::arb_signatures;
 use harmonia_store_core::store_path::{ContentAddress, StoreDir, StorePath};
-use harmonia_utils_hash::NarHash;
 
 use crate::types::DaemonTime;
 

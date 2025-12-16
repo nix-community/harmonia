@@ -30,10 +30,13 @@
 pub mod daemon_wire;
 pub mod de;
 pub mod log;
+pub mod nar_hash;
 pub mod ser;
 pub mod types;
 pub mod valid_path_info;
 pub mod version;
+
+pub use nar_hash::NarHash;
 
 pub use version::ProtocolVersion;
 

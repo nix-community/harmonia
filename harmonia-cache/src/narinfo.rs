@@ -2,6 +2,7 @@ use crate::error::{CacheError, NarInfoError, Result, StoreError};
 use actix_web::{HttpResponse, http, web};
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::DaemonStore;
+use harmonia_utils_hash::fmt::CommonHash;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;

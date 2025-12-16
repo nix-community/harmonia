@@ -1002,6 +1002,7 @@ dependencies = [
  "harmonia-nar",
  "harmonia-store-core",
  "harmonia-store-remote",
+ "harmonia-utils-hash",
  "harmonia-utils-test",
  "http-range",
  "log",

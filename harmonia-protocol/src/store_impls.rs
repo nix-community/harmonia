@@ -23,6 +23,7 @@ use harmonia_store_core::realisation::Realisation;
 use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathName,
 };
+use harmonia_utils_hash::fmt::CommonHash;
 
 // ========== BasicDerivation ==========
 
@@ -508,16 +509,14 @@ nix_serialize_remote!(
 
 // NarHash (uses custom from/into with fmt types)
 nix_deserialize_remote!(
-    #[nix(
-        from = "harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Any<harmonia_utils_hash::NarHash>>"
-    )]
-    harmonia_utils_hash::NarHash
+    #[nix(from = "harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Any<crate::NarHash>>")]
+    crate::NarHash
 );
 nix_serialize_remote!(
     #[nix(
-        into = "harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Base16<harmonia_utils_hash::NarHash>>"
+        into = "harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Base16<crate::NarHash>>"
     )]
-    harmonia_utils_hash::NarHash
+    crate::NarHash
 );
 
 // Signature
@@ -554,8 +553,8 @@ nix_serialize_remote!(
 );
 
 // NarHash format wrappers
-nix_deserialize_remote!(#[nix(from_str)] harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Any<harmonia_utils_hash::NarHash>>);
-nix_serialize_remote!(#[nix(display)] harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Base16<harmonia_utils_hash::NarHash>>);
+nix_deserialize_remote!(#[nix(from_str)] harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Any<crate::NarHash>>);
+nix_serialize_remote!(#[nix(display)] harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Base16<crate::NarHash>>);
 
 // ContentAddressMethodAlgorithm
 nix_deserialize_remote!(

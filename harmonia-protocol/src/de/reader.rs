@@ -216,12 +216,12 @@ mod unittests {
     use tokio_test::io::Builder;
 
     use super::*;
+    use crate::NarHash;
     use crate::daemon::{
         de::NixRead,
         ser::{NixWrite, NixWriter},
     };
     use harmonia_store_core::btree_set;
-    use harmonia_utils_hash::NarHash;
     use harmonia_utils_io::BytesReader;
 
     #[tokio::test]

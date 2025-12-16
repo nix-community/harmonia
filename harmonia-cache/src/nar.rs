@@ -5,6 +5,7 @@ use futures::{SinkExt, StreamExt};
 use harmonia_nar::{NarWriter, dump};
 use harmonia_store_core::store_path::StorePathHash;
 use harmonia_store_remote::DaemonStore;
+use harmonia_utils_hash::fmt::CommonHash;
 use serde::Deserialize;
 use std::path::PathBuf;
 use tokio::task;
