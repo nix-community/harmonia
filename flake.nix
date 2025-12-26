@@ -72,6 +72,7 @@
             // lib.optionalAttrs pkgs.stdenv.isLinux {
               nix-daemon = import ./tests/nix-daemon.nix testArgs;
               harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
+              chroot-store = import ./tests/chroot-store.nix testArgs;
             }
             // packages
             // devShells;

@@ -97,6 +97,11 @@ async fn test_chroot() -> Result<()> {
         daemon.socket_path.display()
     );
 
+    // To test the chroot mapping logic, we use a different path for the real store.
+    // In this test, we'll make real_nix_store a symlink to the actual guest_store.
+    let real_store = temp_dir.path().join("real-store");
+    std::os::unix::fs::symlink(&guest_store, &real_store)?;
+
     // Extract directory hash from the store path
     // The path will be something like /nix/store/hash-name
     let dir_hash = dir_path
@@ -110,18 +115,21 @@ async fn test_chroot() -> Result<()> {
     // Find an available port
     let port = pick_unused_port().ok_or("No available ports")?;
 
-    // Start harmonia-cache with chroot configuration
+    // Start harmonia-cache with chroot configuration.
+    // virtual_nix_store must match what the daemon uses for protocol communication.
+    // real_nix_store is where Harmonia looks for files on the filesystem.
     let cache_config = format!(
         r#"
 bind = "127.0.0.1:{}"
 daemon_socket = "{}"
 priority = 30
-virtual_nix_store = "/nix/store"
+virtual_nix_store = "{}"
 real_nix_store = "{}"
 "#,
         port,
         daemon.socket_path.display(),
         guest_store.display(),
+        real_store.display(),
     );
 
     let _cache_guard = start_harmonia_cache(&cache_config, port).await?;
