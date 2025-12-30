@@ -171,6 +171,7 @@ impl TryFrom<Hash> for Sha256 {
 #[derive(Clone)]
 enum InnerContext {
     MD5(md5::Context),
+    BLAKE3(Box<blake3::Hasher>),
     Ring(digest::Context),
 }
 
@@ -199,6 +200,10 @@ impl Context {
     pub fn new(algorithm: Algorithm) -> Self {
         match algorithm {
             Algorithm::MD5 => Context(algorithm, InnerContext::MD5(md5::Context::new())),
+            Algorithm::BLAKE3 => Context(
+                algorithm,
+                InnerContext::BLAKE3(Box::new(blake3::Hasher::new())),
+            ),
             _ => Context(
                 algorithm,
                 InnerContext::Ring(digest::Context::new(algorithm.digest_algorithm())),
@@ -212,6 +217,9 @@ impl Context {
         let data = data.as_ref();
         match &mut self.1 {
             InnerContext::MD5(ctx) => ctx.consume(data),
+            InnerContext::BLAKE3(ctx) => {
+                ctx.update(data);
+            }
             InnerContext::Ring(ctx) => ctx.update(data),
         }
     }
@@ -223,6 +231,7 @@ impl Context {
     pub fn finish(self) -> Hash {
         match self.1 {
             InnerContext::MD5(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
+            InnerContext::BLAKE3(ctx) => Hash::new(self.0, ctx.finalize().as_bytes()),
             InnerContext::Ring(ctx) => ctx.finish().try_into().unwrap(),
         }
     }
@@ -325,6 +334,7 @@ mod proptests {
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             prop_oneof![
                 1 => Just(Algorithm::MD5),
+                1 => Just(Algorithm::BLAKE3),
                 2 => Just(Algorithm::SHA1),
                 5 => Just(Algorithm::SHA256),
                 2 => Just(Algorithm::SHA512)
@@ -363,6 +373,15 @@ mod unittests {
     const MD5_EMPTY: Hash = Hash::new(Algorithm::MD5, &hex!("d41d8cd98f00b204e9800998ecf8427e"));
     /// value taken from: https://tools.ietf.org/html/rfc1321
     const MD5_ABC: Hash = Hash::new(Algorithm::MD5, &hex!("900150983cd24fb0d6963f7d28e17f72"));
+
+    const BLAKE3_EMPTY: Hash = Hash::new(
+        Algorithm::BLAKE3,
+        &hex!("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"),
+    );
+    const BLAKE3_ABC: Hash = Hash::new(
+        Algorithm::BLAKE3,
+        &hex!("6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"),
+    );
 
     /// value taken from: https://tools.ietf.org/html/rfc3174
     const SHA1_ABC: Hash = Hash::new(
@@ -403,6 +422,7 @@ mod unittests {
 
     #[rstest]
     #[case::md5(Algorithm::MD5, 16, 32, 26, 24, 18)]
+    #[case::blake3(Algorithm::BLAKE3, 32, 64, 52, 44, 33)]
     #[case::sha1(Algorithm::SHA1, 20, 40, 32, 28, 21)]
     #[case::sha256(Algorithm::SHA256, 32, 64, 52, 44, 33)]
     #[case::sha512(Algorithm::SHA512, 64, 128, 103, 88, 66)]
@@ -439,6 +459,7 @@ mod unittests {
 
     #[rstest]
     #[case::md5("md5", Algorithm::MD5)]
+    #[case::blake3("blake3", Algorithm::BLAKE3)]
     #[case::sha1("sha1", Algorithm::SHA1)]
     #[case::sha256("sha256", Algorithm::SHA256)]
     #[case::sha512("sha512", Algorithm::SHA512)]
@@ -458,6 +479,8 @@ mod unittests {
     #[rstest]
     #[case::md5_empty(&MD5_EMPTY, "")]
     #[case::md5_abc(&MD5_ABC, "abc")]
+    #[case::blake3_empty(&BLAKE3_EMPTY, "")]
+    #[case::blake3_abc(&BLAKE3_ABC, "abc")]
     #[case::sha1_abc(&SHA1_ABC, "abc")]
     #[case::sha1_long(&SHA1_LONG, "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")]
     #[case::sha256_abc(&SHA256_ABC, "abc")]
@@ -489,6 +512,7 @@ mod unittests {
     #[case::sha256(&SHA256_ABC, "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=")]
     #[case::sha1(&SHA1_ABC, "sha1-qZk+NkcGgWq6PiVxeFDCbJzQ2J0=")]
     #[case::md5(&MD5_ABC, "md5-kAFQmDzST7DWlj99KOF/cg==")]
+    #[case::blake3(&BLAKE3_ABC, "blake3-ZDezrDhGUTP/tjt1JzqNtUjFWEZdedsD/TWcbNW9nYU=")]
     #[case::sha512(&SHA512_ABC, "sha512-3a81oZNherrMQXNJriBBMRLm+k6JqX6iCp7u5ktV05ohkpkqJ0/BqDa6PCOj/uu9RU1EI2Q86A4qmslPpUyknw==")]
     fn test_serde_hash_sri(#[case] hash: &Hash, #[case] sri_str: &str) {
         // Test serialization - should produce SRI string
