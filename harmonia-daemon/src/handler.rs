@@ -8,6 +8,7 @@
 
 use std::collections::BTreeSet;
 use std::future::ready;
+use std::num::NonZero;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -83,8 +84,8 @@ impl LocalStoreHandler {
         let registration_time = info
             .registration_time
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
+            .map(|d| NonZero::new(d.as_secs() as i64))
+            .unwrap_or(None);
 
         // Parse signatures
         let signatures = info
