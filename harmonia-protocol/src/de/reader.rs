@@ -466,7 +466,7 @@ mod unittests {
             deriver: Some("00000000000000000000000000000000-_.drv".parse().unwrap()),
             nar_hash: NarHash::new(&[0u8; 32]),
             references: btree_set!["00000000000000000000000000000000-_"],
-            registration_time: 0,
+            registration_time: None,
             nar_size: 0,
             ultimate: true,
             signatures: BTreeSet::new(),

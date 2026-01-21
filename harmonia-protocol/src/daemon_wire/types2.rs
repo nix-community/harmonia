@@ -4,6 +4,7 @@ pub use crate::build_result::{
 };
 
 use std::fmt;
+use std::num::NonZero;
 use std::str::FromStr;
 use std::str::from_utf8;
 use std::time::Duration;
@@ -532,6 +533,26 @@ impl NixSerializeTrait for Option<Microseconds> {
         } else {
             writer.write_number(0).await
         }
+    }
+}
+
+/// Nix wire protocol impl for Option<NonZero<i64>> - serializes as plain i64 (0 = None)
+impl NixDeserializeTrait for Option<NonZero<i64>> {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + NixRead + Send,
+    {
+        Ok(reader.try_read_value::<i64>().await?.map(NonZero::new))
+    }
+}
+
+impl NixSerializeTrait for Option<NonZero<i64>> {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: NixWrite,
+    {
+        let value = self.map(|n| n.get()).unwrap_or(0);
+        writer.write_number(value as u64).await
     }
 }
 
