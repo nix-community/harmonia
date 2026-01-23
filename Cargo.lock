@@ -1122,7 +1122,7 @@ version = "2.1.0"
 
 [[package]]
 name = "harmonia-store-core"
-version = "2.1.0"
+version = "0.0.0-alpha.0"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -1179,7 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-utils-base-encoding"
-version = "2.1.0"
+version = "0.0.0-alpha.0"
 dependencies = [
  "data-encoding",
  "derive_more",
@@ -1192,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-utils-hash"
-version = "2.1.0"
+version = "0.0.0-alpha.0"
 dependencies = [
  "data-encoding",
  "derive_more",
@@ -1212,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-utils-io"
-version = "2.1.0"
+version = "0.0.0-alpha.0"
 dependencies = [
  "bytes",
  "futures",
@@ -1229,7 +1229,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-utils-test"
-version = "2.1.0"
+version = "0.0.0-alpha.0"
 dependencies = [
  "bytes",
  "paste",

@@ -18,7 +18,7 @@ bstr = "1.11"
 bytes = { workspace = true }
 derive_more = { workspace = true }
 futures = { workspace = true }
-harmonia-utils-io = { path = "../harmonia-utils-io" }
+harmonia-utils-io = { version = "0.0.0-alpha.0" }
 pin-project-lite = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util"] }
@@ -27,7 +27,7 @@ tracing = { workspace = true }
 walkdir = "2.5"
 
 [dev-dependencies]
-harmonia-utils-test = { path = "../harmonia-utils-test" }
+harmonia-utils-test = { version = "0.0.0-alpha.0" }
 proptest = { workspace = true }
 rstest = { workspace = true }
 tempfile = { workspace = true }
