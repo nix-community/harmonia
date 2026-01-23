@@ -4,7 +4,7 @@
 
 [package]
 name = "harmonia-utils-hash"
-version.workspace = true
+version = "0.0.0-alpha.0"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,7 +16,7 @@ readme = "README.md"
 [dependencies]
 data-encoding = { workspace = true }
 derive_more = { workspace = true }
-harmonia-utils-base-encoding = { path = "../harmonia-utils-base-encoding" }
+harmonia-utils-base-encoding = { version = "0.0.0-alpha.0" }
 md5 = { workspace = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }

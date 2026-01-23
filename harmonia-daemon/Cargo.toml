@@ -9,11 +9,11 @@ repository.workspace = true
 readme = "README.md"
 
 [dependencies]
-harmonia-utils-io = { path = "../harmonia-utils-io" }
-harmonia-utils-hash = { path = "../harmonia-utils-hash" }
-harmonia-store-core = { path = "../harmonia-store-core" }
-harmonia-store-db = { path = "../harmonia-store-db" }
-harmonia-protocol = { path = "../harmonia-protocol" }
+harmonia-utils-io = { version = "0.0.0-alpha.0" }
+harmonia-utils-hash = { version = "0.0.0-alpha.0" }
+harmonia-store-core = { version = "0.0.0-alpha.0" }
+harmonia-store-db = { version = "2.1.0" }
+harmonia-protocol = { version = "2.1.0" }
 tokio = { workspace = true }
 log = { workspace = true }
 tracing = { workspace = true }
@@ -24,7 +24,7 @@ serde = { workspace = true }
 futures = { workspace = true }
 
 [dev-dependencies]
-harmonia-utils-test = { path = "../harmonia-utils-test" }
+harmonia-utils-test = { version = "0.0.0-alpha.0" }
 tempfile = "3"
 
 [lints]

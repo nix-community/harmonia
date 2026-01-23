@@ -4,7 +4,7 @@
 
 [package]
 name = "harmonia-store-core"
-version.workspace = true
+version = "0.0.0-alpha.0"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,8 +17,8 @@ readme = "README.md"
 bytes = { workspace = true, features = ["serde"] }
 data-encoding = { workspace = true }
 derive_more = { workspace = true }
-harmonia-utils-base-encoding = { path = "../harmonia-utils-base-encoding" }
-harmonia-utils-hash = { path = "../harmonia-utils-hash" }
+harmonia-utils-base-encoding = { version = "0.0.0-alpha.0" }
+harmonia-utils-hash = { version = "0.0.0-alpha.0" }
 num_enum = { workspace = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
@@ -27,7 +27,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = "3.16"
 test-strategy = { workspace = true, optional = true }
-harmonia-utils-test = { path = "../harmonia-utils-test", optional = true }
+harmonia-utils-test = { version = "0.0.0-alpha.0", optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "sync"] }
 tracing = { workspace = true }
@@ -41,8 +41,8 @@ tempfile = { workspace = true }
 test-strategy = { workspace = true }
 tokio-test = "0.4"
 hex-literal = "1.1"
-harmonia-protocol = { path = "../harmonia-protocol", features = ["test"] }
-harmonia-utils-test = { path = "../harmonia-utils-test" }
+harmonia-protocol = { version = "2.1.0", features = ["test"] }
+harmonia-utils-test = { version = "0.0.0-alpha.0" }
 test-log = "0.2"
 rstest_reuse = "0.7"
 

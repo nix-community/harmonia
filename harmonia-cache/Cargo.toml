@@ -34,15 +34,15 @@ url = "2.5.7"
 async-compression = { version = "0.4.36", features = ["tokio", "bzip2"] }
 tokio-util = { version = "0.7.17", features = ["io"] }
 # Nix.rs-based crates
-harmonia-store-core = { path = "../harmonia-store-core" }
-harmonia-store-remote = { path = "../harmonia-store-remote" }
-harmonia-nar = { path = "../harmonia-nar" }
-harmonia-utils-hash = { path = "../harmonia-utils-hash" }
+harmonia-store-core = { version = "0.0.0-alpha.0" }
+harmonia-store-remote = { version = "2.1.0" }
+harmonia-nar = { version = "2.1.0" }
+harmonia-utils-hash = { version = "0.0.0-alpha.0" }
 futures = { workspace = true }
 prometheus = { workspace = true }
 
 [dev-dependencies]
-harmonia-utils-test = { path = "../harmonia-utils-test" }
+harmonia-utils-test = { version = "0.0.0-alpha.0" }
 nix = { workspace = true }
 tokio = { workspace = true, features = ["process"] }
 

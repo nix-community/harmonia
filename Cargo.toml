@@ -22,7 +22,8 @@ resolver = "2"
 version = "2.1.0"
 authors = [
   "Jörg Thalheim <joerg@thalheim.io>",
-  "Simon Hauser <simon.hauser@helsinki-systems.de>"
+  "Simon Hauser <simon.hauser@helsinki-systems.de>",
+  "John Ericson <John.Ericson@Obsidian.Systems>",
 ]
 edition = "2024"
 license = "MIT"
@@ -71,6 +72,19 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+
+# Patch internal crates to use local paths during development
+[patch.crates-io]
+harmonia-utils-base-encoding = { path = "harmonia-utils-base-encoding" }
+harmonia-utils-hash = { path = "harmonia-utils-hash" }
+harmonia-utils-test = { path = "harmonia-utils-test" }
+harmonia-store-core = { path = "harmonia-store-core" }
+harmonia-utils-io = { path = "harmonia-utils-io" }
+harmonia-protocol = { path = "harmonia-protocol" }
+harmonia-nar = { path = "harmonia-nar" }
+harmonia-protocol-derive = { path = "harmonia-protocol-derive" }
+harmonia-store-db = { path = "harmonia-store-db" }
+harmonia-store-remote = { path = "harmonia-store-remote" }
 
 # Profiling profile: release optimizations with debug info for flamegraphs/perf
 [profile.profiling]
