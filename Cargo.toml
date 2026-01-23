@@ -64,7 +64,7 @@ syn = "2.0"
 proptest = "1.6"
 proptest-derive = "0.7"
 rstest = "0.26"
-tempfile = "3.10"
+tempfile = "3.24"
 test-strategy = "0.4"
 
 # Database
