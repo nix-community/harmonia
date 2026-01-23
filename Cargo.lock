@@ -1127,7 +1127,6 @@ dependencies = [
  "bytes",
  "data-encoding",
  "derive_more",
- "harmonia-protocol",
  "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
  "harmonia-utils-test",
