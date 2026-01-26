@@ -32,7 +32,7 @@ thiserror = { workspace = true }
 tempfile = "3.24"
 url = "2.5.7"
 async-compression = { version = "0.4.36", features = ["tokio", "bzip2"] }
-tokio-util = { version = "0.7.17", features = ["io"] }
+tokio-util = { version = "0.7.18", features = ["io"] }
 # Nix.rs-based crates
 harmonia-store-core = { version = "0.0.0-alpha.0" }
 harmonia-store-remote = { version = "2.1.0" }
