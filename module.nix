@@ -108,7 +108,7 @@ in
       warnings =
         if cacheCfg.signKeyPath != null then
           [
-            ''`services.harmonia-dev.cache.signKeyPath` is deprecated, use `services.harmonia-dev.cache.signKeyPaths` instead''
+            "`services.harmonia-dev.cache.signKeyPath` is deprecated, use `services.harmonia-dev.cache.signKeyPaths` instead"
           ]
         else
           [ ];

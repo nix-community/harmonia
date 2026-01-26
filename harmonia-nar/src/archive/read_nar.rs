@@ -162,8 +162,8 @@ macro_rules! token {
         concat_slice!($(encoding!($e)),+)
     };
 }
+#[cfg(test)]
 pub(crate) use concat_slice;
-pub(crate) use token;
 
 pub const TOK_ROOT: &[u8] = token!(b"nix-archive-1", b"(", b"type");
 pub const TOK_PAR: &[u8] = encoding!(b")");
