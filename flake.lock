@@ -53,18 +53,19 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1764426117,
-        "narHash": "sha256-rTslB7dCKLKCCDg4/6OJ+ZFmU7ctNAKeyYZ4VBnU/TQ=",
-        "owner": "Mic92",
-        "repo": "nixpkgs",
-        "rev": "65037cffdb986acb08035988674765b6cf0f34e7",
-        "type": "github"
+        "lastModified": 1769330179,
+        "narHash": "sha256-yxgb4AmkVHY5OOBrC79Vv6EVd4QZEotqv+6jcvA212M=",
+        "ref": "nixpkgs-unstable",
+        "rev": "48698d12cc10555a4f3e3222d9c669b884a49dfe",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/NixOS/nixpkgs"
       },
       "original": {
-        "owner": "Mic92",
-        "ref": "harmonia-coverage",
-        "repo": "nixpkgs",
-        "type": "github"
+        "ref": "nixpkgs-unstable",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/NixOS/nixpkgs"
       }
     },
     "root": {

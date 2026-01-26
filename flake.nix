@@ -1,8 +1,8 @@
 {
   description = "Nix binary cache implemented in rust using libnix-store";
 
-  # TODO: switch back to nixos-unstable-small after https://github.com/NixOS/nixpkgs/pull/466280 is merged
-  inputs.nixpkgs.url = "github:Mic92/nixpkgs/harmonia-coverage";
+  inputs.nixpkgs.url = "git+https://github.com/NixOS/nixpkgs?shallow=1&ref=nixpkgs-unstable";
+
   inputs.flake-parts = {
     url = "github:hercules-ci/flake-parts";
     inputs.nixpkgs-lib.follows = "nixpkgs";
