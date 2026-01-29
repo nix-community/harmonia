@@ -68,7 +68,7 @@ tempfile = "3.24"
 test-strategy = "0.4"
 
 # Database
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
