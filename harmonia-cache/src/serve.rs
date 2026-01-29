@@ -128,7 +128,16 @@ pub(crate) async fn get(
         full_path.display()
     ))?;
 
-    if !full_path.starts_with(settings.store.real_store()) {
+    let real_store = settings
+        .store
+        .real_store()
+        .canonicalize()
+        .io_context(format!(
+            "cannot resolve real nix store path: {}",
+            settings.store.real_store().display()
+        ))?;
+
+    if !full_path.starts_with(&real_store) {
         return Ok(HttpResponse::NotFound().finish());
     }
 
@@ -147,7 +156,7 @@ pub(crate) async fn get(
         } else {
             url_prefix.join(dir)
         };
-        directory_listing(&url_prefix, &full_path, settings.store.real_store())
+        directory_listing(&url_prefix, &full_path, &real_store)
     } else {
         Ok(NamedFile::open_async(&full_path)
             .await

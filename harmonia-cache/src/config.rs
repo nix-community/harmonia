@@ -152,13 +152,11 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
                 .as_encoded_bytes()
                 .to_vec()
         });
-    // For daemon communication, use real_nix_store if set (chroot mode),
-    // otherwise use the virtual store path
-    let daemon_store_dir = settings
-        .real_nix_store
-        .as_ref()
-        .map(|p| p.as_os_str().as_encoded_bytes().to_vec())
-        .unwrap_or_else(|| virtual_store_dir.clone());
+    // For daemon communication, always use the virtual store path.
+    // The daemon's database stores paths with the virtual prefix (e.g., /nix/store),
+    // even when files are physically located elsewhere (chroot mode).
+    // The real_nix_store is only used for mapping file access to actual locations.
+    let daemon_store_dir = virtual_store_dir.clone();
     settings.store = Store::new(
         virtual_store_dir,
         daemon_store_dir,
