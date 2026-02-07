@@ -208,7 +208,7 @@ impl<R: AsyncBytesRead> AsyncBytesRead for NixReader<R> {
 
 #[cfg(test)]
 mod unittests {
-    use std::{collections::BTreeSet, time::Duration};
+    use std::collections::BTreeSet;
 
     use hex_literal::hex;
     use rstest::rstest;
@@ -257,9 +257,7 @@ mod unittests {
     async fn test_read_u64_partial() {
         let mock = Builder::new()
             .read(&hex!("0100 0000"))
-            .wait(Duration::ZERO)
             .read(&hex!("0000 0000 0123 4567 89AB CDEF"))
-            .wait(Duration::ZERO)
             .read(&hex!("0100 0000"))
             .build();
         let mut reader = NixReader::new(mock);
@@ -306,7 +304,6 @@ mod unittests {
     async fn test_try_read_u64_eof2() {
         let mock = Builder::new()
             .read(&hex!("0100"))
-            .wait(Duration::ZERO)
             .read(&hex!("0000 0000"))
             .build();
         let mut reader = NixReader::new(mock);
@@ -359,7 +356,6 @@ mod unittests {
     async fn test_try_read_bytes_missing_data() {
         let mock = Builder::new()
             .read(&hex!("0500"))
-            .wait(Duration::ZERO)
             .read(&hex!("0000 0000"))
             .build();
         let mut reader = NixReader::new(mock);
@@ -374,7 +370,6 @@ mod unittests {
     async fn test_try_read_bytes_missing_padding() {
         let mock = Builder::new()
             .read(&hex!("0200 0000 0000 0000"))
-            .wait(Duration::ZERO)
             .read(&hex!("1234"))
             .build();
         let mut reader = NixReader::new(mock);
@@ -389,7 +384,6 @@ mod unittests {
     async fn test_read_bytes_bad_padding() {
         let mock = Builder::new()
             .read(&hex!("0200 0000 0000 0000"))
-            .wait(Duration::ZERO)
             .read(&hex!("1234 0100 0000 0000"))
             .build();
         let mut reader = NixReader::new(mock);

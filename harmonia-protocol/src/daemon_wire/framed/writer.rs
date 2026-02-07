@@ -177,8 +177,6 @@ where
 
 #[cfg(test)]
 mod unittests {
-    use std::time::Duration;
-
     use tokio::io::AsyncWriteExt;
     use tokio_test::io::Builder;
 
@@ -188,9 +186,7 @@ mod unittests {
     async fn test_write_frames() {
         let mut mock = Builder::new()
             .write(b"\x01\0\0\0\0\0\0\0 \x04\0\0\0\0\0\0\0ABCD")
-            .wait(Duration::from_millis(1))
             .write(b"\x01\0\0\0\0\0\0\0E\0\0\0")
-            .wait(Duration::from_millis(1))
             .write(b"\0\0\0\0\0F")
             .build();
         let mut writer = FramedWriter::new(&mut mock);

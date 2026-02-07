@@ -342,7 +342,7 @@ where
 
 #[cfg(test)]
 mod unittests {
-    use std::{io::Cursor, time::Duration};
+    use std::io::Cursor;
 
     use hex_literal::hex;
     use rstest::rstest;
@@ -450,7 +450,6 @@ mod unittests {
         let mut builder = Builder::new();
         for chunk in buf.chunks(chunks_size) {
             builder.write(chunk);
-            builder.wait(Duration::ZERO);
         }
         let mock = builder.build();
         let mut writer = NixWriter::builder()
@@ -483,7 +482,6 @@ mod unittests {
         let mut builder = Builder::new();
         for chunk in buf.chunks(chunks_size) {
             builder.write(chunk);
-            builder.wait(Duration::ZERO);
         }
         let mock = builder.build();
         let mut writer = NixWriter::builder().build(mock);

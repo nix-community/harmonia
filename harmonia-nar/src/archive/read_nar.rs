@@ -799,7 +799,6 @@ where
 #[cfg(test)]
 mod unittests {
     use std::io;
-    use std::time::Duration;
 
     use bytes::{BufMut as _, Bytes, BytesMut};
     use rstest::rstest;
@@ -846,10 +845,8 @@ mod unittests {
             let mut b = Builder::new();
             for c in read_content.chunks(chunk_size) {
                 b.read(c);
-                b.wait(Duration::from_secs(0));
             }
             if let Err(err) = postfix {
-                b.wait(Duration::from_secs(0));
                 b.read_error(io::Error::new(err, "unexpected read"));
             }
             b.build()
@@ -889,7 +886,7 @@ mod unittests {
 
 #[cfg(test)]
 mod proptests {
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use bytes::{BufMut as _, Bytes, BytesMut};
     use proptest::prelude::{TestCaseError, any};
@@ -923,7 +920,6 @@ mod proptests {
                 let chunk_size = chunk_size.index(read_content.len()) + 1;
                 for c in read_content.chunks(chunk_size) {
                     b.read(c);
-                    b.wait(Duration::from_secs(0));
                 }
                 let mock = b.build();
                 let mut buf_read = BufReader::new(mock);
