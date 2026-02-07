@@ -1,5 +1,6 @@
 use crate::ByteString;
 
+mod byte_stream;
 mod dumper;
 pub(crate) mod mmap;
 mod parser;
@@ -9,6 +10,7 @@ mod restorer;
 pub mod test_data;
 mod writer;
 
+pub use byte_stream::NarByteStream;
 pub use dumper::{DumpOptions, DumpedFile, NarDumper, dump};
 #[cfg(any(test, feature = "test"))]
 pub use parser::read_nar;
