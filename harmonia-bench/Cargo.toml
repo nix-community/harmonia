@@ -6,9 +6,13 @@ edition.workspace = true
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 tempfile.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "time", "net"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "io-util"] }
 nix.workspace = true
 
 [[bench]]
 name = "closure_download"
+harness = false
+
+[[bench]]
+name = "http_download"
 harness = false

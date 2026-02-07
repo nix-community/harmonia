@@ -15,7 +15,6 @@ use bstr::{ByteSlice as _, ByteVec as _};
 use bytes::Bytes;
 use futures::Stream;
 use pin_project_lite::pin_project;
-use tokio::fs;
 use tokio::io::{AsyncBufRead, AsyncRead, BufReader};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{JoinHandle, spawn_blocking};
@@ -111,23 +110,44 @@ fn remove_case_hack(name: &mut Bytes) {
     }
 }
 
+use super::mmap::MappedFile;
+
+/// Files smaller than this are read into memory in one `spawn_blocking` call,
+/// avoiding per-read context switches. Larger files use mmap for zero-copy
+/// streaming without unbounded memory allocation.
+const SMALL_FILE_THRESHOLD: u64 = 256 * 1024; // 256 KiB
+
+/// Loaded file data — either in-memory for small files or mmap'd for large ones.
+enum FileData {
+    InMemory(Vec<u8>),
+    Mapped(MappedFile),
+}
+
+impl FileData {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            FileData::InMemory(v) => v,
+            FileData::Mapped(m) => m.as_slice(),
+        }
+    }
+}
+
 pin_project! {
     #[project = DumpedFileStatesProj]
     enum DumpedFileStates {
         WaitPermit {
             #[pin]
             semaphore: PollSemaphore,
-            file: Option<PathBuf>,
+            file: Option<(PathBuf, u64)>,
         },
         OpenFile {
-            permit: Option<OwnedSemaphorePermit>,
             #[pin]
-            handle: JoinHandle<io::Result<std::fs::File>>,
+            handle: JoinHandle<io::Result<(FileData, OwnedSemaphorePermit)>>,
         },
         Reading {
-            #[pin]
-            file: fs::File,
-            permit: OwnedSemaphorePermit,
+            data: FileData,
+            offset: usize,
+            _permit: OwnedSemaphorePermit,
         },
         Eof,
     }
@@ -141,14 +161,14 @@ pin_project! {
 }
 
 impl DumpedFile {
-    pub fn new<P>(path: P, semaphore: Arc<Semaphore>) -> Self
+    pub fn new<P>(path: P, size: u64, semaphore: Arc<Semaphore>) -> Self
     where
         P: Into<PathBuf>,
     {
         Self {
             states: DumpedFileStates::WaitPermit {
                 semaphore: PollSemaphore::new(semaphore),
-                file: Some(path.into()),
+                file: Some((path.into(), size)),
             },
         }
     }
@@ -168,12 +188,16 @@ impl AsyncRead for DumpedFile {
                     file,
                 } => match ready!(semaphore.poll_acquire(cx)) {
                     Some(permit) => {
-                        let path = file.take().unwrap();
-                        let handle = spawn_blocking(|| std::fs::File::open(path));
-                        this.states.set(DumpedFileStates::OpenFile {
-                            permit: Some(permit),
-                            handle,
+                        let (path, size) = file.take().unwrap();
+                        let handle = spawn_blocking(move || {
+                            let data = if size <= SMALL_FILE_THRESHOLD {
+                                FileData::InMemory(std::fs::read(&path)?)
+                            } else {
+                                FileData::Mapped(MappedFile::open(&path, size)?)
+                            };
+                            Ok((data, permit))
                         });
+                        this.states.set(DumpedFileStates::OpenFile { handle });
                     }
                     None => {
                         this.states.set(DumpedFileStates::Eof);
@@ -183,31 +207,34 @@ impl AsyncRead for DumpedFile {
                         )));
                     }
                 },
-                DumpedFileStatesProj::OpenFile { permit, handle } => {
-                    match ready!(handle.poll(cx)) {
-                        Ok(Ok(file)) => {
-                            let file = fs::File::from_std(file);
-                            let permit = permit.take().unwrap();
-                            this.states.set(DumpedFileStates::Reading { file, permit });
-                        }
-                        Ok(Err(err)) => {
-                            this.states.set(DumpedFileStates::Eof);
-                            return Poll::Ready(Err(err));
-                        }
-                        Err(_) => {
-                            this.states.set(DumpedFileStates::Eof);
-                            return Poll::Ready(Err(io::Error::new(
-                                io::ErrorKind::BrokenPipe,
-                                "spawned task failed",
-                            )));
-                        }
+                DumpedFileStatesProj::OpenFile { handle } => match ready!(handle.poll(cx)) {
+                    Ok(Ok((data, permit))) => {
+                        this.states.set(DumpedFileStates::Reading {
+                            data,
+                            offset: 0,
+                            _permit: permit,
+                        });
                     }
-                }
-                DumpedFileStatesProj::Reading { file, permit: _ } => {
-                    let filled = buf.filled().len();
-                    ready!(file.poll_read(cx, buf))?;
-                    if filled == buf.filled().len() {
+                    Ok(Err(err)) => {
                         this.states.set(DumpedFileStates::Eof);
+                        return Poll::Ready(Err(err));
+                    }
+                    Err(_) => {
+                        this.states.set(DumpedFileStates::Eof);
+                        return Poll::Ready(Err(io::Error::new(
+                            io::ErrorKind::BrokenPipe,
+                            "spawned task failed",
+                        )));
+                    }
+                },
+                DumpedFileStatesProj::Reading { data, offset, .. } => {
+                    let remaining = &data.as_slice()[*offset..];
+                    if remaining.is_empty() {
+                        this.states.set(DumpedFileStates::Eof);
+                    } else {
+                        let to_copy = remaining.len().min(buf.remaining());
+                        buf.put_slice(&remaining[..to_copy]);
+                        *offset += to_copy;
                     }
                     break;
                 }
@@ -394,7 +421,8 @@ impl Stream for NarDumper {
                         size,
                         executable,
                     } => {
-                        let reader = BufReader::new(DumpedFile::new(path, self.semaphore.clone()));
+                        let reader =
+                            BufReader::new(DumpedFile::new(path, size, self.semaphore.clone()));
                         NarEvent::File {
                             name,
                             executable,
