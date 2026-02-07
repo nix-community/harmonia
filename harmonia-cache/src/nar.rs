@@ -1,18 +1,13 @@
-use crate::error::{CacheError, Result, StoreError};
+use crate::config::Config;
+use crate::error::{CacheError, StoreError};
+use crate::{cache_control_max_age_1y, some_or_404};
 use actix_web::web::Bytes;
 use actix_web::{HttpRequest, HttpResponse, http, web};
-use futures::{SinkExt, StreamExt};
-use harmonia_nar::{NarWriter, dump};
+use harmonia_nar::NarByteStream;
 use harmonia_store_core::store_path::StorePathHash;
 use harmonia_store_remote::DaemonStore;
 use harmonia_utils_hash::fmt::CommonHash;
 use serde::Deserialize;
-use std::path::PathBuf;
-use tokio::task;
-use tokio_util::io::ReaderStream;
-
-use crate::config::Config;
-use crate::{cache_control_max_age_1y, some_or_404};
 
 /// Represents the query string of a NAR URL.
 #[derive(Debug, Deserialize)]
@@ -56,57 +51,6 @@ impl HttpRange {
                 .collect()
         })
     }
-}
-
-/// Buffer size for the duplex channel (64KB for good throughput)
-const DUPLEX_BUFFER_SIZE: usize = 64 * 1024;
-
-/// Chunk size for ReaderStream (64KB chunks)
-const READER_CHUNK_SIZE: usize = 64 * 1024;
-
-/// Dump a path to NAR format using harmonia-nar, returning a stream of bytes.
-///
-/// Uses tokio::io::duplex() to bridge NarWriter (which writes to AsyncWrite)
-/// to a byte stream suitable for HTTP streaming.
-async fn dump_path_stream(
-    path: PathBuf,
-) -> Result<impl futures::Stream<Item = std::result::Result<Bytes, std::io::Error>>> {
-    let (writer, reader) = tokio::io::duplex(DUPLEX_BUFFER_SIZE);
-
-    // Spawn task to dump NAR events through NarWriter
-    let dump_task = task::spawn(async move {
-        let events = dump(&path);
-        let mut nar_writer = NarWriter::new(writer);
-
-        // Forward all events to the writer
-        futures::pin_mut!(events);
-        while let Some(event_result) = events.next().await {
-            match event_result {
-                Ok(event) => {
-                    if let Err(e) = nar_writer.send(event).await {
-                        log::error!("Error writing NAR event for {}: {}", path.display(), e);
-                        return;
-                    }
-                }
-                Err(e) => {
-                    log::error!("Error reading path {} for NAR dump: {}", path.display(), e);
-                    return;
-                }
-            }
-        }
-
-        // Close the writer to signal EOF
-        if let Err(e) = nar_writer.close().await {
-            log::error!("Error closing NAR writer for {}: {}", path.display(), e);
-        }
-    });
-
-    // Detach the task - it will run independently
-    drop(dump_task);
-
-    // Return a stream that reads from the duplex reader
-    let stream = ReaderStream::with_capacity(reader, READER_CHUNK_SIZE);
-    Ok(stream.map(|result| result))
 }
 
 pub(crate) async fn get(
@@ -223,7 +167,7 @@ pub(crate) async fn get(
                 ));
 
                 // For range requests, we need to skip bytes and limit output
-                let stream = dump_path_stream(real_path).await?;
+                let stream = NarByteStream::new(real_path);
                 let ranged_stream = create_range_stream(stream, offset, range_length);
 
                 return Ok(res
@@ -244,7 +188,7 @@ pub(crate) async fn get(
     }
 
     // Non-range request: stream the full NAR
-    let stream = dump_path_stream(real_path).await?;
+    let stream = NarByteStream::new(real_path);
 
     Ok(res
         .insert_header((http::header::CONTENT_TYPE, "application/x-nix-archive"))
@@ -310,13 +254,15 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::error::IoErrorContext;
+    use crate::error::{IoErrorContext, Result};
+    use futures::StreamExt;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
     use std::process::Command;
 
-    async fn dump_to_vec(path: PathBuf) -> Result<Vec<u8>> {
-        let stream = dump_path_stream(path).await?;
+    async fn dump_to_vec(path: PathBuf) -> Vec<u8> {
+        let stream = NarByteStream::new(path);
         futures::pin_mut!(stream);
 
         let mut result = Vec::new();
@@ -324,7 +270,7 @@ mod test {
             let bytes = chunk.expect("Stream error during NAR dump");
             result.extend_from_slice(&bytes);
         }
-        Ok(result)
+        result
     }
 
     #[tokio::test]
@@ -347,7 +293,7 @@ mod test {
         std::os::unix::fs::symlink("sometarget", dir.join("symlink"))
             .io_context("Failed to create test symlink")?;
 
-        let nar_dump = dump_to_vec(dir.clone()).await?;
+        let nar_dump = dump_to_vec(dir.clone()).await;
         let res = Command::new("nix-store")
             .arg("--dump")
             .arg(dir)
