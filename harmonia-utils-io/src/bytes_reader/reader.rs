@@ -229,8 +229,6 @@ where
 
 #[cfg(test)]
 mod unittests {
-    use std::time::Duration;
-
     use hex_literal::hex;
     use tokio::io::AsyncReadExt as _;
     use tokio_test::io::Builder;
@@ -241,9 +239,7 @@ mod unittests {
     async fn test_read_u64_partial() {
         let mock = Builder::new()
             .read(&hex!("0100 0000"))
-            .wait(Duration::ZERO)
             .read(&hex!("0000 0000 0123 4567 89AB CDEF"))
-            .wait(Duration::ZERO)
             .read(&hex!("0100 0000"))
             .build();
         let mut reader = BytesReader::new(mock);
@@ -263,9 +259,7 @@ mod unittests {
     async fn test_read_twice() {
         let mock = Builder::new()
             .read(&hex!("0100 0000"))
-            .wait(Duration::ZERO)
             .read(&hex!("0000 0000 0123 4567 89AB CDEF"))
-            .wait(Duration::ZERO)
             .read(&hex!("0100 0000"))
             .build();
         let mut reader = BytesReader::new(mock);
@@ -290,7 +284,6 @@ mod unittests {
     async fn test_force_fill() {
         let mock = Builder::new()
             .read(&hex!("0100"))
-            .wait(Duration::ZERO)
             .read(&hex!("0000 0000 0000"))
             .build();
         let mut reader = BytesReader::new(mock);
@@ -307,7 +300,6 @@ mod unittests {
     async fn test_try_read_bytes_missing_padding() {
         let mock = Builder::new()
             .read(&hex!("0200 0000 0000 0000"))
-            .wait(Duration::ZERO)
             .read(&hex!("1234"))
             .build();
         let mut reader = BytesReader::new(mock);
