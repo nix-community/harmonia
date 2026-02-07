@@ -1070,6 +1070,7 @@ dependencies = [
  "futures",
  "harmonia-utils-io",
  "harmonia-utils-test",
+ "nix",
  "pin-project-lite",
  "proptest",
  "rstest",
