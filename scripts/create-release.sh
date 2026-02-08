@@ -28,9 +28,19 @@ if [[ "$unpushed_commits" != "" ]]; then
   echo -e "\nThere are unpushed changes, exiting:\n$unpushed_commits" >&2
   exit 1
 fi
+# Get current version before bumping
+old_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml)
+
+# Update workspace version in root Cargo.toml
 sed -i -e "s!^version = \".*\"\$!version = \"${version}\"!" Cargo.toml
+
+# Update inter-crate dependency version specifiers in all sub-crate Cargo.toml files
+for toml in */Cargo.toml; do
+  sed -i -e "s!\(harmonia-[a-z-]* = {.*version = \)\"${old_version}\"!\1\"${version}\"!g" "$toml"
+done
+
 cargo build
-git add Cargo.lock Cargo.toml
+git add Cargo.lock Cargo.toml ./**/Cargo.toml
 nix flake check -vL
 git commit -m "bump version harmonia-v${version}"
 git tag "harmonia-v${version}"
