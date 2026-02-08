@@ -11,6 +11,13 @@ if [[ -z "$version" ]]; then
   exit 1
 fi
 
+# Validate semver (MAJOR.MINOR.PATCH with optional pre-release and build metadata)
+semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+\.)*[0-9A-Za-z-]+)?(\+([0-9A-Za-z-]+\.)*[0-9A-Za-z-]+)?$'
+if [[ ! "$version" =~ $semver_re ]]; then
+  echo "error: '$version' is not a valid semver version" >&2
+  exit 1
+fi
+
 if [[ "$(git symbolic-ref --short HEAD)" != "main" ]]; then
   echo "must be on main branch" >&2
   exit 1
