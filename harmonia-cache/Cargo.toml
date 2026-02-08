@@ -35,8 +35,8 @@ async-compression = { version = "0.4.37", features = ["tokio", "bzip2"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
 # Nix.rs-based crates
 harmonia-store-core = { version = "0.0.0-alpha.0" }
-harmonia-store-remote = { version = "2.1.0" }
-harmonia-nar = { version = "2.1.0" }
+harmonia-store-remote = { version = "3.0.0" }
+harmonia-nar = { version = "3.0.0" }
 harmonia-utils-hash = { version = "0.0.0-alpha.0" }
 futures = { workspace = true }
 prometheus = { workspace = true }

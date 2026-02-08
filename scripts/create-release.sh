@@ -46,9 +46,8 @@ for toml in */Cargo.toml; do
   sed -i -e "s!\(harmonia-[a-z-]* = {.*version = \)\"${old_version}\"!\1\"${version}\"!g" "$toml"
 done
 
-cargo build
+cargo update --workspace
 git add Cargo.lock Cargo.toml ./**/Cargo.toml
-nix flake check -vL
 git commit -m "bump version harmonia-v${version}"
 git tag "harmonia-v${version}"
 
