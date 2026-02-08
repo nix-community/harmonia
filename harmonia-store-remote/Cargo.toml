@@ -20,8 +20,8 @@ readme = "README.md"
 # Harmonia crates
 harmonia-utils-io = { version = "0.0.0-alpha.0" }
 harmonia-store-core = { version = "0.0.0-alpha.0" }
-harmonia-protocol = { version = "2.1.0" }
-harmonia-nar = { version = "2.1.0" }
+harmonia-protocol = { version = "3.0.0" }
+harmonia-nar = { version = "3.0.0" }
 
 # Async runtime
 tokio = { workspace = true }

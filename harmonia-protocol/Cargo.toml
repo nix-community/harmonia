@@ -38,12 +38,12 @@ harmonia-utils-test = { version = "0.0.0-alpha.0", optional = true }
 harmonia-utils-io = { version = "0.0.0-alpha.0" }
 harmonia-utils-hash = { version = "0.0.0-alpha.0" }
 harmonia-store-core = { version = "0.0.0-alpha.0" }
-harmonia-protocol-derive = { version = "2.1.0" }
-harmonia-nar = { version = "2.1.0" }
+harmonia-protocol-derive = { version = "3.0.0" }
+harmonia-nar = { version = "3.0.0" }
 
 [dev-dependencies]
 harmonia-store-core = { version = "0.0.0-alpha.0", features = ["test"] }
-harmonia-nar = { version = "2.1.0", features = ["test"] }
+harmonia-nar = { version = "3.0.0", features = ["test"] }
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
 paste = "1.0"
 proptest = { workspace = true }
