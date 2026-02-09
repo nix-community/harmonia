@@ -61,7 +61,7 @@ quote = "1.0"
 syn = "2.0"
 
 # Dev dependencies for property-based testing
-proptest = "1.6"
+proptest = "1.10"
 proptest-derive = "0.8"
 rstest = "0.26"
 tempfile = "3.24"
