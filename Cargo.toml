@@ -62,7 +62,7 @@ syn = "2.0"
 
 # Dev dependencies for property-based testing
 proptest = "1.6"
-proptest-derive = "0.7"
+proptest-derive = "0.8"
 rstest = "0.26"
 tempfile = "3.24"
 test-strategy = "0.4"
