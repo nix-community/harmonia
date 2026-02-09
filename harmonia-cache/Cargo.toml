@@ -31,7 +31,7 @@ percent-encoding = "2.3.2"
 thiserror = { workspace = true }
 tempfile = "3.24"
 url = "2.5.7"
-async-compression = { version = "0.4.37", features = ["tokio", "bzip2"] }
+async-compression = { version = "0.4.39", features = ["tokio", "bzip2"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
 # Nix.rs-based crates
 harmonia-store-core = { version = "0.0.0-alpha.0" }
