@@ -12,6 +12,7 @@ const MD5_SIZE: usize = 128 / 8;
 const SHA1_SIZE: usize = 160 / 8;
 const SHA256_SIZE: usize = 256 / 8;
 const SHA512_SIZE: usize = 512 / 8;
+const BLAKE3_SIZE: usize = 256 / 8;
 
 /// A digest algorithm.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Display, Default)]
@@ -25,6 +26,8 @@ pub enum Algorithm {
     SHA256,
     #[display("sha512")]
     SHA512,
+    #[display("blake3")]
+    BLAKE3,
 }
 
 impl Algorithm {
@@ -39,6 +42,7 @@ impl Algorithm {
             Algorithm::SHA1 => SHA1_SIZE,
             Algorithm::SHA256 => SHA256_SIZE,
             Algorithm::SHA512 => SHA512_SIZE,
+            Algorithm::BLAKE3 => BLAKE3_SIZE,
         }
     }
 
@@ -48,6 +52,9 @@ impl Algorithm {
             Algorithm::SHA1 => &digest::SHA1_FOR_LEGACY_USE_ONLY,
             Algorithm::SHA256 => &digest::SHA256,
             Algorithm::SHA512 => &digest::SHA512,
+            Algorithm::BLAKE3 => unreachable!(
+                "BLAKE3 is not supported by ring's digest::Algorithm; use blake3 crate directly"
+            ),
             Algorithm::MD5 => unreachable!(
                 "MD5 is not supported by ring's digest::Algorithm; use md5 crate directly"
             ),
@@ -65,6 +72,9 @@ impl Algorithm {
     pub fn digest<B: AsRef<[u8]>>(&self, data: B) -> Hash {
         match *self {
             Algorithm::MD5 => Hash::new(Algorithm::MD5, md5::compute(data).as_ref()),
+            Algorithm::BLAKE3 => {
+                Hash::new(Algorithm::BLAKE3, blake3::hash(data.as_ref()).as_bytes())
+            }
             _ => digest::digest(self.digest_algorithm(), data.as_ref())
                 .try_into()
                 .unwrap(),
@@ -102,6 +112,8 @@ impl FromStr for Algorithm {
             Ok(Algorithm::SHA1)
         } else if s.eq_ignore_ascii_case("md5") {
             Ok(Algorithm::MD5)
+        } else if s.eq_ignore_ascii_case("blake3") {
+            Ok(Algorithm::BLAKE3)
         } else {
             Err(UnknownAlgorithm(s.to_owned()))
         }
