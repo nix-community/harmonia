@@ -36,7 +36,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["sync", "fs", "io-util", "rt", "rt-multi-thread", "macros", "time", "net", "signal"] }
 env_logger = "0.11"
-toml = "0.9"
+toml = "1.0"
 thiserror = "2"
 hex = "0.4"
 prometheus = { version = "0.14", default-features = false }
