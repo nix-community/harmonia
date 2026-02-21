@@ -166,8 +166,9 @@ pub async fn build_derivation(
             ))
         })?;
 
-    // Build environment variables
-    let env = build_environment(store_dir, drv, build_tmp.path(), &output_paths, config);
+    // Build environment variables (includes passAsFile handling which writes files)
+    let env = build_environment(store_dir, drv, build_tmp.path(), &output_paths, config)
+        .map_err(|e| ProtocolError::custom(format!("Failed to set up build environment: {e}")))?;
 
     // Extract builder path and args
     let builder = std::str::from_utf8(&drv.builder)
@@ -468,9 +469,10 @@ fn build_environment(
     build_dir: &Path,
     output_paths: &[(OutputName, StorePath)],
     config: &BuildConfig,
-) -> BTreeMap<String, String> {
+) -> std::io::Result<BTreeMap<String, String>> {
     let mut env = BTreeMap::new();
     let build_dir_str = build_dir.to_string_lossy().to_string();
+    let is_structured = drv.structured_attrs.is_some();
 
     // Phase 1: defaults that CAN be overridden by derivation env
     env.insert("PATH".into(), "/path-not-set".into());
@@ -478,11 +480,62 @@ fn build_environment(
     env.insert("NIX_STORE".into(), store_dir.to_str().to_string());
     env.insert("NIX_BUILD_CORES".into(), config.cores.to_string());
 
-    // Phase 2: derivation env vars (can override PATH, HOME, etc.)
-    for (key, value) in &drv.env {
-        let key_str = String::from_utf8_lossy(key).to_string();
-        let value_str = String::from_utf8_lossy(value).to_string();
-        env.insert(key_str, value_str);
+    if is_structured {
+        // Structured attrs mode: write .attrs.json to the build dir.
+        // Individual derivation env vars are NOT set — the builder reads
+        // everything from the JSON file.
+        let json = prepare_structured_attrs(drv, store_dir, output_paths);
+        let json_str = serde_json::to_string(&json).map_err(|e| {
+            std::io::Error::other(
+                format!("JSON serialization: {e}"),
+            )
+        })?;
+        let json_path = build_dir.join(".attrs.json");
+        std::fs::write(&json_path, &json_str)?;
+        env.insert(
+            "NIX_ATTRS_JSON_FILE".into(),
+            json_path.to_string_lossy().to_string(),
+        );
+    } else {
+        // Non-structured mode: set derivation env vars, honoring passAsFile.
+        let pass_as_file: BTreeSet<String> = drv
+            .env
+            .get(b"passAsFile".as_ref())
+            .map(|v| {
+                String::from_utf8_lossy(v)
+                    .split_whitespace()
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for (key, value) in &drv.env {
+            let key_str = String::from_utf8_lossy(key).to_string();
+            let value_str = String::from_utf8_lossy(value).to_string();
+
+            if key_str == "passAsFile" {
+                continue;
+            }
+
+            if pass_as_file.contains(&key_str) {
+                // Write value to a file in the build dir, matching Nix's naming:
+                // .attr-<sha256(name)> (nix32-encoded)
+                let name_hash = {
+                    let mut ctx = Context::new(Algorithm::SHA256);
+                    ctx.update(key_str.as_bytes());
+                    ctx.finish()
+                };
+                let file_name = format!(".attr-{}", name_hash.as_base32());
+                let file_path = build_dir.join(&file_name);
+                std::fs::write(&file_path, value.as_ref())?;
+                env.insert(
+                    format!("{key_str}Path"),
+                    file_path.to_string_lossy().to_string(),
+                );
+            } else {
+                env.insert(key_str, value_str);
+            }
+        }
     }
 
     // Phase 3: system vars set AFTER drv env (cannot be overridden)
@@ -506,7 +559,39 @@ fn build_environment(
     env.insert("NIX_LOG_FD".into(), "2".into());
     env.insert("TERM".into(), "xterm-256color".into());
 
-    env
+    Ok(env)
+}
+
+/// Build the JSON object for `.attrs.json` in structured attrs mode.
+///
+/// Starts with the derivation's structured attrs, then adds an `outputs` map
+/// mapping output names to their resolved store paths (for input-addressed
+/// derivations, these are the final paths).
+fn prepare_structured_attrs(
+    drv: &BasicDerivation,
+    store_dir: &StoreDir,
+    output_paths: &[(OutputName, StorePath)],
+) -> serde_json::Value {
+    let mut json = drv
+        .structured_attrs
+        .as_ref()
+        .map(|sa| serde_json::Value::Object(sa.attrs.clone()))
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+
+    // Add outputs map: { "out": "/nix/store/...", "dev": "/nix/store/..." }
+    let mut outputs_json = serde_json::Map::new();
+    for (name, path) in output_paths {
+        let full_path = store_dir.to_path().join(path.to_string());
+        outputs_json.insert(
+            name.to_string(),
+            serde_json::Value::String(full_path.to_string_lossy().to_string()),
+        );
+    }
+    json.as_object_mut()
+        .unwrap()
+        .insert("outputs".into(), serde_json::Value::Object(outputs_json));
+
+    json
 }
 
 /// Errors from builder execution.

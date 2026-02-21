@@ -9,7 +9,9 @@ use std::collections::BTreeSet;
 use harmonia_protocol::build_result::{BuildResultInner, FailureStatus, SuccessStatus};
 use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
 use harmonia_protocol::daemon_wire::types2::BuildMode;
-use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
+use harmonia_store_core::derivation::{
+    BasicDerivation, DerivationOutput, DerivationT, StructuredAttrs,
+};
 use harmonia_store_core::derived_path::OutputName;
 use harmonia_store_core::store_path::StorePath;
 
@@ -895,5 +897,245 @@ printf 'TMPDIR=%s\n' "$TMPDIR" >> "$out"
         env_map.get("TMPDIR"),
         Some(&"/should/be/ignored"),
         "Derivation should NOT be able to override TMPDIR"
+    );
+}
+
+/// passAsFile writes env var contents to files, replacing `text` with `textPath`.
+#[tokio::test]
+async fn test_build_derivation_pass_as_file() {
+    let ts = TestStore::new();
+    let mut store = ts.handler.clone().handshake().await.unwrap();
+
+    let output_path =
+        StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-passfile").unwrap();
+    let drv_path =
+        StorePath::from_base_path("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-passfile.drv").unwrap();
+
+    let mut outputs = BTreeMap::new();
+    outputs.insert(
+        OutputName::default(),
+        DerivationOutput::InputAddressed(output_path.clone()),
+    );
+
+    // The builder reads the file pointed to by $textPath, verifies `text` is
+    // NOT in the env, and writes the file contents to $out.
+    // Use shell built-ins only — PATH is /path-not-set during builds.
+    let script = r#"
+        if [ -n "${text+set}" ]; then
+            echo "FAIL: text env var should not be set" >&2
+            exit 1
+        fi
+        if [ -z "$textPath" ]; then
+            echo "FAIL: textPath env var not set" >&2
+            exit 1
+        fi
+        if [ ! -f "$textPath" ]; then
+            echo "FAIL: textPath does not point to a file" >&2
+            exit 1
+        fi
+        /bin/cat "$textPath" > $out
+    "#;
+
+    let mut env = BTreeMap::new();
+    env.insert("passAsFile".into(), "text".into());
+    env.insert("text".into(), "hello from passAsFile".into());
+
+    let drv = DerivationT {
+        name: "passfile".parse().unwrap(),
+        outputs,
+        inputs: BTreeSet::new(),
+        platform: "x86_64-linux".into(),
+        builder: "/bin/sh".into(),
+        args: vec!["-c".into(), script.into()],
+        env,
+        structured_attrs: None,
+    };
+
+    let result = store
+        .build_derivation(&drv_path, &drv, BuildMode::Normal)
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(&result.inner, BuildResultInner::Success(_)),
+        "Build should succeed, got: {:?}",
+        result.inner
+    );
+
+    let disk_path = ts.store_path().join(output_path.to_string());
+    let content = std::fs::read_to_string(&disk_path).unwrap();
+    assert_eq!(
+        content, "hello from passAsFile",
+        "Output should contain the passAsFile content"
+    );
+}
+
+/// structuredAttrs writes `.attrs.json` in build dir, sets `NIX_ATTRS_JSON_FILE`,
+/// and does NOT set individual derivation env vars.
+#[tokio::test]
+async fn test_build_derivation_structured_attrs() {
+    let ts = TestStore::new();
+    let mut store = ts.handler.clone().handshake().await.unwrap();
+
+    let output_path = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-sattrs").unwrap();
+    let drv_path =
+        StorePath::from_base_path("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-sattrs.drv").unwrap();
+
+    let mut outputs = BTreeMap::new();
+    outputs.insert(
+        OutputName::default(),
+        DerivationOutput::InputAddressed(output_path.clone()),
+    );
+
+    // The builder verifies:
+    // 1. NIX_ATTRS_JSON_FILE is set and points to a readable file
+    // 2. The JSON file contains our custom attribute
+    // 3. Individual env vars from the derivation are NOT set
+    //
+    // We use /bin/cat and shell built-ins with absolute paths since
+    // PATH=/path-not-set during builds.
+    let script = r#"
+        if [ -z "$NIX_ATTRS_JSON_FILE" ]; then
+            echo "FAIL: NIX_ATTRS_JSON_FILE not set" >&2
+            exit 1
+        fi
+        if [ ! -f "$NIX_ATTRS_JSON_FILE" ]; then
+            echo "FAIL: NIX_ATTRS_JSON_FILE does not point to a file" >&2
+            exit 1
+        fi
+        if [ -n "${myAttr+set}" ]; then
+            echo "FAIL: myAttr env var should NOT be set in structured mode" >&2
+            exit 1
+        fi
+        /bin/cat "$NIX_ATTRS_JSON_FILE" > $out
+    "#;
+
+    let mut env = BTreeMap::new();
+    env.insert("__structuredAttrs".into(), "1".into());
+    env.insert("myAttr".into(), "myValue".into());
+
+    let mut structured_attrs_map = serde_json::Map::new();
+    structured_attrs_map.insert("myAttr".into(), serde_json::Value::String("myValue".into()));
+
+    let drv = DerivationT {
+        name: "sattrs".parse().unwrap(),
+        outputs,
+        inputs: BTreeSet::new(),
+        platform: "x86_64-linux".into(),
+        builder: "/bin/sh".into(),
+        args: vec!["-c".into(), script.into()],
+        env,
+        structured_attrs: Some(StructuredAttrs {
+            attrs: structured_attrs_map,
+        }),
+    };
+
+    let result = store
+        .build_derivation(&drv_path, &drv, BuildMode::Normal)
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(&result.inner, BuildResultInner::Success(_)),
+        "Build should succeed, got: {:?}",
+        result.inner
+    );
+
+    // Verify the JSON file contents written to the output
+    let disk_path = ts.store_path().join(output_path.to_string());
+    let content = std::fs::read_to_string(&disk_path).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(
+        json.get("myAttr").and_then(serde_json::Value::as_str),
+        Some("myValue"),
+        "JSON should contain myAttr"
+    );
+}
+
+/// structuredAttrs with multiple outputs → `.attrs.json` contains `outputs` map.
+#[tokio::test]
+async fn test_build_derivation_structured_attrs_outputs() {
+    let ts = TestStore::new();
+    let mut store = ts.handler.clone().handshake().await.unwrap();
+
+    let out_path = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-saout").unwrap();
+    let dev_path = StorePath::from_base_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-saout-dev").unwrap();
+    let drv_path = StorePath::from_base_path("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-saout.drv").unwrap();
+
+    let mut outputs = BTreeMap::new();
+    outputs.insert(
+        OutputName::default(),
+        DerivationOutput::InputAddressed(out_path.clone()),
+    );
+    outputs.insert(
+        "dev".parse().unwrap(),
+        DerivationOutput::InputAddressed(dev_path.clone()),
+    );
+
+    // Builder reads .attrs.json, extracts the outputs map, and verifies both
+    // "out" and "dev" keys are present with store path values.
+    let script = r#"
+        if [ -z "$NIX_ATTRS_JSON_FILE" ]; then
+            echo "FAIL: NIX_ATTRS_JSON_FILE not set" >&2
+            exit 1
+        fi
+        # Write the JSON to $out for inspection by the test
+        /bin/cat "$NIX_ATTRS_JSON_FILE" > $out
+        echo ok > $dev
+    "#;
+
+    let mut env = BTreeMap::new();
+    env.insert("__structuredAttrs".into(), "1".into());
+
+    let drv = DerivationT {
+        name: "saout".parse().unwrap(),
+        outputs,
+        inputs: BTreeSet::new(),
+        platform: "x86_64-linux".into(),
+        builder: "/bin/sh".into(),
+        args: vec!["-c".into(), script.into()],
+        env,
+        structured_attrs: Some(StructuredAttrs {
+            attrs: serde_json::Map::new(),
+        }),
+    };
+
+    let result = store
+        .build_derivation(&drv_path, &drv, BuildMode::Normal)
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(&result.inner, BuildResultInner::Success(_)),
+        "Build should succeed, got: {:?}",
+        result.inner
+    );
+
+    let disk_path = ts.store_path().join(out_path.to_string());
+    let content = std::fs::read_to_string(&disk_path).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    let outputs_obj = json
+        .get("outputs")
+        .expect("JSON should have 'outputs' key")
+        .as_object()
+        .expect("'outputs' should be an object");
+
+    let out_val = outputs_obj
+        .get("out")
+        .and_then(serde_json::Value::as_str)
+        .expect("outputs.out should be a string");
+    assert!(
+        out_val.contains(&out_path.to_string()),
+        "outputs.out should contain the out store path, got: {out_val}"
+    );
+
+    let dev_val = outputs_obj
+        .get("dev")
+        .and_then(serde_json::Value::as_str)
+        .expect("outputs.dev should be a string");
+    assert!(
+        dev_val.contains(&dev_path.to_string()),
+        "outputs.dev should contain the dev store path, got: {dev_val}"
     );
 }

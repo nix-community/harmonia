@@ -18,6 +18,7 @@ harmonia-protocol = { version = "3.0.0" }
 bzip2 = "0.6"
 bytes = { workspace = true }
 libc = "0.2"
+serde_json = { workspace = true }
 tempfile = { workspace = true }
 nix = { version = "0.31", features = ["user", "fs"] }
 tokio = { workspace = true, features = ["process"] }

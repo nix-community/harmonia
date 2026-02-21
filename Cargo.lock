@@ -1057,6 +1057,7 @@ dependencies = [
  "nix",
  "ring",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
