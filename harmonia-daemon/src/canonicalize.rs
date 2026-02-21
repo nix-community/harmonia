@@ -71,9 +71,12 @@ pub async fn canonicalize_path_metadata(path: &Path) -> io::Result<()> {
 }
 
 fn canonicalize_path_metadata_sync(path: &Path) -> io::Result<()> {
-    canonicalize_entry(path)?;
+    let metadata = canonicalize_entry(path)?;
 
-    if path.is_dir() {
+    // Use the symlink_metadata result to decide whether to recurse.
+    // path.is_dir() follows symlinks and would descend into symlink
+    // targets outside the store path.
+    if metadata.is_dir() {
         for entry in fs::read_dir(path)? {
             let entry = entry?;
             canonicalize_path_metadata_sync(&entry.path())?;
@@ -83,12 +86,14 @@ fn canonicalize_path_metadata_sync(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn canonicalize_entry(path: &Path) -> io::Result<()> {
+/// Canonicalize a single entry's metadata. Returns the `symlink_metadata`
+/// so callers can inspect the file type without an extra syscall.
+fn canonicalize_entry(path: &Path) -> io::Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;
 
     // Don't modify symlinks — they don't have independent permissions/timestamps
     if metadata.is_symlink() {
-        return Ok(());
+        return Ok(metadata);
     }
 
     // Clear group and world write bits (keep owner permissions intact)
@@ -108,7 +113,7 @@ fn canonicalize_entry(path: &Path) -> io::Result<()> {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     }
 
-    Ok(())
+    Ok(metadata)
 }
 
 #[cfg(test)]
