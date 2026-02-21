@@ -20,9 +20,7 @@ use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput};
 use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
 use harmonia_store_core::realisation::Realisation;
-use harmonia_store_core::store_path::{
-    ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathName,
-};
+use harmonia_store_core::store_path::{StorePath, StorePathName};
 use harmonia_utils_hash::fmt::CommonHash;
 
 // ========== BasicDerivation ==========
@@ -95,14 +93,6 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
 
 // ========== DerivationOutput ==========
 
-fn output_path_name(drv_name: &StorePathName, output_name: &OutputName) -> String {
-    if output_name.is_default() {
-        drv_name.to_string()
-    } else {
-        format!("{}-{}", drv_name, output_name)
-    }
-}
-
 async fn read_derivation_output<R>(
     reader: &mut R,
     _drv_name: &StorePathName,
@@ -114,34 +104,18 @@ where
     use crate::de::Error;
     use harmonia_utils_hash::fmt::Base32;
 
-    let store_path_str = reader.read_value::<String>().await?;
+    let path_str = reader.read_value::<String>().await?;
     let method_str = reader.read_value::<String>().await?;
     let hash_str = reader.read_value::<String>().await?;
 
-    if hash_str == "impure" {
-        let algo = method_str.parse().map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::Impure(algo))
-    } else if store_path_str.is_empty() && !method_str.is_empty() {
-        let algo = method_str.parse().map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::CAFloating(algo))
-    } else if store_path_str.is_empty() && method_str.is_empty() && hash_str.is_empty() {
-        Ok(DerivationOutput::Deferred)
-    } else if method_str.is_empty() && hash_str.is_empty() {
-        let store_path = reader
-            .store_dir()
-            .parse(&store_path_str)
-            .map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::InputAddressed(store_path))
-    } else {
-        // CAFixed
-        let method_algo = method_str
-            .parse::<ContentAddressMethodAlgorithm>()
-            .map_err(R::Error::invalid_data)?;
-        let hash = Base32::from_str(&hash_str).map_err(R::Error::invalid_data)?;
-        let ca = ContentAddress::from_hash(method_algo.method(), *hash.as_hash())
-            .map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::CAFixed(ca))
-    }
+    crate::aterm::decode_output_fields(
+        reader.store_dir(),
+        &path_str,
+        &method_str,
+        &hash_str,
+        |_algo, s| Base32::from_str(s).map(|h| *h.as_hash()),
+    )
+    .map_err(R::Error::invalid_data)
 }
 
 async fn write_derivation_output<W>(
@@ -153,40 +127,14 @@ async fn write_derivation_output<W>(
 where
     W: NixWrite,
 {
-    use crate::ser::Error;
-
-    match output {
-        DerivationOutput::InputAddressed(store_path) => {
-            writer.write_value(store_path).await?;
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-        }
-        DerivationOutput::CAFixed(ca) => {
-            let name = output_path_name(drv_name, output_name)
-                .to_string()
-                .parse()
-                .map_err(Error::unsupported_data)?;
-            let path = writer.store_dir().make_store_path_from_ca(name, *ca);
-            writer.write_value(&path).await?;
-            writer.write_value(&ca.method_algorithm()).await?;
-            writer.write_display(ca.hash().base32().bare()).await?;
-        }
-        DerivationOutput::Deferred => {
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-        }
-        DerivationOutput::CAFloating(algo) => {
-            writer.write_value("").await?;
-            writer.write_value(algo).await?;
-            writer.write_value("").await?;
-        }
-        DerivationOutput::Impure(algo) => {
-            writer.write_value("").await?;
-            writer.write_value(algo).await?;
-            writer.write_value("impure").await?;
-        }
-    }
+    let store_dir = writer.store_dir().clone();
+    let (path_str, method_str, hash_str) =
+        crate::aterm::encode_output_fields(output, &store_dir, drv_name, output_name, |h| {
+            h.base32().bare().to_string()
+        });
+    writer.write_value(&path_str).await?;
+    writer.write_value(&method_str).await?;
+    writer.write_value(&hash_str).await?;
     Ok(())
 }
 

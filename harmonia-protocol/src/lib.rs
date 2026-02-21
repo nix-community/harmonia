@@ -27,6 +27,7 @@
 //! 3. **Well-specified**: Document wire format
 //! 4. **Type-safe**: Use strong types for protocol messages
 
+pub mod aterm;
 pub mod build_result;
 pub mod daemon_wire;
 pub mod de;
