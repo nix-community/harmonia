@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
-// SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+// SPDX-FileCopyrightText: 2026 Jörg Thalheim (Harmonia adaptation)
 // SPDX-License-Identifier: EUPL-1.2 OR MIT
 //
 // This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)

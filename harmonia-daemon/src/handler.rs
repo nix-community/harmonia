@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-FileCopyrightText: 2026 Jörg Thalheim
 // SPDX-License-Identifier: MIT
 
 //! Request handler for the local store daemon.
