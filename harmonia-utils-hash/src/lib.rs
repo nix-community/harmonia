@@ -11,8 +11,8 @@ mod algo;
 pub mod fmt;
 mod hashing_reader;
 
-pub use hashing_reader::{HashState, HashingReader};
 use fmt::CommonHash;
+pub use hashing_reader::{HashState, HashingReader};
 
 pub use algo::{Algorithm, UnknownAlgorithm};
 

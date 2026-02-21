@@ -147,38 +147,44 @@ async fn inner_main() -> Result<()> {
     log::info!("listening on {}", c.bind);
     let mut server = HttpServer::new(move || {
         App::new()
-                .wrap(middleware::Condition::new(config_data.enable_compression, middleware::Compress::default()))
-                .wrap(prometheus::PrometheusMiddleware::new(metrics.clone()))
-                .app_data(config_data.clone())
-                .app_data(metrics_data.clone())
-                .route("/", web::get().to(root::get))
-                .route("/{hash}.ls", web::get().to(narlist::get))
-                .route("/{hash}.ls", web::head().to(narlist::get))
-                .route("/{hash}.narinfo", web::get().to(narinfo::get))
-                .route("/{hash}.narinfo", web::head().to(narinfo::get))
-                .route(
-                    &format!("/nar/{{narhash:[{}]{{52}}}}.nar", harmonia_utils_base_encoding::base32::ALPHABET),
-                    web::get().to(nar::get),
-                )
-                .route(
-                    // narinfos served by nix-serve have the narhash embedded in the nar URL.
-                    // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
-                    // will stay in client caches for a while - so support them anyway.
-                    &format!(
-                        "/nar/{{outhash:[{alpha}]{{32}}}}-{{narhash:[{alpha}]{{52}}}}.nar",
-                        alpha = harmonia_utils_base_encoding::base32::ALPHABET,
-                    ),
-                    web::get().to(nar::get),
-                )
-                .route("/serve/{hash}{path:.*}", web::get().to(serve::get))
-                .route("/log/{drv}", web::get().to(buildlog::get))
-                .route("/version", web::get().to(version::get))
-                .route("/health", web::get().to(health::get))
-                .route("/nix-cache-info", web::get().to(cacheinfo::get))
-                .route("/metrics", web::get().to(prometheus::metrics_handler))
-        })
-        // default is 5 seconds, which is too small when doing mass requests on slow machines
-        .client_request_timeout(Duration::from_secs(30))
+            .wrap(middleware::Condition::new(
+                config_data.enable_compression,
+                middleware::Compress::default(),
+            ))
+            .wrap(prometheus::PrometheusMiddleware::new(metrics.clone()))
+            .app_data(config_data.clone())
+            .app_data(metrics_data.clone())
+            .route("/", web::get().to(root::get))
+            .route("/{hash}.ls", web::get().to(narlist::get))
+            .route("/{hash}.ls", web::head().to(narlist::get))
+            .route("/{hash}.narinfo", web::get().to(narinfo::get))
+            .route("/{hash}.narinfo", web::head().to(narinfo::get))
+            .route(
+                &format!(
+                    "/nar/{{narhash:[{}]{{52}}}}.nar",
+                    harmonia_utils_base_encoding::base32::ALPHABET
+                ),
+                web::get().to(nar::get),
+            )
+            .route(
+                // narinfos served by nix-serve have the narhash embedded in the nar URL.
+                // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
+                // will stay in client caches for a while - so support them anyway.
+                &format!(
+                    "/nar/{{outhash:[{alpha}]{{32}}}}-{{narhash:[{alpha}]{{52}}}}.nar",
+                    alpha = harmonia_utils_base_encoding::base32::ALPHABET,
+                ),
+                web::get().to(nar::get),
+            )
+            .route("/serve/{hash}{path:.*}", web::get().to(serve::get))
+            .route("/log/{drv}", web::get().to(buildlog::get))
+            .route("/version", web::get().to(version::get))
+            .route("/health", web::get().to(health::get))
+            .route("/nix-cache-info", web::get().to(cacheinfo::get))
+            .route("/metrics", web::get().to(prometheus::metrics_handler))
+    })
+    // default is 5 seconds, which is too small when doing mass requests on slow machines
+    .client_request_timeout(Duration::from_secs(30))
     .workers(c.workers)
     .max_connection_rate(c.max_connection_rate);
 

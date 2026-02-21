@@ -333,16 +333,18 @@ impl DaemonStore for LocalStoreHandler {
             // Unpack NAR into a temp directory that auto-cleans on drop
             // (handles all error paths).  We restore into a child path so
             // that a single-file NAR can create it fresh.
-            let temp_dir = tempfile::tempdir_in(dest_path.parent().unwrap_or(std::path::Path::new("/")))
-                .map_err(|e| ProtocolError::custom(format!("Failed to create temp dir: {e}")))?;
+            let temp_dir =
+                tempfile::tempdir_in(dest_path.parent().unwrap_or(std::path::Path::new("/")))
+                    .map_err(|e| {
+                        ProtocolError::custom(format!("Failed to create temp dir: {e}"))
+                    })?;
             let temp_dest = temp_dir.path().join("nar");
 
             // Stream the NAR directly into restore while computing the
             // SHA-256 hash on the fly — matching Nix's TeeSource/HashSink
             // pattern.  This avoids buffering the entire NAR in memory or
             // on disk.
-            let (hashing_reader, hash_state) =
-                harmonia_utils_hash::HashingReader::new(source);
+            let (hashing_reader, hash_state) = harmonia_utils_hash::HashingReader::new(source);
             let events = harmonia_nar::parse_nar(hashing_reader);
             use futures::StreamExt as _;
             let mapped = events.map(|item| match item {
