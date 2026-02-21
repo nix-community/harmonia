@@ -2,14 +2,14 @@ use harmonia_daemon::config::Config;
 use harmonia_daemon::error::{DaemonError, IoContext};
 use harmonia_daemon::handler::LocalStoreHandler;
 use harmonia_daemon::server::DaemonServer;
-use log::{error, info};
 use std::path::PathBuf;
 use tokio::signal;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<(), DaemonError> {
-    // Initialize logger
-    env_logger::init();
+    // Initialize tracing subscriber
+    tracing_subscriber::fmt::init();
 
     // Load configuration
     let config = match std::env::var("HARMONIA_DAEMON_CONFIG") {

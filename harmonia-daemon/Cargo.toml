@@ -15,9 +15,8 @@ harmonia-store-core = { version = "0.0.0-alpha.0" }
 harmonia-store-db = { version = "3.0.0" }
 harmonia-protocol = { version = "3.0.0" }
 tokio = { workspace = true }
-log = { workspace = true }
 tracing = { workspace = true }
-env_logger = { workspace = true }
+tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }

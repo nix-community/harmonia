@@ -754,7 +754,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a1c3cc8e57274ec99de65301228b537f1e4eedc1b8e0f9411c6caac8ae7308f"
 dependencies = [
  "log",
- "regex",
 ]
 
 [[package]]
@@ -1043,7 +1042,6 @@ version = "3.0.0"
 name = "harmonia-daemon"
 version = "3.0.0"
 dependencies = [
- "env_logger",
  "futures",
  "harmonia-protocol",
  "harmonia-store-core",
@@ -1051,13 +1049,13 @@ dependencies = [
  "harmonia-utils-hash",
  "harmonia-utils-io",
  "harmonia-utils-test",
- "log",
  "serde",
  "tempfile",
  "thiserror",
  "tokio",
  "toml",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2863,6 +2861,7 @@ dependencies = [
  "once_cell",
  "regex-automata",
  "sharded-slab",
+ "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
