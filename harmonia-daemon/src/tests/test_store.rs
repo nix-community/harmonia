@@ -15,6 +15,8 @@ use harmonia_store_core::store_path::StoreDir;
 use harmonia_store_db::StoreDb;
 use harmonia_utils_test::CanonicalTempDir;
 
+use harmonia_store_core::signature::PublicKey;
+
 use crate::handler::LocalStoreHandler;
 
 /// A self-contained test store.
@@ -25,8 +27,8 @@ use crate::handler::LocalStoreHandler;
 /// same database (for exercising the daemon protocol).
 pub struct TestStore {
     pub store_dir: StoreDir,
-    pub db: Arc<Mutex<StoreDb>>,
     pub handler: LocalStoreHandler,
+    _db: Arc<Mutex<StoreDb>>,
     _temp_dir: CanonicalTempDir,
 }
 
@@ -46,7 +48,29 @@ impl TestStore {
 
         Self {
             store_dir,
-            db,
+            _db: db,
+            handler,
+            _temp_dir: temp_dir,
+        }
+    }
+
+    /// Create a new test store with trusted public keys for signature verification.
+    pub fn with_trusted_keys(keys: Vec<PublicKey>) -> Self {
+        let temp_dir = CanonicalTempDir::new().expect("failed to create temp dir");
+        let store_path = temp_dir.path().join("store");
+        std::fs::create_dir_all(&store_path).expect("failed to create store dir");
+
+        let store_dir =
+            StoreDir::new(&store_path).expect("failed to create StoreDir from temp path");
+        let db = StoreDb::open_memory().expect("failed to create in-memory database");
+        let db = Arc::new(Mutex::new(db));
+
+        let handler =
+            LocalStoreHandler::from_shared_db_with_keys(store_dir.clone(), Arc::clone(&db), keys);
+
+        Self {
+            store_dir,
+            _db: db,
             handler,
             _temp_dir: temp_dir,
         }
