@@ -114,26 +114,26 @@ impl RefScanSink {
             return;
         }
 
-        // Search the overlap region: tail of previous chunk + start of current.
-        // This catches references that span chunk boundaries.
+        // Mirrors Nix's RefScanSink::operator() exactly.
+        let tail_len = data.len().min(HASH_LEN);
+
+        // Search the overlap region: copy of old tail + start of new data.
+        // Uses a separate buffer so self.tail can be rebuilt independently.
         if !self.tail.is_empty() {
-            let tail_len = data.len().min(HASH_LEN);
-            self.tail.extend_from_slice(&data[..tail_len]);
-            search(&self.tail, &mut self.pending, &mut self.seen);
+            let mut overlap = self.tail.clone();
+            overlap.extend_from_slice(&data[..tail_len]);
+            search(&overlap, &mut self.pending, &mut self.seen);
         }
 
         // Search the current chunk itself.
         search(data, &mut self.pending, &mut self.seen);
 
-        // Update tail: keep the last (HASH_LEN - 1) bytes for boundary matching.
-        // Mirrors Nix's tail management in RefScanSink::operator().
-        let tail_len = data.len().min(HASH_LEN);
-        let rest = HASH_LEN.saturating_sub(tail_len + 1);
+        // Rebuild tail: keep up to HASH_LEN bytes total
+        // (suffix of old tail + suffix of new data).
+        let rest = HASH_LEN - tail_len;
         if rest < self.tail.len() {
-            let drain_to = self.tail.len() - rest;
-            self.tail.drain(..drain_to);
+            self.tail.drain(..self.tail.len() - rest);
         }
-        self.tail.clear();
         self.tail.extend_from_slice(&data[data.len() - tail_len..]);
     }
 
@@ -273,28 +273,31 @@ mod tests {
         assert!(refs.contains(&self_path), "Should detect self-reference");
     }
 
-    /// Verify RefScanSink handles chunk boundaries correctly.
+    /// Feed data in every possible chunk size to verify the tail logic
+    /// handles hashes spanning any number of chunks (2, 3, ... up to N).
     #[test]
     fn test_scan_across_chunk_boundary() {
         let input = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test").unwrap();
         let hash_str = input.hash().to_string();
-
-        let mut candidates = BTreeSet::new();
-        candidates.insert(input.clone());
-
-        let mut sink = RefScanSink::new(&candidates, None);
-
-        // Split the hash across two chunks
         let content = format!("prefix{hash_str}suffix");
         let bytes = content.as_bytes();
-        let mid = bytes.len() / 2;
-        sink.feed(&bytes[..mid]);
-        sink.feed(&bytes[mid..]);
 
-        let refs = sink.found_paths();
-        assert!(
-            refs.contains(&input),
-            "Should find reference spanning chunk boundary"
-        );
+        // chunk_size=1 means single-byte feeds (hash spans 32 chunks),
+        // chunk_size=bytes.len() means one big feed.
+        for chunk_size in 1..=bytes.len() {
+            let mut candidates = BTreeSet::new();
+            candidates.insert(input.clone());
+            let mut sink = RefScanSink::new(&candidates, None);
+
+            for chunk in bytes.chunks(chunk_size) {
+                sink.feed(chunk);
+            }
+
+            let refs = sink.found_paths();
+            assert!(
+                refs.contains(&input),
+                "Should find reference with chunk_size={chunk_size}"
+            );
+        }
     }
 }
