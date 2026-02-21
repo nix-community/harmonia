@@ -9,7 +9,9 @@ use thiserror::Error;
 
 mod algo;
 pub mod fmt;
+mod hashing_reader;
 
+pub use hashing_reader::{HashState, HashingReader};
 use fmt::CommonHash;
 
 pub use algo::{Algorithm, UnknownAlgorithm};

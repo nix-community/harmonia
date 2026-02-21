@@ -36,6 +36,7 @@ pub mod derivation;
 pub mod derived_path;
 pub mod placeholder;
 pub mod realisation;
+pub mod references;
 pub mod signature;
 pub mod store_path;
 

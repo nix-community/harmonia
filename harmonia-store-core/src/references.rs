@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-FileCopyrightText: 2026 Jörg Thalheim
 // SPDX-License-Identifier: MIT
 
 //! Reference scanning for store path outputs.
@@ -31,16 +31,17 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use harmonia_store_core::store_path::{StorePath, StorePathHash};
+use crate::store_path::{StorePath, StorePathHash};
 
 /// Encoded length of a store path hash in nix-base32 (32 bytes).
 const HASH_LEN: usize = StorePathHash::encoded_len();
 
 /// 256-byte lookup table: `true` for bytes that are valid nix-base32 characters.
-/// The nix-base32 alphabet is `0123456789abcdfghijklmnpqrsvwxyz`.
+///
+/// Built from the canonical alphabet in [`harmonia_utils_base_encoding::base32`].
 const NIX_BASE32_VALID: [bool; 256] = {
     let mut table = [false; 256];
-    let chars = b"0123456789abcdfghijklmnpqrsvwxyz";
+    let chars = harmonia_utils_base_encoding::base32::ALPHABET_BYTES;
     let mut i = 0;
     while i < chars.len() {
         table[chars[i] as usize] = true;
@@ -230,46 +231,34 @@ mod tests {
     }
 
     /// Output file containing an input's hash part → input is discovered as a reference.
-    #[tokio::test]
-    async fn test_scan_finds_input_reference() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let output_dir = dir.path().join("output");
-        fs::create_dir(&output_dir).unwrap();
-
+    #[test]
+    fn test_scan_finds_input_reference() {
         let input = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-input").unwrap();
         let hash_str = input.hash().to_string();
-
-        fs::write(
-            output_dir.join("file.txt"),
-            format!("some content /nix/store/{hash_str}-input more stuff"),
-        )
-        .unwrap();
+        let data = format!("some content /nix/store/{hash_str}-input more stuff");
 
         let mut candidates = BTreeSet::new();
         candidates.insert(input.clone());
 
-        let refs = scan_nar_for_references(&output_dir, &candidates, None).await;
+        let mut sink = RefScanSink::new(&candidates, None);
+        sink.feed(data.as_bytes());
+
+        let refs = sink.found_paths();
         assert!(refs.contains(&input), "Should discover input as reference");
     }
 
     /// Output containing its own hash part → self-reference detected.
-    #[tokio::test]
-    async fn test_scan_finds_self_reference() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let output_dir = dir.path().join("output");
-        fs::create_dir(&output_dir).unwrap();
-
+    #[test]
+    fn test_scan_finds_self_reference() {
         let self_path = StorePath::from_base_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-self").unwrap();
         let hash_str = self_path.hash().to_string();
-
-        fs::write(
-            output_dir.join("wrapper.sh"),
-            format!("#!/bin/sh\nexec /nix/store/{hash_str}-self/bin/real \"$@\""),
-        )
-        .unwrap();
+        let data = format!("#!/bin/sh\nexec /nix/store/{hash_str}-self/bin/real \"$@\"");
 
         let candidates = BTreeSet::new();
-        let refs = scan_nar_for_references(&output_dir, &candidates, Some(&self_path)).await;
+        let mut sink = RefScanSink::new(&candidates, Some(&self_path));
+        sink.feed(data.as_bytes());
+
+        let refs = sink.found_paths();
         assert!(refs.contains(&self_path), "Should detect self-reference");
     }
 
@@ -299,5 +288,49 @@ mod tests {
                 "Should find reference with chunk_size={chunk_size}"
             );
         }
+    }
+
+    /// Input reference discovered when scanning over a NAR stream.
+    #[tokio::test]
+    async fn test_nar_scan_finds_input_reference() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let output_dir = dir.path().join("output");
+        fs::create_dir(&output_dir).unwrap();
+
+        let input = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-input").unwrap();
+        let hash_str = input.hash().to_string();
+
+        fs::write(
+            output_dir.join("file.txt"),
+            format!("some content /nix/store/{hash_str}-input more stuff"),
+        )
+        .unwrap();
+
+        let mut candidates = BTreeSet::new();
+        candidates.insert(input.clone());
+
+        let refs = scan_nar_for_references(&output_dir, &candidates, None).await;
+        assert!(refs.contains(&input), "Should discover input as reference");
+    }
+
+    /// Self-reference detected when scanning over a NAR stream.
+    #[tokio::test]
+    async fn test_nar_scan_finds_self_reference() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let output_dir = dir.path().join("output");
+        fs::create_dir(&output_dir).unwrap();
+
+        let self_path = StorePath::from_base_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-self").unwrap();
+        let hash_str = self_path.hash().to_string();
+
+        fs::write(
+            output_dir.join("wrapper.sh"),
+            format!("#!/bin/sh\nexec /nix/store/{hash_str}-self/bin/real \"$@\""),
+        )
+        .unwrap();
+
+        let candidates = BTreeSet::new();
+        let refs = scan_nar_for_references(&output_dir, &candidates, Some(&self_path)).await;
+        assert!(refs.contains(&self_path), "Should detect self-reference");
     }
 }

@@ -342,7 +342,7 @@ impl DaemonStore for LocalStoreHandler {
             // pattern.  This avoids buffering the entire NAR in memory or
             // on disk.
             let (hashing_reader, hash_state) =
-                crate::hashing_reader::HashingReader::new(source);
+                harmonia_utils_hash::HashingReader::new(source);
             let events = harmonia_nar::parse_nar(hashing_reader);
             use futures::StreamExt as _;
             let mapped = events.map(|item| match item {
@@ -363,8 +363,8 @@ impl DaemonStore for LocalStoreHandler {
                 .into_inner()
                 .unwrap();
             let total_bytes = hash_state.bytes_read;
-            let digest = hash_state.finish();
-            let actual_hash = NarHash::from_slice(digest.as_ref())
+            let hash = hash_state.finish();
+            let actual_hash = NarHash::try_from(hash)
                 .map_err(|e| ProtocolError::custom(format!("Hash conversion error: {e}")))?;
 
             if actual_hash != expected_hash {

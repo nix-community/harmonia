@@ -17,10 +17,8 @@ harmonia-nar = { version = "3.0.0" }
 harmonia-protocol = { version = "3.0.0" }
 bytes = { workspace = true }
 libc = "0.2"
-ring = { workspace = true }
 tempfile = { workspace = true }
 nix = { version = "0.31", features = ["user", "fs"] }
-pin-project-lite = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
@@ -33,6 +31,7 @@ futures = { workspace = true }
 [dev-dependencies]
 harmonia-nar = { version = "3.0.0", features = ["test"] }
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
+ring = { workspace = true }
 tokio-test = "0.4"
 
 [lints]
