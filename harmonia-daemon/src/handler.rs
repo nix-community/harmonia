@@ -302,7 +302,7 @@ impl DaemonStore for LocalStoreHandler {
         let deriver = info.info.deriver.clone();
         let references = info.info.references.clone();
         let signatures = info.info.signatures.clone();
-        let ca = info.info.ca.clone();
+        let ca = info.info.ca;
         let ultimate = info.info.ultimate;
 
         async move {
@@ -419,11 +419,9 @@ impl DaemonStore for LocalStoreHandler {
                 let mut db = db.blocking_lock();
 
                 // Re-check under lock — another task may have registered it
-                if !repair {
-                    if let Ok(true) = db.is_valid_path(&full_path_for_reg) {
-                        // temp_dir drops here, cleaning up temp_dest
-                        return Ok(());
-                    }
+                if !repair && let Ok(true) = db.is_valid_path(&full_path_for_reg) {
+                    // temp_dir drops here, cleaning up temp_dest
+                    return Ok(());
                 }
 
                 // Move into place — remove the old path first on repair.

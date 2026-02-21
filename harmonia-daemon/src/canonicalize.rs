@@ -67,7 +67,7 @@ pub async fn canonicalize_path_metadata(path: &Path) -> io::Result<()> {
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || canonicalize_path_metadata_sync(&path))
         .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+        .map_err(io::Error::other)?
 }
 
 fn canonicalize_path_metadata_sync(path: &Path) -> io::Result<()> {
@@ -110,7 +110,7 @@ fn canonicalize_entry(path: &Path) -> io::Result<fs::Metadata> {
     // (In tests we typically aren't root, so this is best-effort)
     if geteuid().is_root() {
         nix::unistd::chown(path, Some(Uid::from_raw(0)), Some(Gid::from_raw(0)))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
     }
 
     Ok(metadata)

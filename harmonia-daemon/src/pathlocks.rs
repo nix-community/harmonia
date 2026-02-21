@@ -38,9 +38,8 @@ impl PathLock {
             .truncate(false)
             .open(&lock_path)?;
 
-        let flock = Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, errno)| {
-            io::Error::new(io::ErrorKind::Other, format!("flock failed: {errno}"))
-        })?;
+        let flock = Flock::lock(file, FlockArg::LockExclusive)
+            .map_err(|(_, errno)| io::Error::other(format!("flock failed: {errno}")))?;
 
         Ok(Self {
             _flock: flock,

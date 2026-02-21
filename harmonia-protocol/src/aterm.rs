@@ -74,7 +74,7 @@ pub fn parse(store_dir: &StoreDir, input: &str, name: &str) -> Result<BasicDeriv
 
     // BasicDerivation.inputs = input_srcs ∪ input_drv store paths
     let mut inputs: BTreeSet<StorePath> = input_srcs;
-    for (drv_path, _) in &input_drvs {
+    for drv_path in input_drvs.keys() {
         inputs.insert(drv_path.clone());
     }
 
