@@ -374,6 +374,8 @@ impl DaemonStore for LocalStoreHandler {
                 )));
             }
 
+            // nar_size == 0 means "unknown" in the Nix protocol (narSize NULL in DB).
+            // Hash verification above is always authoritative; size is a secondary check.
             if nar_size > 0 && total_bytes != nar_size {
                 return Err(ProtocolError::custom(format!(
                     "NAR size mismatch for {}: expected {}, got {}",
