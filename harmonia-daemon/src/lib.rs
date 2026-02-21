@@ -1,3 +1,4 @@
+pub mod build;
 pub mod canonicalize;
 pub mod config;
 pub mod error;

@@ -36,6 +36,7 @@ pub struct LocalStoreHandler {
     store_dir: StoreDir,
     db: Arc<Mutex<StoreDb>>,
     trusted_public_keys: Arc<Vec<PublicKey>>,
+    build_dir: PathBuf,
 }
 
 impl LocalStoreHandler {
@@ -49,6 +50,7 @@ impl LocalStoreHandler {
             store_dir,
             db: Arc::new(Mutex::new(db)),
             trusted_public_keys: Arc::new(Vec::new()),
+            build_dir: PathBuf::from(crate::build::DEFAULT_BUILD_DIR),
         })
     }
 
@@ -61,6 +63,7 @@ impl LocalStoreHandler {
             store_dir,
             db,
             trusted_public_keys: Arc::new(Vec::new()),
+            build_dir: PathBuf::from(crate::build::DEFAULT_BUILD_DIR),
         }
     }
 
@@ -74,7 +77,13 @@ impl LocalStoreHandler {
             store_dir,
             db,
             trusted_public_keys: Arc::new(trusted_public_keys),
+            build_dir: PathBuf::from(crate::build::DEFAULT_BUILD_DIR),
         }
+    }
+
+    /// Override the directory used for temporary build sandboxes.
+    pub fn set_build_dir(&mut self, path: PathBuf) {
+        self.build_dir = path;
     }
 
     /// Convert a harmonia_store_db::ValidPathInfo to the protocol UnkeyedValidPathInfo.
@@ -536,6 +545,36 @@ impl DaemonStore for LocalStoreHandler {
         }
         .empty_logs()
         .boxed_result()
+    }
+
+    fn build_derivation<'a>(
+        &'a mut self,
+        drv_path: &'a StorePath,
+        drv: &'a harmonia_store_core::derivation::BasicDerivation,
+        mode: harmonia_protocol::daemon_wire::types2::BuildMode,
+    ) -> impl ResultLog<Output = DaemonResult<harmonia_protocol::daemon_wire::types2::BuildResult>>
+    + Send
+    + 'a {
+        async move {
+            let config = crate::build::BuildConfig {
+                build_dir: self.build_dir.clone(),
+                ..Default::default()
+            };
+            // TODO: write build logs to /nix/var/log/nix/drvs/ like upstream Nix
+            let log_sink: Arc<std::sync::Mutex<dyn std::io::Write + Send>> =
+                Arc::new(std::sync::Mutex::new(std::io::sink()));
+            crate::build::build_derivation(
+                &self.store_dir,
+                &self.db,
+                drv_path,
+                drv,
+                mode,
+                &config,
+                log_sink,
+            )
+            .await
+        }
+        .empty_logs()
     }
 
     fn shutdown(&mut self) -> impl std::future::Future<Output = DaemonResult<()>> + Send + '_ {

@@ -19,7 +19,7 @@ bytes = { workspace = true }
 libc = "0.2"
 tempfile = { workspace = true }
 nix = { version = "0.31", features = ["user", "fs"] }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

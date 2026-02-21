@@ -28,7 +28,7 @@ use crate::handler::LocalStoreHandler;
 pub struct TestStore {
     pub store_dir: StoreDir,
     pub handler: LocalStoreHandler,
-    _db: Arc<Mutex<StoreDb>>,
+    pub db: Arc<Mutex<StoreDb>>,
     _temp_dir: CanonicalTempDir,
 }
 
@@ -44,11 +44,14 @@ impl TestStore {
         let db = StoreDb::open_memory().expect("failed to create in-memory database");
         let db = Arc::new(Mutex::new(db));
 
-        let handler = LocalStoreHandler::from_shared_db(store_dir.clone(), Arc::clone(&db));
+        let build_dir = temp_dir.path().join("builds");
+        std::fs::create_dir_all(&build_dir).expect("failed to create build dir");
+        let mut handler = LocalStoreHandler::from_shared_db(store_dir.clone(), Arc::clone(&db));
+        handler.set_build_dir(build_dir);
 
         Self {
             store_dir,
-            _db: db,
+            db,
             handler,
             _temp_dir: temp_dir,
         }
@@ -65,12 +68,15 @@ impl TestStore {
         let db = StoreDb::open_memory().expect("failed to create in-memory database");
         let db = Arc::new(Mutex::new(db));
 
-        let handler =
+        let build_dir = temp_dir.path().join("builds");
+        std::fs::create_dir_all(&build_dir).expect("failed to create build dir");
+        let mut handler =
             LocalStoreHandler::from_shared_db_with_keys(store_dir.clone(), Arc::clone(&db), keys);
+        handler.set_build_dir(build_dir);
 
         Self {
             store_dir,
-            _db: db,
+            db,
             handler,
             _temp_dir: temp_dir,
         }
@@ -79,5 +85,12 @@ impl TestStore {
     /// Filesystem path to the store root (e.g. `/tmp/xxx/store`).
     pub fn store_path(&self) -> PathBuf {
         self.store_dir.to_path().to_owned()
+    }
+
+    /// Directory for temporary build sandboxes, created under the test temp dir.
+    pub fn build_dir(&self) -> PathBuf {
+        let p = self._temp_dir.path().join("builds");
+        std::fs::create_dir_all(&p).expect("failed to create build dir");
+        p
     }
 }
