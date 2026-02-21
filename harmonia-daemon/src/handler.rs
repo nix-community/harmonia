@@ -560,19 +560,8 @@ impl DaemonStore for LocalStoreHandler {
                 build_dir: self.build_dir.clone(),
                 ..Default::default()
             };
-            // TODO: write build logs to /nix/var/log/nix/drvs/ like upstream Nix
-            let log_sink: Arc<std::sync::Mutex<dyn std::io::Write + Send>> =
-                Arc::new(std::sync::Mutex::new(std::io::sink()));
-            crate::build::build_derivation(
-                &self.store_dir,
-                &self.db,
-                drv_path,
-                drv,
-                mode,
-                &config,
-                log_sink,
-            )
-            .await
+            crate::build::build_derivation(&self.store_dir, &self.db, drv_path, drv, mode, &config)
+                .await
         }
         .empty_logs()
     }

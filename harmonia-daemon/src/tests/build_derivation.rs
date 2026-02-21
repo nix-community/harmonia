@@ -5,7 +5,6 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use harmonia_protocol::build_result::{BuildResultInner, FailureStatus, SuccessStatus};
 use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
@@ -15,28 +14,6 @@ use harmonia_store_core::derived_path::OutputName;
 use harmonia_store_core::store_path::StorePath;
 
 use super::test_store::TestStore;
-
-type LogSink = Arc<std::sync::Mutex<dyn std::io::Write + Send>>;
-type LogBuf = Arc<std::sync::Mutex<Vec<u8>>>;
-
-/// Create a test log sink that discards output.
-fn test_log_sink() -> LogSink {
-    Arc::new(std::sync::Mutex::new(Vec::<u8>::new()))
-}
-
-/// Create a test log sink that captures output for later inspection.
-fn test_log_sink_capturing() -> (LogSink, LogBuf) {
-    let buf: LogBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
-    (Arc::clone(&buf) as _, buf)
-}
-
-fn log_lines(buf: &LogBuf) -> Vec<String> {
-    let data = buf.lock().unwrap();
-    String::from_utf8_lossy(&data)
-        .lines()
-        .map(String::from)
-        .collect()
-}
 
 /// Helper: create a multi-output derivation with `out` and `dev` outputs.
 fn multi_output_derivation(_ts: &TestStore, name: &str) -> (StorePath, BasicDerivation) {
@@ -295,10 +272,10 @@ async fn test_build_derivation_keep_failed() {
     let config = crate::build::BuildConfig {
         keep_failed: true,
         build_dir: ts.build_dir(),
+        log_dir: None,
         ..Default::default()
     };
 
-    let log_sink = test_log_sink();
     let result = crate::build::build_derivation(
         &ts.store_dir,
         &ts.db,
@@ -306,7 +283,6 @@ async fn test_build_derivation_keep_failed() {
         &drv,
         BuildMode::Normal,
         &config,
-        Arc::clone(&log_sink),
     )
     .await
     .unwrap();
@@ -590,10 +566,10 @@ async fn test_build_derivation_timeout() {
     let config = crate::build::BuildConfig {
         timeout: Some(std::time::Duration::from_millis(100)),
         build_dir: ts.build_dir(),
+        log_dir: None,
         ..Default::default()
     };
 
-    let log_sink = test_log_sink();
     let result = crate::build::build_derivation(
         &ts.store_dir,
         &ts.db,
@@ -601,7 +577,6 @@ async fn test_build_derivation_timeout() {
         &drv,
         BuildMode::Normal,
         &config,
-        Arc::clone(&log_sink),
     )
     .await
     .unwrap();
@@ -646,10 +621,10 @@ async fn test_build_derivation_max_silent() {
     let config = crate::build::BuildConfig {
         max_silent_time: Some(std::time::Duration::from_millis(100)),
         build_dir: ts.build_dir(),
+        log_dir: None,
         ..Default::default()
     };
 
-    let log_sink = test_log_sink();
     let result = crate::build::build_derivation(
         &ts.store_dir,
         &ts.db,
@@ -657,7 +632,6 @@ async fn test_build_derivation_max_silent() {
         &drv,
         BuildMode::Normal,
         &config,
-        Arc::clone(&log_sink),
     )
     .await
     .unwrap();
@@ -703,11 +677,12 @@ async fn test_build_derivation_log_output() {
         structured_attrs: None,
     };
 
+    let log_tmp = tempfile::tempdir().unwrap();
     let config = crate::build::BuildConfig {
         build_dir: ts.build_dir(),
+        log_dir: Some(log_tmp.path().to_owned()),
         ..Default::default()
     };
-    let (log_sink, log_buf) = test_log_sink_capturing();
     let result = crate::build::build_derivation(
         &ts.store_dir,
         &ts.db,
@@ -715,7 +690,6 @@ async fn test_build_derivation_log_output() {
         &drv,
         BuildMode::Normal,
         &config,
-        log_sink,
     )
     .await
     .unwrap();
@@ -725,17 +699,27 @@ async fn test_build_derivation_log_output() {
         "Build should succeed"
     );
 
-    // Log output should have been captured
-    let lines = log_lines(&log_buf);
+    // Read back the bzip2-compressed log file and verify contents
+    let base_name = drv_path.to_string();
+    let log_path = log_tmp
+        .path()
+        .join("drvs")
+        .join(&base_name[..2])
+        .join(format!("{}.bz2", &base_name[2..]));
+    assert!(log_path.exists(), "Log file should exist at {log_path:?}");
+
+    let compressed = std::fs::read(&log_path).unwrap();
+    let mut decompressor = bzip2::read::BzDecoder::new(&compressed[..]);
+    let mut log_text = String::new();
+    std::io::Read::read_to_string(&mut decompressor, &mut log_text).unwrap();
+
     assert!(
-        lines.iter().any(|l| l.contains("log line 1")),
-        "Should capture 'log line 1' in logs: {:?}",
-        lines
+        log_text.contains("log line 1"),
+        "Log should contain 'log line 1': {log_text:?}",
     );
     assert!(
-        lines.iter().any(|l| l.contains("log line 2")),
-        "Should capture 'log line 2' in logs: {:?}",
-        lines
+        log_text.contains("log line 2"),
+        "Log should contain 'log line 2': {log_text:?}",
     );
 }
 

@@ -39,6 +39,9 @@ use crate::canonicalize::canonicalize_path_metadata;
 /// Default parent directory for build sandboxes, matching upstream Nix.
 pub const DEFAULT_BUILD_DIR: &str = "/nix/var/nix/builds";
 
+/// Default log directory, matching upstream Nix's `logDir` setting.
+pub const DEFAULT_LOG_DIR: &str = "/nix/var/log/nix";
+
 /// Configuration for a build operation.
 pub struct BuildConfig {
     /// Whether to keep failed build outputs (with `.failed` suffix).
@@ -52,6 +55,10 @@ pub struct BuildConfig {
     /// Parent directory for temporary build directories.
     /// Defaults to `/nix/var/nix/builds`.
     pub build_dir: PathBuf,
+    /// Directory where bzip2-compressed build logs are written.
+    /// Logs are stored as `{log_dir}/drvs/{hash[0:2]}/{hash[2:]}.bz2`.
+    /// Set to `None` to disable log persistence (useful in tests).
+    pub log_dir: Option<PathBuf>,
 }
 
 impl Default for BuildConfig {
@@ -64,8 +71,34 @@ impl Default for BuildConfig {
                 .map(|n| n.get())
                 .unwrap_or(1),
             build_dir: PathBuf::from(DEFAULT_BUILD_DIR),
+            log_dir: Some(PathBuf::from(DEFAULT_LOG_DIR)),
         }
     }
+}
+
+/// Open a bzip2-compressed build log file for the given derivation path.
+///
+/// Returns a `BzEncoder<File>` writer and the path to the log file.
+/// Matches Nix's log layout: `{log_dir}/drvs/{base_name[0:2]}/{base_name[2:]}.bz2`
+fn open_build_log(
+    drv_path: &StorePath,
+    config: &BuildConfig,
+) -> std::io::Result<Option<(bzip2::write::BzEncoder<std::fs::File>, PathBuf)>> {
+    let log_dir = match &config.log_dir {
+        Some(d) => d,
+        None => return Ok(None),
+    };
+
+    let base_name = drv_path.to_string();
+    let (prefix, rest) = base_name.split_at(2);
+    let dir = log_dir.join("drvs").join(prefix);
+    std::fs::create_dir_all(&dir)?;
+
+    let log_path = dir.join(format!("{rest}.bz2"));
+    let file = std::fs::File::create(&log_path)?;
+    let writer = bzip2::write::BzEncoder::new(file, bzip2::Compression::default());
+
+    Ok(Some((writer, log_path)))
 }
 
 /// Result of scanning and hashing a single built output in one NAR pass.
@@ -80,6 +113,8 @@ struct BuiltOutput {
 /// Execute a build for the given derivation and register outputs.
 ///
 /// This is the core build logic called by `LocalStoreHandler::build_derivation`.
+/// Build logs are written to `{config.log_dir}/drvs/...` (bzip2-compressed by
+/// default), matching Nix's `addBuildLog()` layout so that `nix log` can read them.
 pub async fn build_derivation(
     store_dir: &StoreDir,
     db: &Arc<Mutex<harmonia_store_db::StoreDb>>,
@@ -87,7 +122,6 @@ pub async fn build_derivation(
     drv: &BasicDerivation,
     mode: BuildMode,
     config: &BuildConfig,
-    log_sink: Arc<std::sync::Mutex<dyn Write + Send>>,
 ) -> DaemonResult<BuildResult> {
     let start_time = now_secs();
 
@@ -156,9 +190,23 @@ pub async fn build_derivation(
         }
     }
 
+    // Open build log file (bzip2-compressed by default, matching Nix's layout).
+    // If log_dir is None the build log is simply discarded.
+    let log_sink: Arc<std::sync::Mutex<dyn Write + Send>> = match open_build_log(drv_path, config) {
+        Ok(Some((writer, _path))) => Arc::new(std::sync::Mutex::new(writer)),
+        Ok(None) => Arc::new(std::sync::Mutex::new(std::io::sink())),
+        Err(e) => {
+            tracing::warn!("Failed to open build log for {drv_path}: {e}");
+            Arc::new(std::sync::Mutex::new(std::io::sink()))
+        }
+    };
+
     // Execute the builder process
     let build_result =
-        execute_builder(builder, &args, &env, build_tmp.path(), config, log_sink).await;
+        execute_builder(builder, &args, &env, build_tmp.path(), config, &log_sink).await;
+
+    // Flush / finalize the log file (important for bzip2 trailer)
+    drop(log_sink);
 
     let stop_time = now_secs();
 
@@ -482,7 +530,7 @@ async fn execute_builder(
     env: &BTreeMap<String, String>,
     work_dir: &Path,
     config: &BuildConfig,
-    log_sink: Arc<std::sync::Mutex<dyn Write + Send>>,
+    log_sink: &Arc<std::sync::Mutex<dyn Write + Send>>,
 ) -> Result<(), BuildError> {
     let mut cmd = tokio::process::Command::new(builder);
     cmd.args(args)

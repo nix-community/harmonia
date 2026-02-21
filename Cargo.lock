@@ -1044,6 +1044,7 @@ name = "harmonia-daemon"
 version = "3.0.0"
 dependencies = [
  "bytes",
+ "bzip2",
  "futures",
  "harmonia-nar",
  "harmonia-protocol",
