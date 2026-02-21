@@ -27,7 +27,9 @@ impl PathLock {
     ///
     /// Creates `<path>.lock` if it doesn't exist.
     pub fn lock(path: &Path) -> io::Result<Self> {
-        let lock_path = PathBuf::from(format!("{}.lock", path.display()));
+        let mut lock_path = path.as_os_str().to_os_string();
+        lock_path.push(".lock");
+        let lock_path = PathBuf::from(lock_path);
 
         let file = OpenOptions::new()
             .read(true)
