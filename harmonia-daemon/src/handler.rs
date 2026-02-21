@@ -424,10 +424,25 @@ impl DaemonStore for LocalStoreHandler {
                     }
                 }
 
-                // Move into place
-                if dest_path.exists() && repair {
-                    std::fs::remove_dir_all(&dest_path).ok();
-                    std::fs::remove_file(&dest_path).ok();
+                // Move into place — remove the old path first on repair.
+                // Try remove_dir_all (handles dirs and their contents),
+                // fall back to remove_file. Ignore NotFound in case
+                // another process removed it between our check and removal.
+                if repair {
+                    match std::fs::remove_dir_all(&dest_path) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(_) => match std::fs::remove_file(&dest_path) {
+                            Ok(()) => {}
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => {
+                                return Err(ProtocolError::custom(format!(
+                                    "Failed to remove existing path {}: {e}",
+                                    dest_path.display()
+                                )));
+                            }
+                        },
+                    }
                 }
                 std::fs::rename(&temp_dest, &dest_path).map_err(|e| {
                     // temp_dir drops on the error path, cleaning up
