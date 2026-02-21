@@ -46,6 +46,14 @@ impl LocalStoreHandler {
         })
     }
 
+    /// Create a handler from a shared database handle.
+    ///
+    /// Useful for tests where the caller needs to set up data in the same DB
+    /// that the handler queries.
+    pub fn from_shared_db(store_dir: StoreDir, db: Arc<Mutex<StoreDb>>) -> Self {
+        Self { store_dir, db }
+    }
+
     /// Convert a harmonia_store_db::ValidPathInfo to the protocol UnkeyedValidPathInfo.
     fn to_protocol_path_info(
         info: harmonia_store_db::ValidPathInfo,
