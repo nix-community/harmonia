@@ -1,23 +1,14 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::fs::{OpenOptions, create_dir};
-use std::future::Future;
-use std::io::{self, BufRead as _, Write as _};
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt as _, symlink};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::pin::pin;
-use std::task::{Poll, ready};
 
 use bstr::ByteSlice as _;
 use bytes::Bytes;
 use derive_more::Display;
-use futures::{Sink, Stream};
-use pin_project_lite::pin_project;
+use futures::Stream;
 use thiserror::Error;
-use tokio::io::AsyncBufRead;
-use tokio::task::{JoinHandle, spawn_blocking};
-use tokio_util::io::SyncIoBridge;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt as _, AsyncWriteExt as _};
 use tracing::{debug, trace};
 
 use super::{CASE_HACK_SUFFIX, NarEvent};
@@ -32,8 +23,6 @@ pub enum NarWriteOperation {
     CreateFile,
     #[display("path contains invalid UTF-8")]
     PathUTF8,
-    #[display("Could not join state")]
-    JoinError,
 }
 
 #[derive(Error, Debug)]
@@ -71,16 +60,11 @@ impl NarWriteError {
     }
 }
 
-pin_project! {
-    pub struct NarRestorer {
-        root: PathBuf,
-        path: PathBuf,
-        #[pin]
-        state: Option<JoinHandle<Result<(), NarWriteError>>>,
-        use_case_hack: bool,
-        entries: Entries,
-        dir_stack: Vec<Entries>,
-    }
+pub struct NarRestorer {
+    path: PathBuf,
+    use_case_hack: bool,
+    entries: Entries,
+    dir_stack: Vec<Entries>,
 }
 
 impl NarRestorer {
@@ -98,66 +82,24 @@ impl NarRestorer {
     {
         let path = path.into();
         Self {
-            root: path.clone(),
             path,
-            state: None,
             use_case_hack,
             entries: Default::default(),
             dir_stack: Default::default(),
         }
     }
-}
 
-fn join_name(path: &Path, name: &[u8]) -> Result<PathBuf, NarWriteError> {
-    if name.is_empty() {
-        Ok(path.to_owned())
-    } else {
-        let name_os = name.to_os_str().map_err(|err| {
-            let lossy = name.to_os_str_lossy();
-            let path = path.join(lossy);
-            NarWriteError::path_utf8_error(path, err)
-        })?;
-        Ok(path.join(name_os))
-    }
-}
-
-impl<R> Sink<NarEvent<R>> for NarRestorer
-where
-    R: AsyncBufRead + Send + 'static,
-{
-    type Error = NarWriteError;
-
-    fn poll_ready(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let mut this = self.project();
-        if let Some(state) = this.state.as_mut().as_pin_mut() {
-            ready!(state.poll(cx)).map_err(|_| {
-                NarWriteError::new(
-                    NarWriteOperation::JoinError,
-                    this.root.clone(),
-                    io::Error::other("background task failed"),
-                )
-            })??;
-        }
-        this.state.set(None);
-        Poll::Ready(Ok(()))
-    }
-
-    fn start_send(
-        mut self: std::pin::Pin<&mut Self>,
-        item: NarEvent<R>,
-    ) -> Result<(), Self::Error> {
-        if self.state.is_some() {
-            panic!("Sending when not ready!");
-        }
-        match item {
+    /// Process a single NAR event, writing to the filesystem.
+    async fn process_event<R>(&mut self, event: NarEvent<R>) -> Result<(), NarWriteError>
+    where
+        R: AsyncBufRead + Unpin,
+    {
+        match event {
             NarEvent::File {
                 name,
                 executable,
                 size: _,
-                reader,
+                mut reader,
             } => {
                 let name = if self.use_case_hack {
                     self.entries.hack_name(name)
@@ -166,7 +108,7 @@ where
                 };
 
                 let path = join_name(&self.path, &name)?;
-                let mut options = OpenOptions::new();
+                let mut options = tokio::fs::OpenOptions::new();
                 options.write(true);
                 options.create_new(true);
                 #[cfg(unix)]
@@ -177,32 +119,28 @@ where
                         options.mode(0o666);
                     }
                 }
-                let handle = spawn_blocking(move || {
-                    let reader = pin!(reader);
-                    let mut reader = SyncIoBridge::new(reader);
-                    let mut writer = options
-                        .open(&path)
+                let mut file = options
+                    .open(&path)
+                    .await
+                    .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
+                loop {
+                    trace!("Writing to file {:?}", path);
+                    let buf = reader
+                        .fill_buf()
+                        .await
                         .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-                    loop {
-                        trace!("Writing to file {:?}", path);
-                        let buf = reader
-                            .fill_buf()
-                            .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-                        if buf.is_empty() {
-                            break;
-                        }
-                        let amt = buf.len();
-                        writer
-                            .write_all(buf)
-                            .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-                        reader.consume(amt);
+                    if buf.is_empty() {
+                        break;
                     }
-                    writer
-                        .flush()
+                    let amt = buf.len();
+                    file.write_all(buf)
+                        .await
                         .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-                    Ok(())
-                });
-                self.state = Some(handle);
+                    reader.consume(amt);
+                }
+                file.flush()
+                    .await
+                    .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
             }
             NarEvent::Symlink { name, target } => {
                 let name = if self.use_case_hack {
@@ -220,13 +158,12 @@ where
                         NarWriteError::path_utf8_error(path, err)
                     })?
                     .to_owned();
-                self.state = Some(spawn_blocking(move || {
-                    #[cfg(unix)]
-                    {
-                        symlink(target_os, &path)
-                            .map_err(|err| NarWriteError::create_symlink_error(path, err))
-                    }
-                }));
+                #[cfg(unix)]
+                {
+                    tokio::fs::symlink(target_os, &path)
+                        .await
+                        .map_err(|err| NarWriteError::create_symlink_error(path, err))?;
+                }
             }
             NarEvent::StartDirectory { name } => {
                 let name = if self.use_case_hack {
@@ -243,10 +180,9 @@ where
                 let path = join_name(&self.path, &name)?;
                 self.path = path;
                 let path = self.path.clone();
-                self.state = Some(spawn_blocking(|| {
-                    let path = path;
-                    create_dir(&path).map_err(|err| NarWriteError::create_dir_error(path, err))
-                }));
+                tokio::fs::create_dir(&path)
+                    .await
+                    .map_err(|err| NarWriteError::create_dir_error(path, err))?;
             }
             NarEvent::EndDirectory => {
                 if self.use_case_hack {
@@ -258,18 +194,33 @@ where
         Ok(())
     }
 
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
-        <Self as Sink<NarEvent<R>>>::poll_ready(self, cx)
+    /// Consume a stream of NAR events and restore them to the filesystem.
+    pub async fn restore<S, U, R>(mut self, stream: S) -> Result<(), NarWriteError>
+    where
+        S: Stream<Item = U>,
+        U: Into<Result<NarEvent<R>, NarWriteError>>,
+        R: AsyncBufRead + Send + Unpin,
+    {
+        use futures::StreamExt as _;
+        futures::pin_mut!(stream);
+        while let Some(item) = stream.next().await {
+            let event = item.into()?;
+            self.process_event(event).await?;
+        }
+        Ok(())
     }
+}
 
-    fn poll_close(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
-        <Self as Sink<NarEvent<R>>>::poll_ready(self, cx)
+fn join_name(path: &Path, name: &[u8]) -> Result<PathBuf, NarWriteError> {
+    if name.is_empty() {
+        Ok(path.to_owned())
+    } else {
+        let name_os = name.to_os_str().map_err(|err| {
+            let lossy = name.to_os_str_lossy();
+            let path = path.join(lossy);
+            NarWriteError::path_utf8_error(path, err)
+        })?;
+        Ok(path.join(name_os))
     }
 }
 
@@ -347,11 +298,10 @@ impl RestoreOptions {
         S: Stream<Item = U>,
         U: Into<Result<NarEvent<R>, NarWriteError>>,
         P: Into<PathBuf>,
-        R: AsyncBufRead + Send + 'static,
+        R: AsyncBufRead + Send + Unpin,
     {
-        use futures::stream::StreamExt as _;
         let restorer = NarRestorer::new_restorer(path, self.use_case_hack);
-        stream.map(|item| item.into()).forward(restorer).await
+        restorer.restore(stream).await
     }
 }
 
@@ -366,7 +316,7 @@ where
     S: Stream<Item = U>,
     U: Into<Result<NarEvent<R>, NarWriteError>>,
     P: Into<PathBuf>,
-    R: AsyncBufRead + Send + 'static,
+    R: AsyncBufRead + Send + Unpin,
 {
     RestoreOptions::new().restore(stream, path).await
 }
