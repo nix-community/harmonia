@@ -12,10 +12,19 @@ use data_encoding::DecodeKind;
 use data_encoding::{BitOrder, DecodeError, DecodePartial, Encoding, Specification};
 use std::sync::LazyLock;
 
+/// The 32-character alphabet used by Nix's base32 encoding.
+///
+/// This is the canonical source for the nix-base32 alphabet across the
+/// workspace — use this constant instead of duplicating the string.
+pub const ALPHABET: &str = "0123456789abcdfghijklmnpqrsvwxyz";
+
+/// The nix-base32 alphabet as a byte slice (convenience alias).
+pub const ALPHABET_BYTES: &[u8; 32] = b"0123456789abcdfghijklmnpqrsvwxyz";
+
 /// Nix base32 encoding (lowercase, without padding, LSB first, reversed)
 static NIX_BASE32: LazyLock<Encoding> = LazyLock::new(|| {
     let mut spec = Specification::new();
-    spec.symbols.push_str("0123456789abcdfghijklmnpqrsvwxyz");
+    spec.symbols.push_str(ALPHABET);
     spec.bit_order = BitOrder::LeastSignificantFirst;
     spec.encoding().unwrap()
 });
