@@ -146,6 +146,7 @@ impl LocalStoreHandler {
 }
 
 impl LocalStoreHandler {
+    #[cfg(test)]
     pub(crate) fn nar_from_path_impl(
         store_dir: &StoreDir,
         path: &StorePath,
