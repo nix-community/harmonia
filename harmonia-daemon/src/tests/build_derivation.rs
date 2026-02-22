@@ -919,7 +919,7 @@ async fn test_build_derivation_pass_as_file() {
 
     // The builder reads the file pointed to by $textPath, verifies `text` is
     // NOT in the env, and writes the file contents to $out.
-    // Use shell built-ins only — PATH is /path-not-set during builds.
+    // Use shell built-ins only — only /bin/sh exists in the Nix sandbox.
     let script = r#"
         if [ -n "${text+set}" ]; then
             echo "FAIL: text env var should not be set" >&2
@@ -933,7 +933,8 @@ async fn test_build_derivation_pass_as_file() {
             echo "FAIL: textPath does not point to a file" >&2
             exit 1
         fi
-        /bin/cat "$textPath" > $out
+        IFS= read -r content < "$textPath"
+        printf '%s' "$content" > "$out"
     "#;
 
     let mut env = BTreeMap::new();
@@ -992,8 +993,7 @@ async fn test_build_derivation_structured_attrs() {
     // 2. The JSON file contains our custom attribute
     // 3. Individual env vars from the derivation are NOT set
     //
-    // We use /bin/cat and shell built-ins with absolute paths since
-    // PATH=/path-not-set during builds.
+    // Use shell built-ins only — only /bin/sh exists on NixOS.
     let script = r#"
         if [ -z "$NIX_ATTRS_JSON_FILE" ]; then
             echo "FAIL: NIX_ATTRS_JSON_FILE not set" >&2
@@ -1007,7 +1007,8 @@ async fn test_build_derivation_structured_attrs() {
             echo "FAIL: myAttr env var should NOT be set in structured mode" >&2
             exit 1
         fi
-        /bin/cat "$NIX_ATTRS_JSON_FILE" > $out
+        IFS= read -r content < "$NIX_ATTRS_JSON_FILE"
+        printf '%s' "$content" > "$out"
     "#;
 
     let mut env = BTreeMap::new();
@@ -1080,7 +1081,8 @@ async fn test_build_derivation_structured_attrs_outputs() {
             exit 1
         fi
         # Write the JSON to $out for inspection by the test
-        /bin/cat "$NIX_ATTRS_JSON_FILE" > $out
+        IFS= read -r content < "$NIX_ATTRS_JSON_FILE"
+        printf '%s' "$content" > "$out"
         echo ok > $dev
     "#;
 
