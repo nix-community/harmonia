@@ -1,4 +1,5 @@
 pub mod build;
+pub mod build_users;
 pub mod builtins;
 pub mod canonicalize;
 pub mod config;
