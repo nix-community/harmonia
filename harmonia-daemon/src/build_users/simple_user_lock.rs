@@ -11,6 +11,7 @@ use std::fs;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
 
 use super::UserLock;
@@ -43,7 +44,8 @@ pub fn acquire_simple_user_lock(
 
         let fd = match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
             Ok(fd) => fd,
-            Err(_) => continue,
+            Err((_, Errno::EWOULDBLOCK | Errno::EINTR)) => continue, // Slot is busy
+            Err((_, errno)) => return Err(errno.into()),             // Real error
         };
 
         return Ok(Some(UserLock {

@@ -11,6 +11,7 @@ use std::fs;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
 
 use super::UserLock;
@@ -63,7 +64,8 @@ pub fn acquire_auto_user_lock(
         // Try non-blocking exclusive lock
         let fd = match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
             Ok(fd) => fd,
-            Err(_) => continue, // Slot is busy
+            Err((_, Errno::EWOULDBLOCK | Errno::EINTR)) => continue, // Slot is busy
+            Err((_, errno)) => return Err(errno.into()),             // Real error
         };
 
         let first_uid = start_id + i * MAX_IDS_PER_BUILD;
