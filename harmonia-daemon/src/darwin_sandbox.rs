@@ -65,6 +65,28 @@ const SANDBOX_DEFAULTS: &str = r#"
 ; Without this line clang cannot write to /dev/null.
 (allow file-read-metadata (literal "/dev"))
 
+; Allow local networking when __darwinAllowLocalNetworking is set.
+(if (param "_ALLOW_LOCAL_NETWORKING")
+    (begin
+      (allow network* (remote ip "localhost:*"))
+      (allow network-inbound (local ip "*:*")) ; required to bind and listen
+
+      ; Allow access to /etc/resolv.conf (which is a symlink to
+      ; /private/var/run/resolv.conf).
+      (allow file-read-metadata
+             (literal "/var")
+             (literal "/etc")
+             (literal "/etc/resolv.conf")
+             (literal "/private/etc/resolv.conf"))
+
+      (allow file-read*
+             (literal "/private/var/run/resolv.conf"))
+
+      ; Allow DNS lookups. This is even needed for localhost, which lots of tests rely on
+      (allow file-read-metadata (literal "/etc/hosts"))
+      (allow file-read*         (literal "/private/etc/hosts"))
+      (allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))))
+
 ; Standard devices.
 (allow file*
        (literal "/dev/null")
@@ -267,6 +289,7 @@ pub unsafe fn apply_sandbox(
     profile: &str,
     build_top: &Path,
     global_tmp_dir: &Path,
+    allow_local_networking: bool,
 ) -> Result<(), String> {
     use std::ffi::CString;
     use std::ptr;
@@ -294,13 +317,18 @@ pub unsafe fn apply_sandbox(
     let key2 = CString::new("_GLOBAL_TMP_DIR").unwrap();
     let val2 = CString::new(global_tmp_str.as_ref()).map_err(|e| format!("global_tmp_dir: {e}"))?;
 
-    let params: Vec<*const libc::c_char> = vec![
-        key1.as_ptr(),
-        val1.as_ptr(),
-        key2.as_ptr(),
-        val2.as_ptr(),
-        ptr::null(),
-    ];
+    // Conditionally pass _ALLOW_LOCAL_NETWORKING for packages that need
+    // localhost access (e.g. test suites using __darwinAllowLocalNetworking).
+    let key3 = CString::new("_ALLOW_LOCAL_NETWORKING").unwrap();
+    let val3 = CString::new("1").unwrap();
+
+    let mut params: Vec<*const libc::c_char> =
+        vec![key1.as_ptr(), val1.as_ptr(), key2.as_ptr(), val2.as_ptr()];
+    if allow_local_networking {
+        params.push(key3.as_ptr());
+        params.push(val3.as_ptr());
+    }
+    params.push(ptr::null());
 
     let mut errbuf: *mut libc::c_char = ptr::null_mut();
     // SAFETY: sandbox_init_with_parameters is the documented macOS sandbox API.
@@ -337,7 +365,8 @@ mod tests {
     fn test_sandbox_vs_minimal_profile() {
         let sandboxed = generate_sandbox_profile(&[], &[], false, true, "");
         assert!(sandboxed.contains("(deny default)"));
-        assert!(!sandboxed.contains("(allow network"));
+        // Should not contain the unconditional full network access from SANDBOX_NETWORK
+        assert!(!sandboxed.contains("(allow network* (local ip) (remote ip))"));
 
         let minimal = generate_sandbox_profile(&[], &[], false, false, "");
         assert!(minimal.contains("(allow default)"));
@@ -348,7 +377,8 @@ mod tests {
     #[test]
     fn test_network_access_for_fixed_output() {
         let without = generate_sandbox_profile(&[], &[], false, true, "");
-        assert!(!without.contains("(allow network"));
+        // Should not contain the unconditional full network access from SANDBOX_NETWORK
+        assert!(!without.contains("(allow network* (local ip) (remote ip))"));
 
         let with = generate_sandbox_profile(&[], &[], true, true, "");
         assert!(with.contains("(allow network* (local ip) (remote ip))"));
@@ -393,6 +423,23 @@ mod tests {
         assert!(
             profile.contains(&format!("(literal \"{}\")", tmp.path().display())),
             "Ancestor directories should get file-read* (literal ...)"
+        );
+    }
+
+    /// Nix's sandbox-defaults.sb has a conditional `_ALLOW_LOCAL_NETWORKING`
+    /// block for packages using `__darwinAllowLocalNetworking`. The SBPL
+    /// text must always contain the `(if (param ...))` block; the parameter
+    /// value controls activation at runtime.
+    #[test]
+    fn test_sandbox_defaults_has_local_networking_conditional() {
+        let profile = generate_sandbox_profile(&[], &[], false, true, "");
+        assert!(
+            profile.contains(r#"(if (param "_ALLOW_LOCAL_NETWORKING")"#),
+            "Profile must contain the _ALLOW_LOCAL_NETWORKING conditional block"
+        );
+        assert!(
+            profile.contains(r#"(allow network* (remote ip "localhost:*"))"#),
+            "Local networking conditional must allow localhost connections"
         );
     }
 
@@ -476,7 +523,7 @@ mod tests {
         // It only affects the child process, matching Nix's setUser() pattern.
         unsafe {
             cmd.pre_exec(move || {
-                apply_sandbox(&profile_clone, &build_top_clone, &global_tmp)
+                apply_sandbox(&profile_clone, &build_top_clone, &global_tmp, false)
                     .map_err(std::io::Error::other)
             });
         }
