@@ -182,6 +182,14 @@ impl Sandbox for LinuxSandbox {
 
         let no_chroot = self.config.no_chroot;
 
+        // Capture real UID/GID before fork+unshare. After
+        // unshare(CLONE_NEWUSER) the process is in a new user namespace
+        // where its UID/GID appear as unmapped (65534). The uid_map and
+        // gid_map must reference the *original* IDs from the parent
+        // namespace.
+        let real_uid = nix::unistd::getuid();
+        let real_gid = nix::unistd::getgid();
+
         // Build with std::process::Command, then convert to tokio::process::Command.
         // This lets us use pre_exec (which requires std CommandExt) while still
         // getting tokio's async Child for wait/IO.
@@ -202,41 +210,25 @@ impl Sandbox for LinuxSandbox {
             cmd.pre_exec(move || {
                 use nix::sched::{CloneFlags, unshare};
 
-                // Log thread count for debugging namespace issues
-                let thread_count = std::fs::read_dir("/proc/self/task")
-                    .map(|d| d.count())
-                    .unwrap_or(0);
-                eprintln!(
-                    "sandbox pre_exec: pid={} threads={} no_chroot={}",
-                    std::process::id(),
-                    thread_count,
-                    no_chroot,
-                );
-
                 let mut flags = CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNS;
                 if !no_chroot {
                     flags |= CloneFlags::CLONE_NEWNET;
                 }
 
-                eprintln!("sandbox pre_exec: calling unshare({flags:?})");
                 unshare(flags).map_err(|e| {
                     std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
                         format!("unshare({flags:?}): {e}"),
                     )
                 })?;
-                eprintln!("sandbox pre_exec: unshare succeeded");
 
-                // Map our UID/GID to root inside the namespace.
-                let uid = nix::unistd::getuid();
-                let gid = nix::unistd::getgid();
-                std::fs::write("/proc/self/uid_map", format!("0 {uid} 1\n")).map_err(|e| {
+                // Map the parent namespace UID/GID to root inside.
+                std::fs::write("/proc/self/uid_map", format!("0 {real_uid} 1\n")).map_err(|e| {
                     std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
                         format!("write uid_map: {e}"),
                     )
                 })?;
-                eprintln!("sandbox pre_exec: uid_map written");
                 // Must write "deny" to setgroups before writing gid_map
                 // (kernel requirement for unprivileged user namespaces)
                 std::fs::write("/proc/self/setgroups", "deny\n").map_err(|e| {
@@ -245,13 +237,12 @@ impl Sandbox for LinuxSandbox {
                         format!("write setgroups: {e}"),
                     )
                 })?;
-                std::fs::write("/proc/self/gid_map", format!("0 {gid} 1\n")).map_err(|e| {
+                std::fs::write("/proc/self/gid_map", format!("0 {real_gid} 1\n")).map_err(|e| {
                     std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
                         format!("write gid_map: {e}"),
                     )
                 })?;
-                eprintln!("sandbox pre_exec: namespace setup complete");
 
                 Ok(())
             });
@@ -514,8 +505,25 @@ mod tests {
         sandbox.teardown().await.unwrap();
     }
 
-    /// With `no_chroot = true`, the builder shares the host network namespace
-    /// and can see all host interfaces.
+    /// Helper: parse interface names from `/proc/self/net/dev` content.
+    #[cfg(target_os = "linux")]
+    fn parse_ifaces(content: &str) -> Vec<String> {
+        content
+            .lines()
+            .skip(2) // skip header lines
+            .filter_map(|line| line.split(':').next())
+            .map(|s| s.trim().to_string())
+            .collect()
+    }
+
+    /// With `no_chroot = true`, the builder inherits the parent's network
+    /// namespace instead of getting a fresh one.  We verify by comparing
+    /// the child's interface list with the parent's: they must match
+    /// because no `CLONE_NEWNET` is applied.
+    ///
+    /// This works even inside a nix build sandbox (which itself may only
+    /// have `lo`) because we compare against what the *parent* sees, not
+    /// against an assumption about the host.
     #[tokio::test(flavor = "current_thread")]
     #[cfg(target_os = "linux")]
     async fn test_sandbox_no_chroot_allows_network() {
@@ -533,6 +541,10 @@ mod tests {
 
         let mut sandbox = make_sandbox(&pool_dir, config, 1);
         sandbox.prepare().await.unwrap();
+
+        // Read parent's interfaces for comparison.
+        let parent_net_dev = std::fs::read_to_string("/proc/self/net/dev").unwrap();
+        let parent_ifaces = parse_ifaces(&parent_net_dev);
 
         let out_file = tmp.path().join("net_result");
         let out_path = out_file.to_string_lossy().to_string();
@@ -552,17 +564,11 @@ mod tests {
         assert!(status.success(), "Process should succeed");
 
         let output = std::fs::read_to_string(&out_file).unwrap();
-        let ifaces: Vec<&str> = output
-            .lines()
-            .skip(2)
-            .filter_map(|line| line.split(':').next())
-            .map(|s| s.trim())
-            .collect();
-        // With no network namespace, host interfaces should be visible
-        // (at minimum lo + at least one real interface like eth0, ens*, etc.)
-        assert!(
-            ifaces.len() > 1,
-            "Without network namespace, should see host interfaces (lo + others), got: {ifaces:?}"
+        let child_ifaces = parse_ifaces(&output);
+        // Same interfaces ⇒ same network namespace (no CLONE_NEWNET)
+        assert_eq!(
+            parent_ifaces, child_ifaces,
+            "no_chroot child should see same interfaces as parent"
         );
 
         sandbox.teardown().await.unwrap();

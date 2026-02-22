@@ -95,16 +95,17 @@ pub(crate) fn parse_export_references_graph(
     if let Some(ref sa) = drv.structured_attrs {
         // Structured attrs mode: { "filename": ["/nix/store/path", ...] }
         if let Some(erg) = sa.attrs.get("exportReferencesGraph")
-            && let Some(obj) = erg.as_object() {
-                for (filename, paths_json) in obj {
-                    let paths = flatten_json_to_strings(paths_json).map_err(|e| {
-                        ProtocolError::custom(format!(
-                            "Invalid exportReferencesGraph value for '{filename}': {e}"
-                        ))
-                    })?;
-                    result.push((filename.clone(), paths));
-                }
+            && let Some(obj) = erg.as_object()
+        {
+            for (filename, paths_json) in obj {
+                let paths = flatten_json_to_strings(paths_json).map_err(|e| {
+                    ProtocolError::custom(format!(
+                        "Invalid exportReferencesGraph value for '{filename}': {e}"
+                    ))
+                })?;
+                result.push((filename.clone(), paths));
             }
+        }
     } else {
         // Non-structured mode: space-separated "filename1 path1 filename2 path2 ..."
         if let Some(val) = drv.env.get(b"exportReferencesGraph".as_ref()) {
@@ -318,8 +319,7 @@ pub(crate) async fn check_output_constraints(
                 let mut local_closure = BTreeSet::new();
                 tokio::task::spawn_blocking(move || {
                     let db = db.blocking_lock();
-                    compute_fs_closure(&db, &ref_path, &mut local_closure)
-                        .map(|_| local_closure)
+                    compute_fs_closure(&db, &ref_path, &mut local_closure).map(|_| local_closure)
                 })
                 .await
                 .map_err(|e| format!("Task join error: {e}"))?
