@@ -103,11 +103,11 @@ fn open_build_log(
 
 /// Result of scanning and hashing a single built output in one NAR pass.
 #[derive(Clone)]
-struct BuiltOutput {
-    path: StorePath,
-    nar_hash: NarHash,
-    nar_size: u64,
-    references: BTreeSet<StorePath>,
+pub(crate) struct BuiltOutput {
+    pub(crate) path: StorePath,
+    pub(crate) nar_hash: NarHash,
+    pub(crate) nar_size: u64,
+    pub(crate) references: BTreeSet<StorePath>,
 }
 
 /// Execute a build for the given derivation and register outputs.
