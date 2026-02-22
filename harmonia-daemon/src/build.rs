@@ -11,7 +11,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -36,6 +35,7 @@ use harmonia_utils_hash::{Algorithm, Context};
 
 use crate::canonicalize::canonicalize_path_metadata;
 use crate::export_references_graph::{check_output_constraints, write_export_references_graph};
+use crate::sandbox::Sandbox;
 
 /// Default parent directory for build sandboxes, matching upstream Nix.
 pub const DEFAULT_BUILD_DIR: &str = "/nix/var/nix/builds";
@@ -750,12 +750,8 @@ pub enum BuildError {
 
 /// Execute the builder process, collecting log output.
 ///
-/// The builder runs in its own process group so that on timeout we can
-/// kill the entire tree (builder + any children like `make`, `sleep`, etc.)
-/// rather than just the top-level shell.
-///
-/// Supports both wall-clock timeout and max-silent-time (no log output)
-/// timeout. Either triggers a SIGKILL to the process group.
+/// Spawns the builder via `NoSandbox` (no isolation) and monitors
+/// it for completion, timeouts, and log output.
 async fn execute_builder(
     builder: &str,
     args: &[&str],
@@ -764,27 +760,36 @@ async fn execute_builder(
     config: &BuildConfig,
     log_sink: &Arc<std::sync::Mutex<dyn Write + Send>>,
 ) -> Result<(), BuildError> {
-    let mut cmd = tokio::process::Command::new(builder);
-    cmd.args(args)
-        .current_dir(work_dir)
-        .env_clear()
-        .envs(env.iter())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // Place builder in its own process group for clean kill-on-timeout
-        .process_group(0);
-
-    let mut child = cmd
-        .spawn()
+    let sandbox = crate::sandbox::NoSandbox::new();
+    let child = sandbox
+        .spawn(builder, args, env, work_dir)
+        .await
         .map_err(|e| BuildError::Other(format!("Failed to spawn builder '{builder}': {e}")))?;
 
-    let child_pid = child.id();
+    monitor_child(child, config, log_sink).await
+}
+
+/// Monitor a sandbox child process: drain stdout/stderr to a log sink,
+/// enforce wall-clock and max-silent-time timeouts, and return the exit
+/// status.
+///
+/// The child must have been spawned with `process_group(0)` so that
+/// timeout kills hit the entire process tree.
+///
+/// Supports both wall-clock timeout and max-silent-time (no log output)
+/// timeout. Either triggers a SIGKILL to the process group.
+pub(crate) async fn monitor_child(
+    mut child: crate::sandbox::SandboxChild,
+    config: &BuildConfig,
+    log_sink: &Arc<std::sync::Mutex<dyn Write + Send>>,
+) -> Result<(), BuildError> {
+    let child_pid = child.pid();
 
     // Drain both stdout and stderr concurrently, writing each line directly
     // to the caller's log sink (typically a file) without buffering in memory.
     // Both streams update last_output on each line for max_silent_time tracking.
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
+    let stdout = child.take_stdout();
+    let stderr = child.take_stderr();
     let last_output = Arc::new(std::sync::Mutex::new(tokio::time::Instant::now()));
 
     let last_out = Arc::clone(&last_output);
