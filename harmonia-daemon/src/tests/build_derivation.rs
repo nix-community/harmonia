@@ -560,7 +560,10 @@ async fn test_build_derivation_timeout() {
         inputs: BTreeSet::new(),
         platform: "x86_64-linux".into(),
         builder: "/bin/sh".into(),
-        args: vec!["-c".into(), "/bin/sleep 60; echo done > $out".into()],
+        args: vec![
+            "-c".into(),
+            "while true; do :; done; echo done > $out".into(),
+        ],
         env: BTreeMap::new(),
         structured_attrs: None,
     };
@@ -615,7 +618,7 @@ async fn test_build_derivation_max_silent() {
         inputs: BTreeSet::new(),
         platform: "x86_64-linux".into(),
         builder: "/bin/sh".into(),
-        args: vec!["-c".into(), "/bin/sleep 60".into()],
+        args: vec!["-c".into(), "while true; do :; done".into()],
         env: BTreeMap::new(),
         structured_attrs: None,
     };
