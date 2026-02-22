@@ -146,6 +146,6 @@ mod tests {
             .expect("slot 0");
 
         assert_eq!(lock.uid_count(), 65536);
-        assert_eq!(lock.uid_range(), (30000, 30000 + 65535));
+        assert_eq!(lock.uid_range(), Some((30000, 30000 + 65535)));
     }
 }

@@ -40,7 +40,13 @@ impl UserLock {
     }
 
     /// Get the UID range as (first, last) inclusive.
-    pub fn uid_range(&self) -> (u32, u32) {
-        (self.first_uid, self.first_uid + self.nr_ids - 1)
+    ///
+    /// Returns `None` when the lock holds zero IDs.
+    pub fn uid_range(&self) -> Option<(u32, u32)> {
+        if self.nr_ids == 0 {
+            None
+        } else {
+            Some((self.first_uid, self.first_uid + self.nr_ids - 1))
+        }
     }
 }
