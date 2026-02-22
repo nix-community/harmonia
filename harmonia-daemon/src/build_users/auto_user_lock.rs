@@ -70,11 +70,11 @@ pub fn acquire_auto_user_lock(
             Err((_, errno)) => return Err(errno.into()),             // Real error
         };
 
-        let first_uid = start_id + i * MAX_IDS_PER_BUILD;
+        let first_uid = Uid::from_raw(start_id + i * MAX_IDS_PER_BUILD);
 
         // Safety: reject UIDs that collide with real system users.
         // Matches Nix's `getpwuid(firstUid)` check in AutoUserLock::acquire.
-        if let Ok(Some(user)) = User::from_uid(Uid::from_raw(first_uid)) {
+        if let Ok(Some(user)) = User::from_uid(first_uid) {
             return Err(io::Error::new(
                 ErrorKind::AddrInUse,
                 format!(
@@ -87,7 +87,7 @@ pub fn acquire_auto_user_lock(
         return Ok(Some(UserLock {
             _fd: fd,
             first_uid,
-            first_gid: first_uid,
+            first_gid: nix::unistd::Gid::from_raw(first_uid.as_raw()),
             nr_ids,
             supplementary_gids: Vec::new(),
         }));
@@ -133,9 +133,9 @@ mod tests {
             .expect("slot 1");
 
         assert_ne!(lock1.uid(), lock2.uid());
-        assert_eq!(lock1.uid(), 30000);
-        assert_eq!(lock2.uid(), 30000 + MAX_IDS_PER_BUILD);
-        assert_eq!(lock1.gid(), lock1.uid());
+        assert_eq!(lock1.uid(), Uid::from_raw(30000));
+        assert_eq!(lock2.uid(), Uid::from_raw(30000 + MAX_IDS_PER_BUILD));
+        assert_eq!(lock1.gid().as_raw(), lock1.uid().as_raw());
     }
 
     #[test]
@@ -182,6 +182,9 @@ mod tests {
             .expect("slot 0");
 
         assert_eq!(lock.uid_count(), 65536);
-        assert_eq!(lock.uid_range(), Some((30000, 30000 + 65535)));
+        assert_eq!(
+            lock.uid_range(),
+            Some((Uid::from_raw(30000), Uid::from_raw(30000 + 65535)))
+        );
     }
 }

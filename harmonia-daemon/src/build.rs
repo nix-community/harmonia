@@ -34,6 +34,7 @@ use harmonia_utils_hash::fmt::CommonHash as _;
 use harmonia_utils_hash::{Algorithm, Context};
 
 use crate::canonicalize::canonicalize_path_metadata;
+use crate::config::SandboxConfig;
 use crate::export_references_graph::{check_output_constraints, write_export_references_graph};
 use crate::sandbox::Sandbox;
 
@@ -131,6 +132,7 @@ pub async fn build_derivation(
     drv: &BasicDerivation,
     mode: BuildMode,
     config: &BuildConfig,
+    sandbox_config: &SandboxConfig,
 ) -> DaemonResult<BuildResult> {
     let start_time = now_secs();
 
@@ -228,7 +230,16 @@ pub async fn build_derivation(
     let build_result = if let Some(builtin_name) = builder.strip_prefix("builtin:") {
         run_builtin_builder(builtin_name, drv, &env, &output_paths, store_dir).await
     } else {
-        execute_builder(builder, &args, &env, build_tmp.path(), config, &log_sink).await
+        spawn_and_monitor(
+            builder,
+            &args,
+            &env,
+            build_tmp.path(),
+            config,
+            sandbox_config,
+            &log_sink,
+        )
+        .await
     };
 
     // Flush / finalize the log file (important for bzip2 trailer)
@@ -748,25 +759,106 @@ pub enum BuildError {
     Other(String),
 }
 
-/// Execute the builder process, collecting log output.
+/// Create the appropriate sandbox, prepare it, spawn the builder, monitor
+/// the child process, and tear down the sandbox.
 ///
-/// Spawns the builder via `NoSandbox` (no isolation) and monitors
-/// it for completion, timeouts, and log output.
-async fn execute_builder(
+/// The sandbox lifecycle (prepare → spawn → teardown) is fully owned here
+/// so that the lock on the build user is held exactly for the duration of
+/// the build.
+async fn spawn_and_monitor(
     builder: &str,
     args: &[&str],
     env: &BTreeMap<String, String>,
     work_dir: &Path,
     config: &BuildConfig,
+    sandbox_config: &SandboxConfig,
     log_sink: &Arc<std::sync::Mutex<dyn Write + Send>>,
 ) -> Result<(), BuildError> {
-    let sandbox = crate::sandbox::NoSandbox::new();
-    let child = sandbox
-        .spawn(builder, args, env, work_dir)
-        .await
-        .map_err(|e| BuildError::Other(format!("Failed to spawn builder '{builder}': {e}")))?;
+    match sandbox_config {
+        SandboxConfig::Off => {
+            let mut sandbox = crate::sandbox::NoSandbox::new();
+            sandbox
+                .prepare()
+                .await
+                .map_err(|e| BuildError::Other(e.to_string()))?;
+            let child = sandbox
+                .spawn(builder, args, env, work_dir)
+                .await
+                .map_err(|e| {
+                    BuildError::Other(format!("Failed to spawn builder '{builder}': {e}"))
+                })?;
+            let result = monitor_child(child, config, log_sink).await;
+            let _ = sandbox.teardown().await;
+            result
+        }
+        #[cfg(target_os = "linux")]
+        SandboxConfig::On { pool_dir, .. } => {
+            use crate::linux_sandbox::{LinuxSandbox, LinuxSandboxConfig};
 
-    monitor_child(child, config, log_sink).await
+            let sandbox_cfg = LinuxSandboxConfig {
+                store_dir: PathBuf::from("/nix/store"),
+                build_dir: work_dir.to_path_buf(),
+                required_system_features: BTreeSet::new(),
+                extra_sandbox_paths: Vec::new(),
+                no_chroot: true, // no mount namespace yet
+            };
+
+            // On Linux we always use user namespaces.  When root,
+            // auto-allocate a build UID so concurrent builds are
+            // isolated from each other.  When not root, map the
+            // daemon's own UID into the sandbox.
+            let is_root = nix::unistd::getuid().is_root();
+            let mut sandbox = if is_root {
+                let start_id = 872_415_232; // 0x34000000, matching Nix auto-allocate-uids
+                let id_count = 64 * crate::build_users::MAX_IDS_PER_BUILD;
+                LinuxSandbox::new(sandbox_cfg, pool_dir.clone(), start_id, id_count)
+            } else {
+                LinuxSandbox::new_current_user(sandbox_cfg)
+            };
+            sandbox
+                .prepare()
+                .await
+                .map_err(|e| BuildError::Other(e.to_string()))?;
+
+            // When root, chown the build directory to the allocated
+            // build user so the builder can write to $TMPDIR.
+            // This matches nix-daemon's chownToBuilder(tmpDir).
+            if let Some(uid) = sandbox.build_uid() {
+                let lock = sandbox
+                    .user_lock()
+                    .expect("prepare() succeeded so lock exists");
+                let gid = lock.gid();
+                let work = work_dir.to_path_buf();
+                tokio::task::spawn_blocking(move || {
+                    nix::unistd::chown(&work, Some(uid), Some(gid))
+                })
+                .await
+                .map_err(|e| BuildError::Other(format!("spawn_blocking join: {e}")))?
+                .map_err(|e| BuildError::Other(format!("chown({}): {e}", work_dir.display())))?;
+            }
+
+            let child = sandbox
+                .spawn(builder, args, env, work_dir)
+                .await
+                .map_err(|e| {
+                    BuildError::Other(format!("Failed to spawn builder '{builder}': {e}"))
+                })?;
+            let result = monitor_child(child, config, log_sink).await;
+            let _ = sandbox.teardown().await;
+            result
+        }
+        #[cfg(not(target_os = "linux"))]
+        SandboxConfig::On { group_members, .. } if !group_members.is_empty() => {
+            // macOS: group-based sandbox (TODO: implement darwin sandbox)
+            Err(BuildError::Other(
+                "macOS sandbox not yet implemented".into(),
+            ))
+        }
+        #[cfg(not(target_os = "linux"))]
+        SandboxConfig::On { .. } => Err(BuildError::Other(
+            "sandbox on macOS requires build_users_group to be set".into(),
+        )),
+    }
 }
 
 /// Monitor a sandbox child process: drain stdout/stderr to a log sink,
@@ -812,6 +904,7 @@ pub(crate) async fn monitor_child(
             let mut reader = tokio::io::BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
                 *last_err.lock().unwrap() = tokio::time::Instant::now();
+                tracing::debug!(target: "builder", "{line}");
                 let mut sink = sink_err.lock().unwrap();
                 let _ = writeln!(sink, "{line}");
             }
