@@ -10,7 +10,7 @@
 mod auto_user_lock;
 mod simple_user_lock;
 
-pub use auto_user_lock::{acquire_auto_user_lock, auto_pool_dir};
+pub use auto_user_lock::{MAX_IDS_PER_BUILD, acquire_auto_user_lock, auto_pool_dir};
 pub use simple_user_lock::{acquire_simple_user_lock, simple_pool_dir};
 
 use std::fs;

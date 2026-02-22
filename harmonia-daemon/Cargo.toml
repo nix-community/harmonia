@@ -21,7 +21,7 @@ bytes = { workspace = true }
 libc = "0.2"
 serde_json = { workspace = true }
 tempfile = { workspace = true }
-nix = { version = "0.31", features = ["user", "fs"] }
+nix = { version = "0.31", features = ["user", "fs", "sched", "mount"] }
 tokio = { workspace = true, features = ["process"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
