@@ -7,6 +7,7 @@ pub mod darwin_sandbox;
 pub mod error;
 pub mod handler;
 pub mod pathlocks;
+pub mod scheduler;
 pub mod server;
 
 #[cfg(test)]
