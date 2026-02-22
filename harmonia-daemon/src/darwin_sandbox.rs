@@ -184,6 +184,7 @@ pub fn generate_sandbox_profile(
     output_paths: &[PathBuf],
     allow_network: bool,
     use_sandbox: bool,
+    store_dir: &Path,
     additional_profile: &str,
 ) -> String {
     let mut profile = "(version 1)\n".to_string();
@@ -247,6 +248,20 @@ pub fn generate_sandbox_profile(
                 break;
             }
             cur = parent.to_path_buf();
+        }
+    }
+
+    // Nix explicitly adds the store directory and its ancestors so that
+    // realpath() works even when input_paths is empty. Include the store
+    // dir itself (e.g. /nix/store) plus all parents up to /.
+    {
+        let mut cur = store_dir.to_path_buf();
+        loop {
+            ancestry.insert(cur.clone());
+            match cur.parent() {
+                Some(parent) if parent != cur => cur = parent.to_path_buf(),
+                _ => break,
+            }
         }
     }
 
@@ -363,12 +378,13 @@ mod tests {
     /// Sandboxed profile uses `(deny default)`, minimal uses `(allow default)`.
     #[test]
     fn test_sandbox_vs_minimal_profile() {
-        let sandboxed = generate_sandbox_profile(&[], &[], false, true, "");
+        let sandboxed =
+            generate_sandbox_profile(&[], &[], false, true, Path::new("/nix/store"), "");
         assert!(sandboxed.contains("(deny default)"));
         // Should not contain the unconditional full network access from SANDBOX_NETWORK
         assert!(!sandboxed.contains("(allow network* (local ip) (remote ip))"));
 
-        let minimal = generate_sandbox_profile(&[], &[], false, false, "");
+        let minimal = generate_sandbox_profile(&[], &[], false, false, Path::new("/nix/store"), "");
         assert!(minimal.contains("(allow default)"));
         assert!(minimal.contains("(deny file-write-setugid)"));
     }
@@ -376,11 +392,11 @@ mod tests {
     /// Fixed-output derivations get network access rules.
     #[test]
     fn test_network_access_for_fixed_output() {
-        let without = generate_sandbox_profile(&[], &[], false, true, "");
+        let without = generate_sandbox_profile(&[], &[], false, true, Path::new("/nix/store"), "");
         // Should not contain the unconditional full network access from SANDBOX_NETWORK
         assert!(!without.contains("(allow network* (local ip) (remote ip))"));
 
-        let with = generate_sandbox_profile(&[], &[], true, true, "");
+        let with = generate_sandbox_profile(&[], &[], true, true, Path::new("/nix/store"), "");
         assert!(with.contains("(allow network* (local ip) (remote ip))"));
         assert!(with.contains("mDNSResponder"));
     }
@@ -389,7 +405,7 @@ mod tests {
     /// which would grant unrestricted access.
     #[test]
     fn test_no_empty_allow_groups() {
-        let profile = generate_sandbox_profile(&[], &[], false, true, "");
+        let profile = generate_sandbox_profile(&[], &[], false, true, Path::new("/nix/store"), "");
         // Should NOT contain "(allow file-read* file-write* process-exec\n)"
         // with no subpath/literal entries — that would allow all writes.
         assert!(
@@ -408,8 +424,14 @@ mod tests {
         let file_path = tmp.path().join("some_file");
         std::fs::write(&file_path, "x").unwrap();
 
-        let profile =
-            generate_sandbox_profile(&[dir_path.clone(), file_path.clone()], &[], false, true, "");
+        let profile = generate_sandbox_profile(
+            &[dir_path.clone(), file_path.clone()],
+            &[],
+            false,
+            true,
+            Path::new("/nix/store"),
+            "",
+        );
 
         assert!(
             profile.contains(&format!("(subpath \"{}\")", dir_path.display())),
@@ -424,6 +446,15 @@ mod tests {
             profile.contains(&format!("(literal \"{}\")", tmp.path().display())),
             "Ancestor directories should get file-read* (literal ...)"
         );
+        // Store dir ancestry is always included so realpath() works
+        assert!(
+            profile.contains("(literal \"/nix\")"),
+            "Store dir ancestry must include /nix"
+        );
+        assert!(
+            profile.contains("(literal \"/\")"),
+            "Store dir ancestry must include /"
+        );
     }
 
     /// Nix's sandbox-defaults.sb has a conditional `_ALLOW_LOCAL_NETWORKING`
@@ -432,7 +463,7 @@ mod tests {
     /// value controls activation at runtime.
     #[test]
     fn test_sandbox_defaults_has_local_networking_conditional() {
-        let profile = generate_sandbox_profile(&[], &[], false, true, "");
+        let profile = generate_sandbox_profile(&[], &[], false, true, Path::new("/nix/store"), "");
         assert!(
             profile.contains(r#"(if (param "_ALLOW_LOCAL_NETWORKING")"#),
             "Profile must contain the _ALLOW_LOCAL_NETWORKING conditional block"
@@ -447,7 +478,8 @@ mod tests {
     #[test]
     fn test_additional_profile() {
         let extra = "(allow mach-lookup (global-name \"com.example.test\"))\n";
-        let profile = generate_sandbox_profile(&[], &[], false, true, extra);
+        let profile =
+            generate_sandbox_profile(&[], &[], false, true, Path::new("/nix/store"), extra);
         assert!(profile.contains(extra));
     }
 
@@ -499,7 +531,8 @@ mod tests {
         .filter(|p| p.exists())
         .collect();
 
-        let profile = generate_sandbox_profile(&input_paths, &[], false, true, "");
+        let profile =
+            generate_sandbox_profile(&input_paths, &[], false, true, Path::new("/nix/store"), "");
 
         // Single script: write to build dir (proves sandbox is active),
         // then attempt write to blocked dir (should fail).
