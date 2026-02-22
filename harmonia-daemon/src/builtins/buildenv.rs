@@ -42,41 +42,50 @@ pub(crate) fn builtin_buildenv(
     })?;
 
     // Simple implementation: create symlinks for each package's top-level entries
-    if let Some(pkgs) = manifest_json.as_array() {
-        for pkg in pkgs {
-            if let Some(paths) = pkg.get("paths").and_then(|p| p.as_array()) {
-                for path_val in paths {
-                    if let Some(pkg_path) = path_val.as_str() {
-                        let pkg_dir = PathBuf::from(pkg_path);
-                        if pkg_dir.is_dir() {
-                            // Symlink each entry in the package dir into the output
-                            let entries = std::fs::read_dir(&pkg_dir).map_err(|e| {
-                                BuildError::Other(format!(
-                                    "builtin:buildenv: failed to read dir {}: {e}",
-                                    pkg_dir.display()
-                                ))
-                            })?;
-                            for entry in entries {
-                                let entry = entry.map_err(|e| {
-                                    BuildError::Other(format!(
-                                        "builtin:buildenv: failed to read entry in {}: {e}",
-                                        pkg_dir.display()
-                                    ))
-                                })?;
-                                let name = entry.file_name();
-                                let link = dest.join(&name);
-                                if !link.exists() {
-                                    std::os::unix::fs::symlink(entry.path(), &link)
-                                        .map_err(|e| {
-                                            BuildError::Other(format!(
-                                                "builtin:buildenv: failed to symlink {} -> {}: {e}",
-                                                link.display(),
-                                                entry.path().display()
-                                            ))
-                                        })?;
-                                }
-                            }
-                        }
+    let pkgs = manifest_json.as_array().ok_or_else(|| {
+        BuildError::Other(format!(
+            "builtin:buildenv: manifest must be a JSON array, got: {}",
+            manifest_json
+        ))
+    })?;
+    for (i, pkg) in pkgs.iter().enumerate() {
+        let paths = pkg.get("paths").and_then(|p| p.as_array()).ok_or_else(|| {
+            BuildError::Other(format!(
+                "builtin:buildenv: package {i} missing 'paths' array: {pkg}",
+            ))
+        })?;
+        for path_val in paths {
+            let pkg_path = path_val.as_str().ok_or_else(|| {
+                BuildError::Other(format!(
+                    "builtin:buildenv: path entry must be a string, got: {path_val}",
+                ))
+            })?;
+            let pkg_dir = PathBuf::from(pkg_path);
+            if pkg_dir.is_dir() {
+                // Symlink each entry in the package dir into the output
+                let entries = std::fs::read_dir(&pkg_dir).map_err(|e| {
+                    BuildError::Other(format!(
+                        "builtin:buildenv: failed to read dir {}: {e}",
+                        pkg_dir.display()
+                    ))
+                })?;
+                for entry in entries {
+                    let entry = entry.map_err(|e| {
+                        BuildError::Other(format!(
+                            "builtin:buildenv: failed to read entry in {}: {e}",
+                            pkg_dir.display()
+                        ))
+                    })?;
+                    let name = entry.file_name();
+                    let link = dest.join(&name);
+                    if !link.exists() {
+                        std::os::unix::fs::symlink(entry.path(), &link).map_err(|e| {
+                            BuildError::Other(format!(
+                                "builtin:buildenv: failed to symlink {} -> {}: {e}",
+                                link.display(),
+                                entry.path().display()
+                            ))
+                        })?;
                     }
                 }
             }
