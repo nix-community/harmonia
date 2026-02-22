@@ -27,7 +27,7 @@ use harmonia_protocol::build_result::{
 use harmonia_protocol::daemon::DaemonError as ProtocolError;
 use harmonia_protocol::daemon::DaemonResult;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
-use harmonia_store_core::derivation::BasicDerivation;
+use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput};
 use harmonia_store_core::derived_path::OutputName;
 use harmonia_store_core::references::RefScanSink;
 use harmonia_store_core::store_path::{StoreDir, StorePath};
@@ -507,11 +507,8 @@ fn build_environment(
         // Individual derivation env vars are NOT set — the builder reads
         // everything from the JSON file.
         let json = prepare_structured_attrs(drv, store_dir, output_paths);
-        let json_str = serde_json::to_string(&json).map_err(|e| {
-            std::io::Error::other(
-                format!("JSON serialization: {e}"),
-            )
-        })?;
+        let json_str = serde_json::to_string(&json)
+            .map_err(|e| std::io::Error::other(format!("JSON serialization: {e}")))?;
         let json_path = build_dir.join(".attrs.json");
         std::fs::write(&json_path, &json_str)?;
         env.insert(
@@ -577,11 +574,38 @@ fn build_environment(
     }
     env.insert("outputs".into(), output_names.join(" "));
 
-    // Phase 4: final system vars (cannot be overridden)
+    // Phase 4: fixed-output derivation env vars
+    if is_fixed_output(drv) {
+        env.insert("NIX_OUTPUT_CHECKED".into(), "1".into());
+        // Propagate impure env vars from the process environment
+        // (e.g., http_proxy for fetchurl)
+        if let Some(impure_vars) = drv.env.get(b"impureEnvVars".as_ref()) {
+            let var_names = String::from_utf8_lossy(impure_vars);
+            for var_name in var_names.split_whitespace() {
+                if let Ok(val) = std::env::var(var_name) {
+                    env.insert(var_name.to_string(), val);
+                }
+            }
+        }
+    }
+
+    // Phase 5: final system vars (cannot be overridden)
     env.insert("NIX_LOG_FD".into(), "2".into());
     env.insert("TERM".into(), "xterm-256color".into());
 
     Ok(env)
+}
+
+/// Check if a derivation is a fixed-output derivation.
+///
+/// A fixed-output derivation has exactly one output and that output is `CAFixed`.
+fn is_fixed_output(drv: &BasicDerivation) -> bool {
+    drv.outputs.len() == 1
+        && drv
+            .outputs
+            .values()
+            .next()
+            .is_some_and(|o| matches!(o, DerivationOutput::CAFixed(_)))
 }
 
 /// Build the JSON object for `.attrs.json` in structured attrs mode.
