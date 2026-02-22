@@ -60,6 +60,10 @@ pub struct BuildConfig {
     /// Logs are stored as `{log_dir}/drvs/{hash[0:2]}/{hash[2:]}.bz2`.
     /// Set to `None` to disable log persistence (useful in tests).
     pub log_dir: Option<PathBuf>,
+    /// Allowed prefixes for `impureHostDeps` (macOS).
+    /// Paths in `__impureHostDeps` must start with one of these prefixes
+    /// to be included in the sandbox.
+    pub allowed_impure_host_deps: Vec<PathBuf>,
 }
 
 impl Default for BuildConfig {
@@ -73,6 +77,10 @@ impl Default for BuildConfig {
                 .unwrap_or(1),
             build_dir: PathBuf::from(DEFAULT_BUILD_DIR),
             log_dir: Some(PathBuf::from(DEFAULT_LOG_DIR)),
+            allowed_impure_host_deps: vec![
+                PathBuf::from("/usr/lib"),
+                PathBuf::from("/System/Library"),
+            ],
         }
     }
 }
@@ -166,6 +174,16 @@ pub async fn build_derivation(
                 config.build_dir.display()
             ))
         })?;
+
+    // Validate impure host deps (macOS) — fail early if not allowed
+    if let Err(msg) = validate_impure_host_deps(drv, config) {
+        return Ok(make_failure(
+            FailureStatus::MiscFailure,
+            msg,
+            start_time,
+            now_secs(),
+        ));
+    }
 
     // Build environment variables (includes passAsFile handling which writes files)
     let env = build_environment(store_dir, drv, build_tmp.path(), &output_paths, config)
@@ -606,6 +624,56 @@ fn is_fixed_output(drv: &BasicDerivation) -> bool {
             .values()
             .next()
             .is_some_and(|o| matches!(o, DerivationOutput::CAFixed(_)))
+}
+
+/// Validate and collect impure host deps from a derivation.
+///
+/// Returns the list of allowed host deps as `(path, optional)` pairs, where
+/// `optional` is true (missing paths are tolerated). Returns an error if any
+/// path is not within the allowed prefixes.
+///
+/// On non-macOS platforms, this is a no-op (impureHostDeps are macOS-specific).
+pub fn validate_impure_host_deps(
+    drv: &BasicDerivation,
+    config: &BuildConfig,
+) -> Result<Vec<(PathBuf, bool)>, String> {
+    let mut result = Vec::new();
+
+    // Collect deps from env or structured attrs
+    let deps: Vec<String> = if let Some(val) = drv.env.get(b"__impureHostDeps".as_ref()) {
+        String::from_utf8_lossy(val)
+            .split_whitespace()
+            .map(String::from)
+            .collect()
+    } else if let Some(sa) = &drv.structured_attrs {
+        if let Some(serde_json::Value::Array(arr)) = sa.attrs.get("__impureHostDeps") {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    for dep in deps {
+        let dep_path = PathBuf::from(&dep);
+        let allowed = config
+            .allowed_impure_host_deps
+            .iter()
+            .any(|prefix| dep_path.starts_with(prefix));
+        if !allowed {
+            return Err(format!(
+                "impure host dep '{}' is not within any allowed prefix ({:?})",
+                dep, config.allowed_impure_host_deps
+            ));
+        }
+        // All impure host deps are optional (missing is tolerated)
+        result.push((dep_path, true));
+    }
+
+    Ok(result)
 }
 
 /// Build the JSON object for `.attrs.json` in structured attrs mode.
