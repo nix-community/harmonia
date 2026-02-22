@@ -202,9 +202,12 @@ pub async fn build_derivation(
         }
     };
 
-    // Execute the builder process
-    let build_result =
-        execute_builder(builder, &args, &env, build_tmp.path(), config, &log_sink).await;
+    // Dispatch to builtin builder or external process
+    let build_result = if let Some(builtin_name) = builder.strip_prefix("builtin:") {
+        run_builtin_builder(builtin_name, drv, &env, &output_paths, store_dir).await
+    } else {
+        execute_builder(builder, &args, &env, build_tmp.path(), config, &log_sink).await
+    };
 
     // Flush / finalize the log file (important for bzip2 trailer)
     drop(log_sink);
@@ -598,8 +601,41 @@ fn prepare_structured_attrs(
     json
 }
 
+/// Dispatch to a builtin builder.
+///
+/// Builtin builders run in-process instead of spawning an external process.
+/// They are identified by `builder = "builtin:<name>"` in the derivation.
+async fn run_builtin_builder(
+    name: &str,
+    drv: &BasicDerivation,
+    env: &BTreeMap<String, String>,
+    output_paths: &[(OutputName, StorePath)],
+    store_dir: &StoreDir,
+) -> Result<(), BuildError> {
+    match name {
+        "fetchurl" => {
+            crate::builtins::fetchurl::builtin_fetchurl(drv, env, output_paths, store_dir).await
+        }
+        "buildenv" => {
+            crate::builtins::buildenv::builtin_buildenv(drv, env, output_paths, store_dir).await
+        }
+        "unpack-channel" => {
+            crate::builtins::unpack_channel::builtin_unpack_channel(
+                drv,
+                env,
+                output_paths,
+                store_dir,
+            )
+            .await
+        }
+        _ => Err(BuildError::Other(format!(
+            "unsupported builtin builder 'builtin:{name}'"
+        ))),
+    }
+}
+
 /// Errors from builder execution.
-enum BuildError {
+pub enum BuildError {
     Timeout,
     ExitCode(i32),
     Other(String),
