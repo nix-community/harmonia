@@ -1,8 +1,8 @@
 pub mod build;
 pub mod builtins;
 pub mod canonicalize;
-pub mod export_references_graph;
 pub mod config;
+pub mod darwin_sandbox;
 pub mod error;
 pub mod handler;
 pub mod pathlocks;
