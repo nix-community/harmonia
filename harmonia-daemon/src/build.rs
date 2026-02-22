@@ -211,41 +211,45 @@ pub async fn build_derivation(
 
     let stop_time = now_secs();
 
-    match build_result {
-        Err(BuildError::Timeout) => Ok(make_failure(
+    // Convert build errors to failure descriptions; on success hand off to
+    // process_build_success which registers outputs.
+    let failure = match build_result {
+        Err(BuildError::Timeout) => Some(make_failure(
             FailureStatus::TimedOut,
             "build timed out".to_string(),
             start_time,
             stop_time,
         )),
-        Err(BuildError::ExitCode(code)) => {
-            cleanup_outputs(store_dir, &output_paths, config.keep_failed).await;
-            Ok(make_failure(
-                FailureStatus::MiscFailure,
-                format!("builder for '{}' failed with exit code {}", drv_path, code),
-                start_time,
-                stop_time,
-            ))
-        }
-        Err(BuildError::Other(msg)) => Ok(make_failure(
+        Err(BuildError::ExitCode(code)) => Some(make_failure(
+            FailureStatus::MiscFailure,
+            format!("builder for '{}' failed with exit code {}", drv_path, code),
+            start_time,
+            stop_time,
+        )),
+        Err(BuildError::Other(msg)) => Some(make_failure(
             FailureStatus::MiscFailure,
             msg,
             start_time,
             stop_time,
         )),
-        Ok(()) => {
-            process_build_success(
-                store_dir,
-                db,
-                drv_path,
-                drv,
-                mode,
-                &output_paths,
-                (start_time, stop_time),
-            )
-            .await
-        }
+        Ok(()) => None,
+    };
+
+    if let Some(result) = failure {
+        cleanup_outputs(store_dir, &output_paths, config.keep_failed).await;
+        return Ok(result);
     }
+
+    process_build_success(
+        store_dir,
+        db,
+        drv_path,
+        drv,
+        mode,
+        &output_paths,
+        (start_time, stop_time),
+    )
+    .await
 }
 
 /// After a successful builder exit, canonicalize outputs, scan references,
@@ -879,7 +883,7 @@ fn make_failure(
         inner: BuildResultInner::Failure(BuildResultFailure {
             status,
             error_msg: error_msg.into(),
-            is_non_deterministic: false,
+            is_non_deterministic: status == FailureStatus::NotDeterministic,
         }),
         times_built: 0,
         start_time,
