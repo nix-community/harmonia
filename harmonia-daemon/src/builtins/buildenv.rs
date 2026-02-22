@@ -50,13 +50,30 @@ pub(crate) async fn builtin_buildenv(
                         let pkg_dir = PathBuf::from(pkg_path);
                         if pkg_dir.is_dir() {
                             // Symlink each entry in the package dir into the output
-                            if let Ok(entries) = std::fs::read_dir(&pkg_dir) {
-                                for entry in entries.flatten() {
-                                    let name = entry.file_name();
-                                    let link = dest.join(&name);
-                                    if !link.exists() {
-                                        let _ = std::os::unix::fs::symlink(entry.path(), &link);
-                                    }
+                            let entries = std::fs::read_dir(&pkg_dir).map_err(|e| {
+                                BuildError::Other(format!(
+                                    "builtin:buildenv: failed to read dir {}: {e}",
+                                    pkg_dir.display()
+                                ))
+                            })?;
+                            for entry in entries {
+                                let entry = entry.map_err(|e| {
+                                    BuildError::Other(format!(
+                                        "builtin:buildenv: failed to read entry in {}: {e}",
+                                        pkg_dir.display()
+                                    ))
+                                })?;
+                                let name = entry.file_name();
+                                let link = dest.join(&name);
+                                if !link.exists() {
+                                    std::os::unix::fs::symlink(entry.path(), &link)
+                                        .map_err(|e| {
+                                            BuildError::Other(format!(
+                                                "builtin:buildenv: failed to symlink {} -> {}: {e}",
+                                                link.display(),
+                                                entry.path().display()
+                                            ))
+                                        })?;
                                 }
                             }
                         }
