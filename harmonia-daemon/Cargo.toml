@@ -16,6 +16,7 @@ harmonia-store-db = { version = "3.0.0" }
 harmonia-nar = { version = "3.0.0" }
 harmonia-protocol = { version = "3.0.0" }
 bzip2 = "0.6"
+compress-tools = "0.15"
 bytes = { workspace = true }
 libc = "0.2"
 serde_json = { workspace = true }

@@ -31,7 +31,7 @@ dependencies = [
  "actix-web",
  "bitflags",
  "bytes",
- "derive_more",
+ "derive_more 2.1.1",
  "futures-core",
  "http-range",
  "log",
@@ -56,7 +56,7 @@ dependencies = [
  "bitflags",
  "bytes",
  "bytestring",
- "derive_more",
+ "derive_more 2.1.1",
  "encoding_rs",
  "foldhash 0.1.5",
  "futures-core",
@@ -186,7 +186,7 @@ dependencies = [
  "bytestring",
  "cfg-if",
  "cookie",
- "derive_more",
+ "derive_more 2.1.1",
  "encoding_rs",
  "foldhash 0.1.5",
  "futures-core",
@@ -522,6 +522,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "compress-tools"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecbcea9a172acabd98f272919faf0b1830a2ccec90d518d67c5eb13742e769a7"
+dependencies = [
+ "derive_more 0.99.20",
+ "libc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "compression-codecs"
 version = "0.4.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -689,6 +701,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "structmeta",
+ "syn",
+]
+
+[[package]]
+name = "derive_more"
+version = "0.99.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
+dependencies = [
+ "proc-macro2",
+ "quote",
  "syn",
 ]
 
@@ -1045,6 +1068,7 @@ version = "3.0.0"
 dependencies = [
  "bytes",
  "bzip2",
+ "compress-tools",
  "futures",
  "harmonia-nar",
  "harmonia-protocol",
@@ -1074,7 +1098,7 @@ version = "3.0.0"
 dependencies = [
  "bstr",
  "bytes",
- "derive_more",
+ "derive_more 2.1.1",
  "futures",
  "harmonia-utils-io",
  "harmonia-utils-test",
@@ -1100,7 +1124,7 @@ dependencies = [
  "async-stream",
  "bstr",
  "bytes",
- "derive_more",
+ "derive_more 2.1.1",
  "futures",
  "harmonia-nar",
  "harmonia-protocol-derive",
@@ -1147,7 +1171,7 @@ version = "0.0.0-alpha.0"
 dependencies = [
  "bytes",
  "data-encoding",
- "derive_more",
+ "derive_more 2.1.1",
  "futures",
  "harmonia-nar",
  "harmonia-utils-base-encoding",
@@ -1204,7 +1228,7 @@ name = "harmonia-utils-base-encoding"
 version = "0.0.0-alpha.0"
 dependencies = [
  "data-encoding",
- "derive_more",
+ "derive_more 2.1.1",
  "hex-literal",
  "proptest",
  "rstest",
@@ -1217,7 +1241,7 @@ name = "harmonia-utils-hash"
 version = "0.0.0-alpha.0"
 dependencies = [
  "data-encoding",
- "derive_more",
+ "derive_more 2.1.1",
  "harmonia-utils-base-encoding",
  "hex-literal",
  "md5",
