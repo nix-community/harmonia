@@ -13,7 +13,7 @@ use harmonia_store_core::derivation::{
     BasicDerivation, DerivationOutput, DerivationT, StructuredAttrs,
 };
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_core::store_path::{ContentAddress, StorePath};
 
 use super::test_store::TestStore;
 
@@ -1143,4 +1143,245 @@ async fn test_build_derivation_structured_attrs_outputs() {
         dev_val.contains(&dev_path.to_string()),
         "outputs.dev should contain the dev store path, got: {dev_val}"
     );
+}
+
+/// Fixed-output derivation → builder sees `NIX_OUTPUT_CHECKED=1`.
+#[tokio::test]
+async fn test_build_derivation_fixed_output_env() {
+    let ts = TestStore::new();
+
+    // Create a fixed-output derivation using CAFixed
+    let ca: ContentAddress =
+        "fixed:sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+            .parse()
+            .unwrap();
+    let output = DerivationOutput::CAFixed(ca);
+
+    // Compute the output path for this fixed-output derivation
+    let output_path = output
+        .path(
+            &ts.store_dir,
+            &"fo-test".parse().unwrap(),
+            &OutputName::default(),
+        )
+        .unwrap()
+        .expect("CAFixed should produce a known output path");
+
+    let drv_path =
+        StorePath::from_base_path("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fo-test.drv").unwrap();
+
+    let mut outputs = BTreeMap::new();
+    outputs.insert(OutputName::default(), output);
+
+    // The builder checks for NIX_OUTPUT_CHECKED and writes it to $out
+    let script = r#"
+        printf 'NIX_OUTPUT_CHECKED=%s\n' "$NIX_OUTPUT_CHECKED" > "$out"
+    "#;
+
+    let drv = DerivationT {
+        name: "fo-test".parse().unwrap(),
+        outputs,
+        inputs: BTreeSet::new(),
+        platform: "x86_64-linux".into(),
+        builder: "/bin/sh".into(),
+        args: vec!["-c".into(), script.into()],
+        env: BTreeMap::new(),
+        structured_attrs: None,
+    };
+
+    let config = crate::build::BuildConfig {
+        build_dir: ts.build_dir(),
+        log_dir: None,
+        ..Default::default()
+    };
+
+    let result = crate::build::build_derivation(
+        &ts.store_dir,
+        &ts.db,
+        &drv_path,
+        &drv,
+        BuildMode::Normal,
+        &config,
+    )
+    .await
+    .unwrap();
+
+    match &result.inner {
+        BuildResultInner::Failure(f) => {
+            panic!(
+                "Expected success, got failure: {:?} - {}",
+                f.status,
+                String::from_utf8_lossy(&f.error_msg)
+            );
+        }
+        BuildResultInner::Success(_) => {}
+    }
+
+    let disk_path = ts.store_path().join(output_path.to_string());
+    let content = std::fs::read_to_string(&disk_path).unwrap();
+    let env_map: BTreeMap<&str, &str> = content
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .collect();
+
+    assert_eq!(
+        env_map.get("NIX_OUTPUT_CHECKED"),
+        Some(&"1"),
+        "Fixed-output derivation should have NIX_OUTPUT_CHECKED=1"
+    );
+}
+
+/// `impureHostDeps = ["/usr/lib/libSystem.B.dylib"]` with `/usr/lib` in allowed prefixes
+/// → path appears in sandbox path list as optional.
+#[test]
+fn test_impure_host_deps_allowed() {
+    let mut outputs = BTreeMap::new();
+    outputs.insert(
+        OutputName::default(),
+        DerivationOutput::InputAddressed(
+            StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-dummy").unwrap(),
+        ),
+    );
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "__impureHostDeps".into(),
+        "/usr/lib/libSystem.B.dylib".into(),
+    );
+
+    let drv = DerivationT {
+        name: "hostdep-test".parse().unwrap(),
+        outputs,
+        inputs: BTreeSet::new(),
+        platform: "x86_64-darwin".into(),
+        builder: "/bin/sh".into(),
+        args: vec![],
+        env,
+        structured_attrs: None,
+    };
+
+    let config = crate::build::BuildConfig {
+        allowed_impure_host_deps: vec![
+            std::path::PathBuf::from("/usr/lib"),
+            std::path::PathBuf::from("/System/Library"),
+        ],
+        ..Default::default()
+    };
+
+    let result = crate::build::validate_impure_host_deps(&drv, &config);
+    let deps = result.expect("Allowed impure host dep should succeed");
+    assert_eq!(deps.len(), 1);
+    assert_eq!(
+        deps[0].0,
+        std::path::PathBuf::from("/usr/lib/libSystem.B.dylib")
+    );
+    assert!(deps[0].1, "Impure host deps should be optional");
+}
+
+/// `impureHostDeps` path not within allowed prefixes → build fails with error.
+#[test]
+fn test_impure_host_deps_disallowed() {
+    let mut outputs = BTreeMap::new();
+    outputs.insert(
+        OutputName::default(),
+        DerivationOutput::InputAddressed(
+            StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-dummy2").unwrap(),
+        ),
+    );
+
+    let mut env = BTreeMap::new();
+    env.insert("__impureHostDeps".into(), "/etc/shadow".into());
+
+    let drv = DerivationT {
+        name: "hostdep-bad".parse().unwrap(),
+        outputs,
+        inputs: BTreeSet::new(),
+        platform: "x86_64-darwin".into(),
+        builder: "/bin/sh".into(),
+        args: vec![],
+        env,
+        structured_attrs: None,
+    };
+
+    let config = crate::build::BuildConfig {
+        allowed_impure_host_deps: vec![
+            std::path::PathBuf::from("/usr/lib"),
+            std::path::PathBuf::from("/System/Library"),
+        ],
+        ..Default::default()
+    };
+
+    let result = crate::build::validate_impure_host_deps(&drv, &config);
+    assert!(
+        result.is_err(),
+        "Disallowed impure host dep should fail: {result:?}"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("/etc/shadow"),
+        "Error should mention the disallowed path: {err}"
+    );
+    assert!(
+        err.contains("not within any allowed prefix"),
+        "Error should explain why: {err}"
+    );
+}
+
+/// `builtin:nonexistent` → build fails with unsupported builtin error.
+#[tokio::test]
+async fn test_builtin_nonexistent() {
+    let ts = TestStore::new();
+
+    let output_path =
+        StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-badbuiltin").unwrap();
+    let drv_path =
+        StorePath::from_base_path("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-badbuiltin.drv").unwrap();
+
+    let mut outputs = BTreeMap::new();
+    outputs.insert(
+        OutputName::default(),
+        DerivationOutput::InputAddressed(output_path.clone()),
+    );
+
+    let drv = DerivationT {
+        name: "badbuiltin".parse().unwrap(),
+        outputs,
+        inputs: BTreeSet::new(),
+        platform: "x86_64-linux".into(),
+        builder: "builtin:nonexistent".into(),
+        args: vec![],
+        env: BTreeMap::new(),
+        structured_attrs: None,
+    };
+
+    let config = crate::build::BuildConfig {
+        build_dir: ts.build_dir(),
+        log_dir: None,
+        ..Default::default()
+    };
+
+    let result = crate::build::build_derivation(
+        &ts.store_dir,
+        &ts.db,
+        &drv_path,
+        &drv,
+        BuildMode::Normal,
+        &config,
+    )
+    .await
+    .unwrap();
+
+    match &result.inner {
+        BuildResultInner::Failure(f) => {
+            assert_eq!(f.status, FailureStatus::MiscFailure);
+            let msg = String::from_utf8_lossy(&f.error_msg);
+            assert!(
+                msg.contains("unsupported builtin"),
+                "Error should mention unsupported builtin: {msg}"
+            );
+        }
+        BuildResultInner::Success(_) => {
+            panic!("Expected failure for nonexistent builtin, got success");
+        }
+    }
 }
