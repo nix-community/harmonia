@@ -35,6 +35,7 @@ use harmonia_utils_hash::fmt::CommonHash as _;
 use harmonia_utils_hash::{Algorithm, Context};
 
 use crate::canonicalize::canonicalize_path_metadata;
+use crate::export_references_graph::{check_output_constraints, write_export_references_graph};
 
 /// Default parent directory for build sandboxes, matching upstream Nix.
 pub const DEFAULT_BUILD_DIR: &str = "/nix/var/nix/builds";
@@ -169,6 +170,9 @@ pub async fn build_derivation(
     // Build environment variables (includes passAsFile handling which writes files)
     let env = build_environment(store_dir, drv, build_tmp.path(), &output_paths, config)
         .map_err(|e| ProtocolError::custom(format!("Failed to set up build environment: {e}")))?;
+
+    // Write exportReferencesGraph files to the build dir
+    write_export_references_graph(store_dir, db, drv, build_tmp.path()).await?;
 
     // Extract builder path and args
     let builder = std::str::from_utf8(&drv.builder)
@@ -305,6 +309,17 @@ async fn process_build_success(
             nar_size,
             references,
         });
+    }
+
+    // Validate output reference constraints before registering
+    if let Err(msg) = check_output_constraints(store_dir, db, drv, &built_outputs).await {
+        cleanup_outputs(store_dir, output_paths, false).await;
+        return Ok(make_failure(
+            FailureStatus::OutputRejected,
+            msg,
+            start_time,
+            stop_time,
+        ));
     }
 
     // Register all outputs in the database (repair mode deletes existing entries first)
