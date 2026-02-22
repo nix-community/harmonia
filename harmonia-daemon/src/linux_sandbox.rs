@@ -227,7 +227,9 @@ impl Sandbox for LinuxSandbox {
             .env_clear()
             .envs(env.iter())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // Place builder in its own process group for clean kill-on-timeout
+            .process_group(0);
 
         match &self.user_source {
             UserSource::Auto { .. } => {

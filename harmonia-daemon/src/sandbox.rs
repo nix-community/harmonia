@@ -95,12 +95,12 @@ impl SandboxChild {
     }
 
     /// Take stdout for reading (can only be called once).
-    pub fn take_stdout(&mut self) -> Option<impl tokio::io::AsyncRead + Send + Unpin + '_> {
+    pub fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
         self.inner.stdout.take()
     }
 
     /// Take stderr for reading (can only be called once).
-    pub fn take_stderr(&mut self) -> Option<impl tokio::io::AsyncRead + Send + Unpin + '_> {
+    pub fn take_stderr(&mut self) -> Option<tokio::process::ChildStderr> {
         self.inner.stderr.take()
     }
 
@@ -149,7 +149,9 @@ impl Sandbox for NoSandbox {
             .env_clear()
             .envs(env.iter())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // Place builder in its own process group for clean kill-on-timeout
+            .process_group(0);
 
         let child = cmd
             .spawn()
