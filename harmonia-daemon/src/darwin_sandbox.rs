@@ -24,8 +24,6 @@ use std::path::{Path, PathBuf};
 const SANDBOX_DEFAULTS: &str = r#"
 (define TMPDIR (param "_GLOBAL_TMP_DIR"))
 
-(deny default)
-
 ; Disallow creating setuid/setgid binaries, since that
 ; would allow breaking build user isolation.
 (deny file-write-setugid)
@@ -167,18 +165,13 @@ const SANDBOX_MINIMAL: &str = r#"
 /// Build a complete sandbox profile string for a derivation.
 ///
 /// Matches Nix's `DarwinDerivationBuilder::setUser()` profile construction:
-/// - `(deny default)` baseline with `SANDBOX_DEFAULTS`
+/// - `(deny default (with no-log))` baseline
+/// - `SANDBOX_DEFAULTS` rules (devices, IPC, signals, etc.)
 /// - Output paths get `file-read* file-write* process-exec`
 /// - Input paths get `file-read* file-write* process-exec` (matching Nix:
 ///   "without file-write* allowed, access() incorrectly returns EPERM")
 /// - Path ancestry gets `file-read*` (allows `realpath()`)
 /// - Network rules for unsandboxed (fixed-output) derivations
-///
-/// `input_paths`: store paths the builder may access (transitive closure)
-/// `output_paths`: scratch output paths for the build
-/// `allow_network`: true for fixed-output (unsandboxed) derivations
-/// `use_sandbox`: false → minimal profile (allow default)
-/// `additional_profile`: extra profile rules (from `__sandboxProfile` drv attr)
 pub fn generate_sandbox_profile(
     input_paths: &[PathBuf],
     output_paths: &[PathBuf],
@@ -193,6 +186,10 @@ pub fn generate_sandbox_profile(
         profile.push_str(SANDBOX_MINIMAL);
         return profile;
     }
+
+    // Suppress syslog noise from sandbox violations. The syslog
+    // destination is not configurable on macOS, matching Nix's default.
+    profile.push_str("(deny default (with no-log))\n");
 
     profile.push_str(SANDBOX_DEFAULTS);
 
@@ -380,7 +377,7 @@ mod tests {
     fn test_sandbox_vs_minimal_profile() {
         let sandboxed =
             generate_sandbox_profile(&[], &[], false, true, Path::new("/nix/store"), "");
-        assert!(sandboxed.contains("(deny default)"));
+        assert!(sandboxed.contains("(deny default (with no-log))"));
         // Should not contain the unconditional full network access from SANDBOX_NETWORK
         assert!(!sandboxed.contains("(allow network* (local ip) (remote ip))"));
 
