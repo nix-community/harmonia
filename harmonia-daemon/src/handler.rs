@@ -566,6 +566,85 @@ impl DaemonStore for LocalStoreHandler {
         .empty_logs()
     }
 
+    fn query_missing<'a>(
+        &'a mut self,
+        paths: &'a [harmonia_store_core::derived_path::DerivedPath],
+    ) -> impl ResultLog<
+        Output = DaemonResult<harmonia_protocol::daemon_wire::types2::QueryMissingResult>,
+    > + Send
+    + 'a {
+        async move {
+            use harmonia_protocol::daemon_wire::types2::QueryMissingResult;
+            use harmonia_store_core::derived_path::DerivedPath;
+
+            let mut will_build = BTreeSet::new();
+            let will_substitute = BTreeSet::new();
+            let mut unknown = BTreeSet::new();
+
+            for path in paths {
+                match path {
+                    DerivedPath::Opaque(store_path) => {
+                        let full_path = format!("{}/{}", self.store_dir, store_path);
+                        let db = self.db.clone();
+                        let is_valid = tokio::task::spawn_blocking(move || {
+                            let db = db.blocking_lock();
+                            db.is_valid_path(&full_path)
+                        })
+                        .await
+                        .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
+                        .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
+
+                        if !is_valid {
+                            // Not in store, not available from substituters (standalone mode)
+                            unknown.insert(store_path.clone());
+                        }
+                    }
+                    DerivedPath::Built {
+                        drv_path,
+                        outputs: _,
+                    } => {
+                        // For Built paths, check if outputs exist in store.
+                        // We need to resolve the drv_path to a store path first.
+                        if let harmonia_store_core::derived_path::SingleDerivedPath::Opaque(
+                            drv_store_path,
+                        ) = drv_path.as_ref()
+                        {
+                            // Check if the derivation itself exists
+                            let drv_full = format!("{}/{}", self.store_dir, drv_store_path);
+                            let db = self.db.clone();
+                            let drv_exists = tokio::task::spawn_blocking(move || {
+                                let db = db.blocking_lock();
+                                db.is_valid_path(&drv_full)
+                            })
+                            .await
+                            .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
+                            .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
+
+                            if !drv_exists {
+                                // Derivation not even in store — unknown
+                                unknown.insert(drv_store_path.clone());
+                            } else {
+                                // Derivation exists but we can't resolve outputs
+                                // without parsing the .drv file. Conservatively
+                                // report it needs building.
+                                will_build.insert(drv_store_path.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(QueryMissingResult {
+                will_build,
+                will_substitute,
+                unknown,
+                download_size: 0,
+                nar_size: 0,
+            })
+        }
+        .empty_logs()
+    }
+
     fn shutdown(&mut self) -> impl std::future::Future<Output = DaemonResult<()>> + Send + '_ {
         ready(Ok(()))
     }
