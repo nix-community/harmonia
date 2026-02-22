@@ -8,11 +8,13 @@
 //! coordination.
 
 use std::fs;
+use std::io::{self, ErrorKind};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
+use nix::unistd::{Uid, User};
 
 use super::UserLock;
 
@@ -70,6 +72,18 @@ pub fn acquire_auto_user_lock(
 
         let first_uid = start_id + i * MAX_IDS_PER_BUILD;
 
+        // Safety: reject UIDs that collide with real system users.
+        // Matches Nix's `getpwuid(firstUid)` check in AutoUserLock::acquire.
+        if let Ok(Some(user)) = User::from_uid(Uid::from_raw(first_uid)) {
+            return Err(io::Error::new(
+                ErrorKind::AddrInUse,
+                format!(
+                    "auto-allocated UID {} clashes with existing user account '{}'",
+                    first_uid, user.name
+                ),
+            ));
+        }
+
         return Ok(Some(UserLock {
             _fd: fd,
             first_uid,
@@ -85,6 +99,25 @@ pub fn acquire_auto_user_lock(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// If the auto-allocated first_uid belongs to an existing system user
+    /// the function must return an error, not silently hand out that UID.
+    /// Uses the current process's UID which is guaranteed to exist in
+    /// /etc/passwd and is always > 0 (tests never run as root).
+    #[test]
+    fn test_uid_clash_check() {
+        let tmp = TempDir::new().unwrap();
+        let pool_dir = tmp.path().join("userpool2");
+
+        let my_uid = nix::unistd::getuid().as_raw();
+        assert!(my_uid > 0, "this test cannot run as root");
+
+        let result = acquire_auto_user_lock(&pool_dir, my_uid, MAX_IDS_PER_BUILD, 1);
+        assert!(
+            result.is_err(),
+            "should fail: UID {my_uid} clashes with current user"
+        );
+    }
 
     #[test]
     fn test_acquires_distinct_slots() {
