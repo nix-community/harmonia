@@ -26,6 +26,10 @@ const SANDBOX_DEFAULTS: &str = r#"
 
 (deny default)
 
+; Disallow creating setuid/setgid binaries, since that
+; would allow breaking build user isolation.
+(deny file-write-setugid)
+
 ; Allow forking.
 (allow process-fork)
 
