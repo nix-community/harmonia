@@ -409,15 +409,24 @@ mod tests {
     fn test_sandbox_write_isolation() {
         use std::os::unix::process::CommandExt;
 
+        // macOS doesn't allow nesting sandbox profiles: if we're already
+        // inside a nix build sandbox, sandbox_init_with_parameters returns
+        // EINVAL. The nix test derivation sets this env var on Darwin.
+        if std::env::var("_NIX_TEST_NO_SANDBOX").is_ok() {
+            eprintln!("skipping: cannot nest macOS sandbox profiles inside nix build sandbox");
+            return;
+        }
+
         let build_dir = tempfile::tempdir().unwrap();
         let build_top = build_dir.path().canonicalize().unwrap();
 
         // Blocked dir must be outside _NIX_BUILD_TOP, _GLOBAL_TMP_DIR,
         // and all sandbox-paths (/private/tmp, /private/var/tmp, /usr/lib, etc.).
-        // $HOME is not in the sandbox, so use that.
+        // Use the default tempdir ($TMPDIR, typically /private/var/folders/...)
+        // which is not in the sandbox allow-list.
         let blocked_dir = tempfile::Builder::new()
             .prefix("sandbox-blocked-")
-            .tempdir_in(std::env::var("HOME").unwrap())
+            .tempdir()
             .unwrap();
         let blocked_resolved = blocked_dir.path().canonicalize().unwrap();
         let blocked_file = blocked_resolved.join("blocked.txt");
