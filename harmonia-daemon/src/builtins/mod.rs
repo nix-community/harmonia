@@ -6,5 +6,6 @@
 //! These run in-process instead of spawning an external process,
 //! identified by `builder = "builtin:<name>"` in the derivation.
 
+pub mod buildenv;
 pub mod fetchurl;
 pub mod unpack_channel;
