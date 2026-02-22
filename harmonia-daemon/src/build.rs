@@ -724,7 +724,7 @@ async fn run_builtin_builder(
             crate::builtins::fetchurl::builtin_fetchurl(drv, env, output_paths, store_dir).await
         }
         "buildenv" => {
-            crate::builtins::buildenv::builtin_buildenv(drv, env, output_paths, store_dir).await
+            crate::builtins::buildenv::builtin_buildenv(drv, env, output_paths, store_dir)
         }
         "unpack-channel" => {
             crate::builtins::unpack_channel::builtin_unpack_channel(

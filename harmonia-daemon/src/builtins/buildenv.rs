@@ -15,7 +15,7 @@ use harmonia_store_core::store_path::{StoreDir, StorePath};
 
 use crate::build::BuildError;
 
-pub(crate) async fn builtin_buildenv(
+pub(crate) fn builtin_buildenv(
     _drv: &BasicDerivation,
     env: &BTreeMap<String, String>,
     output_paths: &[(OutputName, StorePath)],
