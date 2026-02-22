@@ -160,7 +160,7 @@ async fn test_handler_with_nix_store() {
 
     // Create handler
     let store_dir = StoreDir::new(store_dir).expect("Failed to create StoreDir");
-    let handler = LocalStoreHandler::new(store_dir, db_path)
+    let handler = LocalStoreHandler::new(store_dir, db_path, false)
         .await
         .expect("Failed to create handler");
 

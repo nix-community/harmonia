@@ -100,12 +100,17 @@ impl LinuxSandboxConfig {
 
 /// How the sandbox acquires a build user.
 enum UserSource {
-    /// Unprivileged: auto-allocate UIDs via file locks in userpool2.
-    /// Uses user namespaces (`CLONE_NEWUSER`) to map the UID.
+    /// Auto-allocate UIDs via file locks (root on Linux).
+    /// Uses user namespaces (`CLONE_NEWUSER`) to map the allocated UID.
     Auto { start_id: u32, id_count: u32 },
-    /// Privileged: daemon runs as root, uses group-based build users.
+    /// Map the daemon's own UID into the sandbox (non-root on Linux).
+    /// Uses user namespaces; no build user lock is needed.
+    CurrentUser,
+    /// Group-based build users (macOS).
     /// Drops privileges via `setgroups`/`setgid`/`setuid` before exec.
-    Group { members: Vec<(u32, u32)> },
+    Group {
+        members: Vec<(nix::unistd::Uid, nix::unistd::Gid)>,
+    },
 }
 
 /// Linux sandbox for build isolation.
@@ -143,15 +148,29 @@ impl LinuxSandbox {
         }
     }
 
+    /// Create a sandbox that maps the daemon's own UID into the user namespace.
+    ///
+    /// No build user lock is needed — the builder runs as the daemon's
+    /// UID on the host but sees UID 1000 inside the namespace, matching
+    /// Nix's non-root behaviour.
+    pub fn new_current_user(config: LinuxSandboxConfig) -> Self {
+        Self {
+            config,
+            pool_dir: PathBuf::new(), // unused
+            user_source: UserSource::CurrentUser,
+            user_lock: None,
+        }
+    }
+
     /// Create a privileged sandbox that drops to a group-based build user.
     ///
-    /// The daemon must be running as root. `group_members` are `(uid, gid)`
+    /// The daemon must be running as root. `group_members` are `(Uid, Gid)`
     /// pairs from the `build-users-group`. Supplementary GIDs are resolved
     /// automatically via `getgrouplist()`.
     pub fn new_privileged(
         config: LinuxSandboxConfig,
         pool_dir: PathBuf,
-        group_members: Vec<(u32, u32)>,
+        group_members: Vec<(nix::unistd::Uid, nix::unistd::Gid)>,
     ) -> Self {
         Self {
             config,
@@ -164,39 +183,52 @@ impl LinuxSandbox {
     }
 
     /// The UID allocated for this build, if `prepare()` has been called.
-    pub fn build_uid(&self) -> Option<u32> {
+    pub fn build_uid(&self) -> Option<nix::unistd::Uid> {
         self.user_lock.as_ref().map(|l| l.uid())
+    }
+
+    /// Access the underlying user lock (for chown, etc.).
+    pub fn user_lock(&self) -> Option<&UserLock> {
+        self.user_lock.as_ref()
     }
 }
 
 impl Sandbox for LinuxSandbox {
     async fn prepare(&mut self) -> Result<(), SandboxError> {
-        let pool_dir = self.pool_dir.clone();
-        let user_source = &self.user_source;
-
-        let lock = match user_source {
+        match &self.user_source {
+            UserSource::CurrentUser => {
+                // No build user needed — we map the daemon's own UID
+                // into the user namespace.
+                Ok(())
+            }
             UserSource::Auto { start_id, id_count } => {
+                let pool_dir = self.pool_dir.clone();
                 let start_id = *start_id;
                 let id_count = *id_count;
-                tokio::task::spawn_blocking(move || {
+                let lock = tokio::task::spawn_blocking(move || {
                     build_users::acquire_auto_user_lock(&pool_dir, start_id, id_count, 1)
                 })
                 .await
+                .map_err(|e| SandboxError::Setup(format!("spawn_blocking join: {e}")))?
+                .map_err(|e| SandboxError::Setup(format!("acquire user lock: {e}")))?
+                .ok_or_else(|| SandboxError::Setup("no build user slots available".into()))?;
+                self.user_lock = Some(lock);
+                Ok(())
             }
             UserSource::Group { members } => {
+                let pool_dir = self.pool_dir.clone();
                 let members = members.clone();
-                tokio::task::spawn_blocking(move || {
+                let lock = tokio::task::spawn_blocking(move || {
                     build_users::acquire_simple_user_lock(&pool_dir, &members)
                 })
                 .await
+                .map_err(|e| SandboxError::Setup(format!("spawn_blocking join: {e}")))?
+                .map_err(|e| SandboxError::Setup(format!("acquire user lock: {e}")))?
+                .ok_or_else(|| SandboxError::Setup("no build user slots available".into()))?;
+                self.user_lock = Some(lock);
+                Ok(())
             }
         }
-        .map_err(|e| SandboxError::Setup(format!("spawn_blocking join: {e}")))?
-        .map_err(|e| SandboxError::Setup(format!("acquire user lock: {e}")))?
-        .ok_or_else(|| SandboxError::Setup("no build user slots available".into()))?;
-
-        self.user_lock = Some(lock);
-        Ok(())
     }
 
     #[cfg(target_os = "linux")]
@@ -208,11 +240,6 @@ impl Sandbox for LinuxSandbox {
         env: &BTreeMap<String, String>,
         work_dir: &Path,
     ) -> Result<SandboxChild, SandboxError> {
-        let lock = self
-            .user_lock
-            .as_ref()
-            .ok_or_else(|| SandboxError::Spawn("prepare() not called".into()))?;
-
         use std::os::unix::process::CommandExt;
         use std::process::Stdio;
 
@@ -232,15 +259,19 @@ impl Sandbox for LinuxSandbox {
             .process_group(0);
 
         match &self.user_source {
-            UserSource::Auto { .. } => {
-                // Unprivileged mode: use user namespaces.
-                // Capture real UID/GID before fork+unshare. After
-                // unshare(CLONE_NEWUSER) the process is in a new user namespace
-                // where its UID/GID appear as unmapped (65534). The uid_map and
-                // gid_map must reference the *original* IDs from the parent
-                // namespace.
-                let real_uid = nix::unistd::getuid();
-                let real_gid = nix::unistd::getgid();
+            UserSource::Auto { .. } | UserSource::CurrentUser => {
+                // User-namespace mode: CLONE_NEWUSER maps a host UID/GID
+                // to UID 0 / GID 0 inside the sandbox.
+                //
+                // - Auto (root): host UID = allocated build user UID
+                // - CurrentUser (non-root): host UID = daemon's own UID
+                //
+                // This matches Nix's linux-derivation-builder.cc:
+                //   hostUid = buildUser ? buildUser->getUID() : getuid();
+                let (host_uid, host_gid) = match &self.user_lock {
+                    Some(lock) => (lock.uid(), lock.gid()),
+                    None => (nix::unistd::getuid(), nix::unistd::getgid()),
+                };
 
                 // SAFETY: unshare and /proc writes are async-signal-safe.
                 unsafe {
@@ -259,8 +290,8 @@ impl Sandbox for LinuxSandbox {
                             )
                         })?;
 
-                        // Map the parent namespace UID/GID to root inside.
-                        std::fs::write("/proc/self/uid_map", format!("0 {real_uid} 1\n")).map_err(
+                        // Map the host UID/GID to root inside the namespace.
+                        std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n")).map_err(
                             |e| {
                                 std::io::Error::new(
                                     std::io::ErrorKind::PermissionDenied,
@@ -276,7 +307,7 @@ impl Sandbox for LinuxSandbox {
                                 format!("write setgroups: {e}"),
                             )
                         })?;
-                        std::fs::write("/proc/self/gid_map", format!("0 {real_gid} 1\n")).map_err(
+                        std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n")).map_err(
                             |e| {
                                 std::io::Error::new(
                                     std::io::ErrorKind::PermissionDenied,
@@ -290,9 +321,13 @@ impl Sandbox for LinuxSandbox {
                 }
             }
             UserSource::Group { .. } => {
-                // Privileged mode: drop to the build user via
+                // macOS-style: drop to the build user via
                 // setgroups/setgid/setuid, matching Nix's
                 // DerivationBuilderImpl::setUser().
+                let lock = self
+                    .user_lock
+                    .as_ref()
+                    .ok_or_else(|| SandboxError::Spawn("prepare() not called".into()))?;
                 let build_uid = lock.uid();
                 let build_gid = lock.gid();
                 let supplementary_gids = lock.supplementary_gids().to_vec();
@@ -300,27 +335,37 @@ impl Sandbox for LinuxSandbox {
                 // SAFETY: setgroups/setgid/setuid are async-signal-safe.
                 unsafe {
                     cmd.pre_exec(move || {
+                        use nix::unistd;
+
                         // Preserve supplementary groups of the build user, to
                         // allow admins to specify groups such as "kvm".
-                        let gids: Vec<libc::gid_t> = supplementary_gids.to_vec();
-                        if libc::setgroups(gids.len(), gids.as_ptr()) != 0 {
-                            return Err(std::io::Error::last_os_error());
-                        }
+                        unistd::setgroups(&supplementary_gids).map_err(|e| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                format!("setgroups: {e}"),
+                            )
+                        })?;
 
-                        if libc::setgid(build_gid) != 0 {
-                            return Err(std::io::Error::last_os_error());
-                        }
-                        if libc::getgid() != build_gid || libc::getegid() != build_gid {
+                        unistd::setgid(build_gid).map_err(|e| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                format!("setgid({build_gid}): {e}"),
+                            )
+                        })?;
+                        if unistd::getgid() != build_gid || unistd::getegid() != build_gid {
                             return Err(std::io::Error::new(
                                 std::io::ErrorKind::PermissionDenied,
                                 format!("setgid({build_gid}) did not take effect"),
                             ));
                         }
 
-                        if libc::setuid(build_uid) != 0 {
-                            return Err(std::io::Error::last_os_error());
-                        }
-                        if libc::getuid() != build_uid || libc::geteuid() != build_uid {
+                        unistd::setuid(build_uid).map_err(|e| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                format!("setuid({build_uid}): {e}"),
+                            )
+                        })?;
+                        if unistd::getuid() != build_uid || unistd::geteuid() != build_uid {
                             return Err(std::io::Error::new(
                                 std::io::ErrorKind::PermissionDenied,
                                 format!("setuid({build_uid}) did not take effect"),
@@ -447,7 +492,11 @@ mod tests {
 
         sandbox1.prepare().await.unwrap();
         let uid1 = sandbox1.build_uid().expect("UID allocated after prepare");
-        assert_eq!(uid1, 30000, "First slot starts at start_id");
+        assert_eq!(
+            uid1,
+            nix::unistd::Uid::from_raw(30000),
+            "First slot starts at start_id"
+        );
 
         // Second sandbox gets a different UID
         let mut sandbox2 = make_sandbox(&pool_dir, default_config(), 2);
@@ -483,8 +532,6 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[cfg(target_os = "linux")]
     async fn test_sandbox_user_namespace_isolation() {
-        let pool_tmp = tempfile::tempdir().unwrap();
-        let pool_dir = pool_tmp.path().join("userpool2");
         let tmp = tempfile::tempdir().unwrap();
 
         let config = LinuxSandboxConfig {
@@ -495,7 +542,7 @@ mod tests {
             no_chroot: false,
         };
 
-        let mut sandbox = make_sandbox(&pool_dir, config, 1);
+        let mut sandbox = LinuxSandbox::new_current_user(config);
         sandbox.prepare().await.unwrap();
 
         // Read UID/GID from /proc/self/status using only shell builtins.
@@ -537,8 +584,6 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[cfg(target_os = "linux")]
     async fn test_sandbox_network_isolation() {
-        let pool_tmp = tempfile::tempdir().unwrap();
-        let pool_dir = pool_tmp.path().join("userpool2");
         let tmp = tempfile::tempdir().unwrap();
 
         let config = LinuxSandboxConfig {
@@ -549,7 +594,7 @@ mod tests {
             no_chroot: false, // network namespace IS created
         };
 
-        let mut sandbox = make_sandbox(&pool_dir, config, 1);
+        let mut sandbox = LinuxSandbox::new_current_user(config);
         sandbox.prepare().await.unwrap();
 
         // In a network namespace with no setup, only `lo` exists and it's down.
@@ -610,8 +655,6 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[cfg(target_os = "linux")]
     async fn test_sandbox_no_chroot_allows_network() {
-        let pool_tmp = tempfile::tempdir().unwrap();
-        let pool_dir = pool_tmp.path().join("userpool2");
         let tmp = tempfile::tempdir().unwrap();
 
         let config = LinuxSandboxConfig {
@@ -622,7 +665,7 @@ mod tests {
             no_chroot: true, // NO network namespace
         };
 
-        let mut sandbox = make_sandbox(&pool_dir, config, 1);
+        let mut sandbox = LinuxSandbox::new_current_user(config);
         sandbox.prepare().await.unwrap();
 
         // Read parent's interfaces for comparison.

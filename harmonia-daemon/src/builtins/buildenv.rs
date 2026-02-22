@@ -164,6 +164,7 @@ mod tests {
             &drv,
             BuildMode::Normal,
             &config,
+            &crate::config::SandboxConfig::Off,
         )
         .await
         .unwrap();

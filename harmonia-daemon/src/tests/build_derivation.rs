@@ -285,6 +285,7 @@ async fn test_build_derivation_keep_failed() {
         &drv,
         BuildMode::Normal,
         &config,
+        &crate::config::SandboxConfig::Off,
     )
     .await
     .unwrap();
@@ -582,6 +583,7 @@ async fn test_build_derivation_timeout() {
         &drv,
         BuildMode::Normal,
         &config,
+        &crate::config::SandboxConfig::Off,
     )
     .await
     .unwrap();
@@ -637,6 +639,7 @@ async fn test_build_derivation_max_silent() {
         &drv,
         BuildMode::Normal,
         &config,
+        &crate::config::SandboxConfig::Off,
     )
     .await
     .unwrap();
@@ -695,6 +698,7 @@ async fn test_build_derivation_log_output() {
         &drv,
         BuildMode::Normal,
         &config,
+        &crate::config::SandboxConfig::Off,
     )
     .await
     .unwrap();
@@ -1202,6 +1206,7 @@ async fn test_build_derivation_fixed_output_env() {
         &drv,
         BuildMode::Normal,
         &config,
+        &crate::config::SandboxConfig::Off,
     )
     .await
     .unwrap();
@@ -1367,6 +1372,7 @@ async fn test_builtin_nonexistent() {
         &drv,
         BuildMode::Normal,
         &config,
+        &crate::config::SandboxConfig::Off,
     )
     .await
     .unwrap();

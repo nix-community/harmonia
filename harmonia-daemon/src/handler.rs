@@ -28,6 +28,7 @@ use harmonia_store_db::StoreDb;
 use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::{Any, CommonHash as _};
 
+use crate::config::SandboxConfig;
 use crate::error::DaemonError;
 
 /// A local store handler that reads from the Nix store database.
@@ -37,13 +38,26 @@ pub struct LocalStoreHandler {
     db: Arc<Mutex<StoreDb>>,
     trusted_public_keys: Arc<Vec<PublicKey>>,
     build_dir: PathBuf,
+    sandbox_config: SandboxConfig,
 }
 
 impl LocalStoreHandler {
     /// Create a new handler with the given store directory and database path.
-    pub async fn new(store_dir: StoreDir, db_path: PathBuf) -> Result<Self, DaemonError> {
-        tracing::debug!("Opening database at {}", db_path.display());
-        let db = StoreDb::open(&db_path, harmonia_store_db::OpenMode::ReadOnly).map_err(|e| {
+    ///
+    /// `writable` controls whether the database is opened read-write
+    /// (needed for builds that register outputs) or read-only.
+    pub async fn new(
+        store_dir: StoreDir,
+        db_path: PathBuf,
+        writable: bool,
+    ) -> Result<Self, DaemonError> {
+        let mode = if writable {
+            harmonia_store_db::OpenMode::ReadWrite
+        } else {
+            harmonia_store_db::OpenMode::ReadOnly
+        };
+        tracing::debug!("Opening database at {} (mode={mode:?})", db_path.display());
+        let db = StoreDb::open(&db_path, mode).map_err(|e| {
             DaemonError::Database(format!("Failed to open {}: {e}", db_path.display()))
         })?;
         Ok(Self {
@@ -51,6 +65,7 @@ impl LocalStoreHandler {
             db: Arc::new(Mutex::new(db)),
             trusted_public_keys: Arc::new(Vec::new()),
             build_dir: PathBuf::from(crate::build::DEFAULT_BUILD_DIR),
+            sandbox_config: SandboxConfig::default(),
         })
     }
 
@@ -64,6 +79,7 @@ impl LocalStoreHandler {
             db,
             trusted_public_keys: Arc::new(Vec::new()),
             build_dir: PathBuf::from(crate::build::DEFAULT_BUILD_DIR),
+            sandbox_config: SandboxConfig::default(),
         }
     }
 
@@ -78,12 +94,18 @@ impl LocalStoreHandler {
             db,
             trusted_public_keys: Arc::new(trusted_public_keys),
             build_dir: PathBuf::from(crate::build::DEFAULT_BUILD_DIR),
+            sandbox_config: SandboxConfig::default(),
         }
     }
 
     /// Override the directory used for temporary build sandboxes.
     pub fn set_build_dir(&mut self, path: PathBuf) {
         self.build_dir = path;
+    }
+
+    /// Set the sandbox configuration for builder process isolation.
+    pub fn set_sandbox_config(&mut self, config: SandboxConfig) {
+        self.sandbox_config = config;
     }
 
     /// Convert a harmonia_store_db::ValidPathInfo to the protocol UnkeyedValidPathInfo.
@@ -194,6 +216,17 @@ impl HandshakeDaemonStore for LocalStoreHandler {
 impl DaemonStore for LocalStoreHandler {
     fn trust_level(&self) -> TrustLevel {
         TrustLevel::Trusted
+    }
+
+    // TODO: honor client options (e.g. max-build-jobs, verbosity) instead
+    // of silently ignoring them.  For now we just accept the RPC so that
+    // nix-store can complete its handshake.
+    fn set_options<'a>(
+        &'a mut self,
+        options: &'a harmonia_protocol::types::ClientOptions,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        tracing::debug!(?options, "set_options: ignoring client options");
+        ready(Ok(())).empty_logs()
     }
 
     fn is_valid_path<'a>(
@@ -560,8 +593,183 @@ impl DaemonStore for LocalStoreHandler {
                 build_dir: self.build_dir.clone(),
                 ..Default::default()
             };
-            crate::build::build_derivation(&self.store_dir, &self.db, drv_path, drv, mode, &config)
-                .await
+            crate::build::build_derivation(
+                &self.store_dir,
+                &self.db,
+                drv_path,
+                drv,
+                mode,
+                &config,
+                &self.sandbox_config,
+            )
+            .await
+        }
+        .empty_logs()
+    }
+
+    fn ensure_path<'a>(
+        &'a mut self,
+        path: &'a StorePath,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        async move {
+            let full_path = format!("{}/{}", self.store_dir, path);
+            let db = self.db.clone();
+            let valid = tokio::task::spawn_blocking(move || {
+                let db = db.blocking_lock();
+                db.is_valid_path(&full_path)
+            })
+            .await
+            .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
+            .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
+            if valid {
+                Ok(())
+            } else {
+                Err(ProtocolError::custom(format!("path '{path}' is not valid")))
+            }
+        }
+        .empty_logs()
+    }
+
+    fn query_derivation_output_map<'a>(
+        &'a mut self,
+        path: &'a StorePath,
+    ) -> impl ResultLog<
+        Output = DaemonResult<
+            std::collections::BTreeMap<
+                harmonia_store_core::derived_path::OutputName,
+                Option<StorePath>,
+            >,
+        >,
+    > + Send
+    + 'a {
+        async move {
+            let drv_path_full = self.store_dir.to_path().join(path.to_string());
+            let content = tokio::fs::read(&drv_path_full).await.map_err(|e| {
+                ProtocolError::custom(format!(
+                    "cannot read derivation {}: {e}",
+                    drv_path_full.display()
+                ))
+            })?;
+            let drv_name = path
+                .name()
+                .strip_suffix(".drv")
+                .unwrap_or_else(|| path.name());
+            let content_str = std::str::from_utf8(&content)
+                .map_err(|e| ProtocolError::custom(format!("invalid UTF-8 in {path}: {e}")))?;
+            let drv = harmonia_protocol::aterm::parse(&self.store_dir, content_str, drv_name)
+                .map_err(|e| ProtocolError::custom(format!("cannot parse {path}: {e}")))?;
+
+            let mut map = std::collections::BTreeMap::new();
+            for (name, output) in &drv.outputs {
+                let resolved = output.path(&self.store_dir, &drv.name, name).map_err(|e| {
+                    ProtocolError::custom(format!("cannot resolve output '{name}': {e}"))
+                })?;
+                map.insert(name.clone(), resolved);
+            }
+            Ok(map)
+        }
+        .empty_logs()
+    }
+
+    // TODO: use BuildScheduler for DAG-aware parallel builds and
+    // honour the `outputs` field of DerivedPath::Built.
+    fn build_paths<'a>(
+        &'a mut self,
+        drvs: &'a [harmonia_store_core::derived_path::DerivedPath],
+        mode: harmonia_protocol::daemon_wire::types2::BuildMode,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        async move {
+            use harmonia_store_core::derived_path::{DerivedPath, SingleDerivedPath};
+
+            for path in drvs {
+                match path {
+                    DerivedPath::Opaque(store_path) => {
+                        // Ensure the path exists in the store
+                        let full_path = self.store_dir.display(store_path).to_string();
+                        let db = self.db.clone();
+                        let is_valid = tokio::task::spawn_blocking(move || {
+                            let db = db.blocking_lock();
+                            db.is_valid_path(&full_path)
+                        })
+                        .await
+                        .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
+                        .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
+
+                        if !is_valid {
+                            return Err(ProtocolError::custom(format!(
+                                "path '{}' is not valid",
+                                self.store_dir.display(store_path)
+                            )));
+                        }
+                    }
+                    DerivedPath::Built { drv_path, .. } => {
+                        // Resolve the drv_path to an actual store path.
+                        // We only support the simple Opaque case (no dynamic derivations).
+                        let drv_store_path = match drv_path.as_ref() {
+                            SingleDerivedPath::Opaque(sp) => sp,
+                            SingleDerivedPath::Built { .. } => {
+                                return Err(ProtocolError::custom(
+                                    "dynamic derivation dependencies not yet supported",
+                                ));
+                            }
+                        };
+
+                        // Read and parse the .drv file from disk
+                        let drv_disk_path = self.store_dir.display(drv_store_path).to_string();
+                        let drv_content =
+                            tokio::fs::read_to_string(&drv_disk_path)
+                                .await
+                                .map_err(|e| {
+                                    ProtocolError::custom(format!(
+                                        "cannot read derivation '{}': {}",
+                                        drv_disk_path, e
+                                    ))
+                                })?;
+
+                        let drv_name_str = drv_store_path.name().as_ref();
+                        let drv_name = drv_name_str.strip_suffix(".drv").unwrap_or(drv_name_str);
+
+                        let store_dir = self.store_dir.clone();
+                        let drv =
+                            harmonia_protocol::aterm::parse(&store_dir, &drv_content, drv_name)
+                                .map_err(|e| {
+                                    ProtocolError::custom(format!(
+                                        "cannot parse derivation '{}': {}",
+                                        drv_disk_path, e
+                                    ))
+                                })?;
+
+                        // Build it
+                        let config = crate::build::BuildConfig {
+                            build_dir: self.build_dir.clone(),
+                            ..Default::default()
+                        };
+                        let result = crate::build::build_derivation(
+                            &self.store_dir,
+                            &self.db,
+                            drv_store_path,
+                            &drv,
+                            mode,
+                            &config,
+                            &self.sandbox_config,
+                        )
+                        .await?;
+
+                        if result.failure().is_some() {
+                            let msg = result
+                                .failure()
+                                .map(|f| String::from_utf8_lossy(&f.error_msg).to_string())
+                                .unwrap_or_default();
+                            return Err(ProtocolError::custom(format!(
+                                "build of '{}' failed: {}",
+                                self.store_dir.display(drv_store_path),
+                                msg
+                            )));
+                        }
+                    }
+                }
+            }
+            Ok(())
         }
         .empty_logs()
     }

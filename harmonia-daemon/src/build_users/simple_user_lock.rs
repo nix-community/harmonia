@@ -26,8 +26,8 @@ use super::UserLock;
 /// Returns an empty list when no passwd entry exists for `uid`.
 /// On non-Linux platforms, returns an empty list (Nix only does this on Linux).
 #[cfg(target_os = "linux")]
-fn get_supplementary_gids(uid: u32, primary_gid: u32) -> io::Result<Vec<u32>> {
-    let user = match User::from_uid(Uid::from_raw(uid)) {
+fn get_supplementary_gids(uid: Uid, primary_gid: Gid) -> io::Result<Vec<Gid>> {
+    let user = match User::from_uid(uid) {
         Ok(Some(u)) => u,
         Ok(None) => return Ok(Vec::new()),
         Err(e) => return Err(io::Error::other(e)),
@@ -40,18 +40,14 @@ fn get_supplementary_gids(uid: u32, primary_gid: u32) -> io::Result<Vec<u32>> {
         )
     })?;
 
-    let gids = nix::unistd::getgrouplist(&c_name, Gid::from_raw(primary_gid))
+    let gids = nix::unistd::getgrouplist(&c_name, primary_gid)
         .map_err(|e| io::Error::other(format!("getgrouplist: {e}")))?;
 
-    Ok(gids
-        .into_iter()
-        .map(|g| g.as_raw())
-        .filter(|&g| g != primary_gid)
-        .collect())
+    Ok(gids.into_iter().filter(|&g| g != primary_gid).collect())
 }
 
 #[cfg(not(target_os = "linux"))]
-fn get_supplementary_gids(_uid: u32, _primary_gid: u32) -> io::Result<Vec<u32>> {
+fn get_supplementary_gids(_uid: Uid, _primary_gid: Gid) -> io::Result<Vec<Gid>> {
     Ok(Vec::new())
 }
 
@@ -66,12 +62,12 @@ pub fn simple_pool_dir(state_dir: &Path) -> PathBuf {
 /// if all members are busy.
 pub fn acquire_simple_user_lock(
     pool_dir: &Path,
-    group_member_uids: &[(u32, u32)], // (uid, gid) pairs
+    group_member_uids: &[(Uid, Gid)],
 ) -> std::io::Result<Option<UserLock>> {
     fs::create_dir_all(pool_dir)?;
 
     for &(uid, gid) in group_member_uids {
-        let lock_path = pool_dir.join(uid.to_string());
+        let lock_path = pool_dir.join(uid.as_raw().to_string());
 
         let file = fs::OpenOptions::new()
             .read(true)
@@ -89,7 +85,7 @@ pub fn acquire_simple_user_lock(
 
         // Safety: the Nix daemon must never run builds as itself.
         // Matches Nix's `lock->uid == getuid() || lock->uid == geteuid()` check.
-        if uid == getuid().as_raw() || uid == geteuid().as_raw() {
+        if uid == getuid() || uid == geteuid() {
             return Err(io::Error::new(
                 ErrorKind::PermissionDenied,
                 format!("the Nix user should not be a member of the build users group (UID {uid})"),
@@ -126,8 +122,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pool_dir = tmp.path().join("userpool");
 
-        let my_uid = nix::unistd::getuid().as_raw();
-        let members = vec![(my_uid, 30000_u32)];
+        let my_uid = nix::unistd::getuid();
+        let members = vec![(my_uid, Gid::from_raw(30000))];
 
         let result = acquire_simple_user_lock(&pool_dir, &members);
         assert!(
@@ -143,9 +139,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pool_dir = tmp.path().join("userpool");
 
-        let my_uid = nix::unistd::getuid().as_raw();
+        let my_uid = nix::unistd::getuid();
+        let gid = Gid::from_raw(30000);
         // Put the self UID as the second member
-        let members = vec![(30001_u32, 30000_u32), (my_uid, 30000)];
+        let members = vec![(Uid::from_raw(30001), gid), (my_uid, gid)];
 
         // First lock grabs 30001 successfully
         let _lock1 = acquire_simple_user_lock(&pool_dir, &members)
@@ -165,19 +162,20 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pool_dir = tmp.path().join("userpool");
 
-        let members = vec![(30001_u32, 30000_u32), (30002, 30000)];
+        let gid = Gid::from_raw(30000);
+        let members = vec![(Uid::from_raw(30001), gid), (Uid::from_raw(30002), gid)];
 
         let lock1 = acquire_simple_user_lock(&pool_dir, &members)
             .unwrap()
             .expect("user 0");
-        assert_eq!(lock1.uid(), 30001);
-        assert_eq!(lock1.gid(), 30000);
+        assert_eq!(lock1.uid(), Uid::from_raw(30001));
+        assert_eq!(lock1.gid(), gid);
         assert_eq!(lock1.uid_count(), 1);
 
         let lock2 = acquire_simple_user_lock(&pool_dir, &members)
             .unwrap()
             .expect("user 1");
-        assert_eq!(lock2.uid(), 30002);
+        assert_eq!(lock2.uid(), Uid::from_raw(30002));
 
         // Exhausted
         assert!(
@@ -191,7 +189,7 @@ mod tests {
         let lock3 = acquire_simple_user_lock(&pool_dir, &members)
             .unwrap()
             .expect("reacquire");
-        assert_eq!(lock3.uid(), 30001);
+        assert_eq!(lock3.uid(), Uid::from_raw(30001));
 
         drop(lock2);
         drop(lock3);
