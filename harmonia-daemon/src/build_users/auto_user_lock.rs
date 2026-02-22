@@ -89,6 +89,7 @@ pub fn acquire_auto_user_lock(
             first_uid,
             first_gid: first_uid,
             nr_ids,
+            supplementary_gids: Vec::new(),
         }));
     }
 

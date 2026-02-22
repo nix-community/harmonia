@@ -24,6 +24,12 @@ pub struct UserLock {
     first_uid: u32,
     first_gid: u32,
     nr_ids: u32,
+    /// Supplementary group IDs for this build user, excluding the primary GID.
+    ///
+    /// Populated via `getgrouplist()` in `SimpleUserLock` so builds can
+    /// access groups like `kvm`. Always empty for `AutoUserLock` (matches
+    /// Nix's `AutoUserLock::getSupplementaryGIDs()`).
+    supplementary_gids: Vec<u32>,
 }
 
 impl UserLock {
@@ -48,5 +54,10 @@ impl UserLock {
         } else {
             Some((self.first_uid, self.first_uid + self.nr_ids - 1))
         }
+    }
+
+    /// Supplementary group IDs for this build user, excluding the primary GID.
+    pub fn supplementary_gids(&self) -> &[u32] {
+        &self.supplementary_gids
     }
 }

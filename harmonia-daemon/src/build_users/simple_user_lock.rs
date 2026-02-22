@@ -7,6 +7,7 @@
 //! and locks `<stateDir>/userpool/<uid>` for cross-process coordination.
 //! Used on macOS where auto-allocate-uids is not available.
 
+use std::ffi::CString;
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::OpenOptionsExt;
@@ -14,9 +15,45 @@ use std::path::{Path, PathBuf};
 
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
-use nix::unistd::{geteuid, getuid};
+use nix::unistd::{Gid, Uid, User, geteuid, getuid};
 
 use super::UserLock;
+
+/// Look up supplementary group IDs for a build user, excluding `primary_gid`.
+///
+/// On Linux, resolves the username from `uid` via `getpwuid` and calls
+/// `getgrouplist(3)` — matching Nix's `get_group_list(pw->pw_name, pw->pw_gid)`.
+/// Returns an empty list when no passwd entry exists for `uid`.
+/// On non-Linux platforms, returns an empty list (Nix only does this on Linux).
+#[cfg(target_os = "linux")]
+fn get_supplementary_gids(uid: u32, primary_gid: u32) -> io::Result<Vec<u32>> {
+    let user = match User::from_uid(Uid::from_raw(uid)) {
+        Ok(Some(u)) => u,
+        Ok(None) => return Ok(Vec::new()),
+        Err(e) => return Err(io::Error::other(e)),
+    };
+
+    let c_name = CString::new(user.name.as_bytes()).map_err(|e| {
+        io::Error::new(
+            ErrorKind::InvalidData,
+            format!("username contains NUL: {e}"),
+        )
+    })?;
+
+    let gids = nix::unistd::getgrouplist(&c_name, Gid::from_raw(primary_gid))
+        .map_err(|e| io::Error::other(format!("getgrouplist: {e}")))?;
+
+    Ok(gids
+        .into_iter()
+        .map(|g| g.as_raw())
+        .filter(|&g| g != primary_gid)
+        .collect())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_supplementary_gids(_uid: u32, _primary_gid: u32) -> io::Result<Vec<u32>> {
+    Ok(Vec::new())
+}
 
 /// Resolve the userpool directory (matches Nix's simple lock path).
 pub fn simple_pool_dir(state_dir: &Path) -> PathBuf {
@@ -59,11 +96,16 @@ pub fn acquire_simple_user_lock(
             ));
         }
 
+        // Gather supplementary groups (e.g. kvm) for this build user.
+        // Matches Nix's get_group_list(pw->pw_name, pw->pw_gid) call.
+        let supplementary_gids = get_supplementary_gids(uid, gid)?;
+
         return Ok(Some(UserLock {
             _fd: fd,
             first_uid: uid,
             first_gid: gid,
             nr_ids: 1,
+            supplementary_gids,
         }));
     }
 
