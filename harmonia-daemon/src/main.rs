@@ -130,12 +130,24 @@ fn make_store_writable(store_dir: &std::path::Path) -> Result<(), DaemonError> {
         )
         .map_err(|e| DaemonError::config(format!("make {} private: {e}", store_dir.display(),)))?;
 
-        info!("Remounting {} read-write", store_dir.display());
+        // Translate the existing statvfs flags into MsFlags so that
+        // security-relevant flags (nosuid, nodev, noexec, …) are preserved
+        // across the remount.  The ST_* and MS_* constants share the same
+        // bit values on Linux, so a bitwise conversion is safe.
+        let preserved = MsFlags::from_bits_truncate(stat.flags().bits())
+            & !MsFlags::MS_RDONLY;
+
+        let remount_flags = MsFlags::MS_REMOUNT | MsFlags::MS_BIND | preserved;
+        info!(
+            "Remounting {} read-write (flags: {:?})",
+            store_dir.display(),
+            remount_flags,
+        );
         mount(
             None::<&str>,
             store_dir,
             None::<&str>,
-            MsFlags::MS_REMOUNT | MsFlags::MS_BIND,
+            remount_flags,
             None::<&str>,
         )
         .map_err(|e| {
