@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
-# SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+# SPDX-FileCopyrightText: 2026 Jörg Thalheim (Harmonia adaptation)
 # SPDX-License-Identifier: MIT
 
 [package]
@@ -18,6 +18,7 @@ data-encoding = { workspace = true }
 derive_more = { workspace = true }
 harmonia-utils-base-encoding = { version = "0.0.0-alpha.0" }
 md5 = { workspace = true }
+pin-project-lite = { workspace = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 ring = { workspace = true }

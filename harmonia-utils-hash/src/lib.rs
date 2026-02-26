@@ -9,8 +9,10 @@ use thiserror::Error;
 
 mod algo;
 pub mod fmt;
+mod hashing_reader;
 
 use fmt::CommonHash;
+pub use hashing_reader::{HashState, HashingReader};
 
 pub use algo::{Algorithm, UnknownAlgorithm};
 

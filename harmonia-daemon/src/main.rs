@@ -2,14 +2,14 @@ use harmonia_daemon::config::Config;
 use harmonia_daemon::error::{DaemonError, IoContext};
 use harmonia_daemon::handler::LocalStoreHandler;
 use harmonia_daemon::server::DaemonServer;
-use log::{error, info};
 use std::path::PathBuf;
 use tokio::signal;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<(), DaemonError> {
-    // Initialize logger
-    env_logger::init();
+    // Initialize tracing subscriber
+    tracing_subscriber::fmt::init();
 
     // Load configuration
     let config = match std::env::var("HARMONIA_DAEMON_CONFIG") {
@@ -26,8 +26,42 @@ async fn main() -> Result<(), DaemonError> {
     let store_dir = harmonia_store_core::store_path::StoreDir::new(&config.store_dir)
         .map_err(|e| DaemonError::config(format!("Invalid store directory: {e}")))?;
 
+    // If the store is on a read-only bind mount (typical NixOS default),
+    // remount it writable so builders can create output paths.  This
+    // mirrors nix-daemon's LocalStore::makeStoreWritable() and requires
+    // the daemon to run as root.
+    #[cfg(target_os = "linux")]
+    if config.sandbox {
+        make_store_writable(&config.store_dir)?;
+    }
+
     // Create the local store handler
-    let handler = LocalStoreHandler::new(store_dir.clone(), config.db_path).await?;
+    let writable = config.sandbox;
+    let mut handler = LocalStoreHandler::new(store_dir.clone(), config.db_path, writable).await?;
+
+    // Configure sandbox for build isolation
+    if config.sandbox {
+        #[cfg(target_os = "linux")]
+        let sandbox_config = {
+            info!("Sandbox enabled (Linux, user namespaces)");
+            harmonia_daemon::config::SandboxConfig::new_linux(config.pool_dir.clone())
+        };
+        #[cfg(not(target_os = "linux"))]
+        let sandbox_config = {
+            let group_name = config.build_users_group.as_deref().ok_or_else(|| {
+                DaemonError::config(
+                    "sandbox on macOS requires build_users_group to be set".to_string(),
+                )
+            })?;
+            info!("Sandbox enabled (macOS, build users group: {group_name})");
+            harmonia_daemon::config::SandboxConfig::from_group_name(
+                config.pool_dir.clone(),
+                group_name,
+            )
+            .map_err(|e| DaemonError::config(format!("sandbox config: {e}")))?
+        };
+        handler.set_sandbox_config(sandbox_config);
+    }
 
     // Create and start the daemon server
     let server = DaemonServer::new(handler, config.socket_path.clone(), store_dir);
@@ -59,6 +93,68 @@ async fn main() -> Result<(), DaemonError> {
     }
 
     info!("harmonia-daemon stopped");
+    Ok(())
+}
+
+/// Remount the Nix store read-write if it is currently mounted read-only.
+///
+/// On NixOS the store is bind-mounted with `ro,nosuid,nodev` by default.
+/// The nix-daemon does the same remount in `LocalStore::makeStoreWritable()`.
+/// Requires root privileges.
+#[cfg(target_os = "linux")]
+fn make_store_writable(store_dir: &std::path::Path) -> Result<(), DaemonError> {
+    use nix::sys::statvfs::FsFlags;
+    use nix::sys::statvfs::statvfs;
+
+    if !nix::unistd::getuid().is_root() {
+        return Ok(());
+    }
+
+    let stat = statvfs(store_dir)
+        .map_err(|e| DaemonError::config(format!("statvfs({}): {e}", store_dir.display())))?;
+
+    if stat.flags().contains(FsFlags::ST_RDONLY) {
+        use nix::mount::{MsFlags, mount};
+
+        // Make the store mount private so the writable remount does not
+        // propagate to other mount namespaces (e.g. sandbox children).
+        // Matches the defensive approach Nix takes inside sandboxes
+        // (MS_PRIVATE | MS_REC on /).
+        info!("Making {} mount private", store_dir.display());
+        mount(
+            None::<&str>,
+            store_dir,
+            None::<&str>,
+            MsFlags::MS_PRIVATE,
+            None::<&str>,
+        )
+        .map_err(|e| DaemonError::config(format!("make {} private: {e}", store_dir.display(),)))?;
+
+        // Translate the existing statvfs flags into MsFlags so that
+        // security-relevant flags (nosuid, nodev, noexec, …) are preserved
+        // across the remount.  The ST_* and MS_* constants share the same
+        // bit values on Linux, so a bitwise conversion is safe.
+        let preserved = MsFlags::from_bits_truncate(stat.flags().bits())
+            & !MsFlags::MS_RDONLY;
+
+        let remount_flags = MsFlags::MS_REMOUNT | MsFlags::MS_BIND | preserved;
+        info!(
+            "Remounting {} read-write (flags: {:?})",
+            store_dir.display(),
+            remount_flags,
+        );
+        mount(
+            None::<&str>,
+            store_dir,
+            None::<&str>,
+            remount_flags,
+            None::<&str>,
+        )
+        .map_err(|e| {
+            DaemonError::config(format!("remount {} writable: {e}", store_dir.display(),))
+        })?;
+    }
+
     Ok(())
 }
 

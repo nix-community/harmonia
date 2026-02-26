@@ -37,6 +37,7 @@ tokio-util = { version = "0.7.18", features = ["io"] }
 harmonia-store-core = { version = "0.0.0-alpha.0" }
 harmonia-store-remote = { version = "3.0.0" }
 harmonia-nar = { version = "3.0.0" }
+harmonia-utils-base-encoding = { version = "0.0.0-alpha.0" }
 harmonia-utils-hash = { version = "0.0.0-alpha.0" }
 futures = { workspace = true }
 prometheus = { workspace = true }
