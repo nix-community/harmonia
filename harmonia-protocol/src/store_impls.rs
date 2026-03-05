@@ -19,7 +19,7 @@ use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput};
 use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
-use harmonia_store_core::realisation::Realisation;
+use harmonia_store_core::realisation::{Realisation, UnkeyedRealisation};
 use harmonia_store_core::store_path::{
     ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathName,
 };
@@ -366,6 +366,35 @@ impl NixDeserialize for Realisation {
     }
 }
 
+// ========== UnkeyedRealisation ==========
+
+impl NixSerialize for UnkeyedRealisation {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: NixWrite,
+    {
+        use crate::ser::Error;
+        let s = serde_json::to_string(&self).map_err(W::Error::custom)?;
+        writer.write_slice(s.as_bytes()).await
+    }
+}
+
+impl NixDeserialize for UnkeyedRealisation {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + NixRead + Send,
+    {
+        use crate::de::Error;
+        if let Some(buf) = reader.try_read_bytes().await? {
+            Ok(Some(
+                serde_json::from_slice(&buf).map_err(R::Error::custom)?,
+            ))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 // ========== Simple derives for store-core types using remote macros ==========
 
 // These types can use automatic derives, so we use the remote macros
@@ -610,7 +639,6 @@ mod tests {
     use crate::ser::NixWrite;
     use harmonia_store_core::realisation::Realisation;
     use rstest::rstest;
-    use std::collections::BTreeMap;
 
     macro_rules! set {
         () => { std::collections::BTreeSet::new() };
@@ -623,31 +651,16 @@ mod tests {
         }};
     }
 
-    macro_rules! btree_map {
-        () => { BTreeMap::new() };
-        ($($k:expr => $v:expr),+ $(,)?) => {{
-            let mut ret = BTreeMap::new();
-            $(
-                ret.insert($k.parse().unwrap(), $v.parse().unwrap());
-            )+
-            ret
-        }};
-    }
-
     #[tokio::test]
     #[rstest]
     #[case(
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out".parse().unwrap(),
+            drv_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3.drv".parse().unwrap(),
+            output_name: "out".parse().unwrap(),
             out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
             signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
-            dependent_realisations: btree_map![
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev",
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin",
-
-            ],
         },
-        "{\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"],\"dependentRealisations\":{\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev\",\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin\"}}",
+        "{\"key\":{\"drvPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3.drv\",\"outputName\":\"out\"},\"value\":{\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"]}}",
     )]
     async fn nix_write_realisation(#[case] value: Realisation, #[case] expected: &str) {
         let mut mock = crate::ser::mock::Builder::new()
@@ -660,16 +673,12 @@ mod tests {
     #[rstest]
     #[case(
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out".parse().unwrap(),
+            drv_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3.drv".parse().unwrap(),
+            output_name: "out".parse().unwrap(),
             out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
             signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
-            dependent_realisations: btree_map![
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev",
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin",
-
-            ],
         },
-        "{\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"],\"dependentRealisations\":{\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev\",\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin\"}}",
+        "{\"key\":{\"drvPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3.drv\",\"outputName\":\"out\"},\"value\":{\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"]}}",
     )]
     async fn nix_read_realisation(#[case] expected: Realisation, #[case] value: &str) {
         let mut mock = crate::de::mock::Builder::new()

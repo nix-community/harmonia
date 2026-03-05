@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use std::fmt;
 use std::str::FromStr;
 
 use derive_more::Display;
@@ -8,7 +9,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
 use crate::derived_path::OutputName;
-use crate::signature::Signature;
+use crate::signature::{Signature, Structured};
 use crate::store_path::{StorePath, StorePathNameError};
 use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::Any;
@@ -66,17 +67,127 @@ impl FromStr for DrvOutput {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Deserialize, Serialize)]
+/// The value part of a realisation: output path and signatures.
+///
+/// Used in contexts where the key (drv_path + output_name) is provided
+/// externally, such as `BuildResult.built_outputs`.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Realisation {
-    pub id: DrvOutput,
+pub struct UnkeyedRealisation {
     pub out_path: StorePath,
+    #[serde(default, deserialize_with = "deserialize_signatures")]
     pub signatures: BTreeSet<Signature>,
-    #[serde(default)]
-    pub dependent_realisations: BTreeMap<DrvOutput, StorePath>,
 }
 
-pub type DrvOutputs = BTreeMap<DrvOutput, Realisation>;
+fn deserialize_signatures<'de, D>(deserializer: D) -> Result<BTreeSet<Signature>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Structured::<BTreeSet<Signature>>::deserialize(deserializer).map(|s| s.0)
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+pub struct Realisation {
+    pub drv_path: StorePath,
+    pub output_name: OutputName,
+    pub out_path: StorePath,
+    pub signatures: BTreeSet<Signature>,
+}
+
+impl Serialize for Realisation {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Key<'a> {
+            drv_path: &'a StorePath,
+            output_name: &'a OutputName,
+        }
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Value<'a> {
+            out_path: &'a StorePath,
+            signatures: &'a BTreeSet<Signature>,
+        }
+
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry(
+            "key",
+            &Key {
+                drv_path: &self.drv_path,
+                output_name: &self.output_name,
+            },
+        )?;
+        map.serialize_entry(
+            "value",
+            &Value {
+                out_path: &self.out_path,
+                signatures: &self.signatures,
+            },
+        )?;
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Realisation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de;
+
+        struct RealisationVisitor;
+
+        impl<'de> de::Visitor<'de> for RealisationVisitor {
+            type Value = Realisation;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(r#"a realisation object with "key" and "value" fields"#)
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut key: Option<KeyRaw> = None;
+                let mut value: Option<ValueRaw> = None;
+
+                while let Some(k) = map.next_key::<&str>()? {
+                    match k {
+                        "key" => key = Some(map.next_value()?),
+                        "value" => value = Some(map.next_value()?),
+                        _ => {
+                            map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                let key = key.ok_or_else(|| de::Error::missing_field("key"))?;
+                let value = value.ok_or_else(|| de::Error::missing_field("value"))?;
+
+                Ok(Realisation {
+                    drv_path: key.drv_path,
+                    output_name: key.output_name,
+                    out_path: value.out_path,
+                    signatures: value.signatures.0,
+                })
+            }
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct KeyRaw {
+            drv_path: StorePath,
+            output_name: OutputName,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ValueRaw {
+            out_path: StorePath,
+            #[serde(default)]
+            signatures: Structured<BTreeSet<Signature>>,
+        }
+
+        deserializer.deserialize_map(RealisationVisitor)
+    }
+}
 
 #[cfg(any(test, feature = "test"))]
 pub mod arbitrary {
@@ -84,7 +195,6 @@ pub mod arbitrary {
 
     use super::*;
     use ::proptest::prelude::*;
-    use ::proptest::sample::SizeRange;
 
     impl Arbitrary for DrvOutput {
         type Parameters = ();
@@ -106,20 +216,6 @@ pub mod arbitrary {
         }
     }
 
-    pub fn arb_drv_outputs(size: impl Into<SizeRange>) -> impl Strategy<Value = DrvOutputs> {
-        let size = size.into();
-        let min_size = size.start();
-        prop::collection::vec(arb_realisation(), size)
-            .prop_map(|r| {
-                let mut ret = BTreeMap::new();
-                for value in r {
-                    ret.insert(value.id.clone(), value);
-                }
-                ret
-            })
-            .prop_filter("BTreeMap minimum size", move |m| m.len() >= min_size)
-    }
-
     impl Arbitrary for Realisation {
         type Parameters = ();
         type Strategy = BoxedStrategy<Realisation>;
@@ -132,17 +228,14 @@ pub mod arbitrary {
     prop_compose! {
         pub fn arb_realisation()
         (
-            id in any::<DrvOutput>(),
+            drv_path in any::<StorePath>(),
+            output_name in any::<OutputName>(),
             out_path in any::<StorePath>(),
             signatures in arb_signatures(),
-            dependent_realisations in  prop::collection::btree_map(
-                arb_drv_output(),
-                any::<StorePath>(),
-                0..50),
         ) -> Realisation
         {
             Realisation {
-                id, out_path, signatures, dependent_realisations,
+                drv_path, output_name, out_path, signatures,
             }
         }
     }
@@ -152,13 +245,11 @@ pub mod arbitrary {
 mod unittests {
     use rstest::rstest;
 
-    use crate::btree_map;
     use crate::derived_path::OutputName;
-    use crate::set;
     use harmonia_utils_hash::Hash;
     use harmonia_utils_hash::fmt::Any;
 
-    use super::{DrvOutput, Realisation};
+    use super::DrvOutput;
 
     #[rstest]
     #[case("sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1!out", DrvOutput {
@@ -201,43 +292,5 @@ mod unittests {
     }, "sha1:84983e441c3bd26ebaae4aa1f95129e5e54670f1!out_put")]
     fn display_drv_output(#[case] value: DrvOutput, #[case] expected: &str) {
         assert_eq!(value.to_string(), expected);
-    }
-
-    #[rstest]
-    #[case(
-        "{\"dependentRealisations\":{\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev\",\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin\"},\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"]}",
-        Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out".parse().unwrap(),
-            out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
-            signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
-            dependent_realisations: btree_map![
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev",
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin",
-
-            ],
-        }
-    )]
-    fn parse_realisation(#[case] value: &str, #[case] expected: Realisation) {
-        let actual: Realisation = serde_json::from_str(value).unwrap();
-        assert_eq!(actual, expected);
-    }
-
-    #[rstest]
-    #[case(
-        Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out".parse().unwrap(),
-            out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
-            signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
-            dependent_realisations: btree_map![
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev",
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin",
-
-            ],
-        },
-        "{\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"],\"dependentRealisations\":{\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev\",\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin\"}}",
-    )]
-    fn write_realisation(#[case] value: Realisation, #[case] expected: &str) {
-        let actual = serde_json::to_string(&value).unwrap();
-        assert_eq!(actual, expected);
     }
 }

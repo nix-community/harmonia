@@ -2,41 +2,65 @@
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
-use harmonia_store_core::realisation::{DrvOutput, Realisation};
+use harmonia_store_core::realisation::Realisation;
 
 test_upstream_json!(
     test_realisation_simple,
     libstore_test_data_path("realisation/simple.json"),
     {
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!foo"
-                .parse::<DrvOutput>()
-                .unwrap(),
-            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
+            drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+            output_name: "foo".parse().unwrap(),
+            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
             signatures: Default::default(),
-            dependent_realisations: Default::default(),
         }
     }
 );
 
 test_upstream_json!(
-    test_realisation_with_dependent,
-    libstore_test_data_path("realisation/with-dependent-realisations.json"),
+    test_realisation_with_signature,
+    libstore_test_data_path("realisation/with-signature.json"),
     {
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!foo"
-                .parse::<DrvOutput>()
-                .unwrap(),
+            drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+            output_name: "foo".parse().unwrap(),
             out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
-            signatures: Default::default(),
-            dependent_realisations: [(
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!foo"
-                    .parse::<DrvOutput>()
-                    .unwrap(),
-                "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
-            )]
-            .into_iter()
-            .collect(),
+            signatures: ["asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="]
+                .into_iter()
+                .map(|s| s.parse().unwrap())
+                .collect(),
         }
     }
 );
+
+#[test]
+fn test_realisation_with_signature_structured_from_json() {
+    crate::test_upstream_json_from_json(
+        &libstore_test_data_path("realisation/with-signature-structured.json"),
+        &Realisation {
+            drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+            output_name: "foo".parse().unwrap(),
+            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
+            signatures: ["asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="]
+                .into_iter()
+                .map(|s| s.parse().unwrap())
+                .collect(),
+        },
+    );
+}
+
+#[test]
+fn test_realisation_with_structured_signature_from_json() {
+    crate::test_upstream_json_from_json(
+        &libstore_test_data_path("realisation/with-structured-signature.json"),
+        &Realisation {
+            drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+            output_name: "foo".parse().unwrap(),
+            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
+            signatures: ["asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="]
+                .into_iter()
+                .map(|s| s.parse().unwrap())
+                .collect(),
+        },
+    );
+}

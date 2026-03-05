@@ -10,6 +10,7 @@ use data_encoding::BASE64;
 use ring::error::{KeyRejected, Unspecified};
 use ring::rand;
 use ring::signature::{self, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
+use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 use tracing::error;
@@ -115,6 +116,127 @@ impl FromStr for Signature {
         let mut sig_buf = [0u8; SIGNATURE_BYTES];
         sig_buf.copy_from_slice(&sig_b[..SIGNATURE_BYTES]);
         Ok(Signature(name, sig_buf))
+    }
+}
+
+/// Wrapper for V3 structured JSON format (`{"keyName": "...", "sig": "..."}`).
+///
+/// The existing [`Signature`] uses [`SerializeDisplay`]/[`DeserializeFromStr`] for the
+/// V2 colon-separated string format (`"name:base64sig"`). This newtype provides
+/// the V3 object format.
+///
+/// Deserialization accepts both string and structured formats for compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Structured<T>(pub T);
+
+impl Default for Structured<BTreeSet<Signature>> {
+    fn default() -> Self {
+        Self(BTreeSet::new())
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StructuredSigRaw<'a> {
+    key_name: &'a str,
+    sig: SignatureBase64<'a>,
+}
+
+struct SignatureBase64<'a>(&'a [u8]);
+
+impl Serialize for SignatureBase64<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut buf = [0u8; SIGNATURE_BASE64_LEN];
+        BASE64.encode_mut(self.0, &mut buf);
+        // SAFETY: Base64 is a subset of ASCII, which guarantees valid UTF-8.
+        let s = unsafe { std::str::from_utf8_unchecked(&buf) };
+        serializer.serialize_str(s)
+    }
+}
+
+impl Serialize for Structured<Signature> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let raw = StructuredSigRaw {
+            key_name: self.0.name(),
+            sig: SignatureBase64(self.0.signature_bytes()),
+        };
+        raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Structured<Signature> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de;
+
+        struct StructuredSigVisitor;
+
+        impl<'de> de::Visitor<'de> for StructuredSigVisitor {
+            type Value = Structured<Signature>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(
+                    r#"a signature string "name:base64" or object {"keyName": "...", "sig": "..."}"#,
+                )
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                v.parse::<Signature>()
+                    .map(Structured)
+                    .map_err(de::Error::custom)
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut key_name: Option<String> = None;
+                let mut sig: Option<String> = None;
+
+                while let Some(k) = map.next_key::<&str>()? {
+                    match k {
+                        "keyName" => key_name = Some(map.next_value()?),
+                        "sig" => sig = Some(map.next_value()?),
+                        _ => {
+                            map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                let key_name = key_name.ok_or_else(|| de::Error::missing_field("keyName"))?;
+                let sig_str = sig.ok_or_else(|| de::Error::missing_field("sig"))?;
+
+                if sig_str.len() != SIGNATURE_BASE64_LEN {
+                    return Err(de::Error::custom("invalid signature length"));
+                }
+                let mut sig_b = [0u8; SIGNATURE_BASE64_DECODED_LEN];
+                let len = BASE64
+                    .decode_mut(sig_str.as_bytes(), &mut sig_b)
+                    .map_err(|_| de::Error::custom("invalid base64 in signature"))?;
+                if len != SIGNATURE_BYTES {
+                    return Err(de::Error::custom("invalid signature length"));
+                }
+                let mut sig_buf = [0u8; SIGNATURE_BYTES];
+                sig_buf.copy_from_slice(&sig_b[..SIGNATURE_BYTES]);
+                Ok(Structured(Signature(Arc::new(key_name), sig_buf)))
+            }
+        }
+
+        deserializer.deserialize_any(StructuredSigVisitor)
+    }
+}
+
+impl Serialize for Structured<BTreeSet<Signature>> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for sig in &self.0 {
+            seq.serialize_element(&Structured(sig.clone()))?;
+        }
+        seq.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Structured<BTreeSet<Signature>> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let sigs = Vec::<Structured<Signature>>::deserialize(deserializer)?;
+        Ok(Structured(sigs.into_iter().map(|s| s.0).collect()))
     }
 }
 

@@ -8,9 +8,9 @@ use test_strategy::Arbitrary;
 
 use crate::NarHash;
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
-use harmonia_store_core::signature::Signature;
 #[cfg(test)]
 use harmonia_store_core::signature::proptests::arb_signatures;
+use harmonia_store_core::signature::{Signature, Structured};
 use harmonia_store_core::store_path::{ContentAddress, StoreDir, StorePath};
 
 use crate::types::DaemonTime;
@@ -42,8 +42,6 @@ pub struct ValidPathInfo {
     pub info: UnkeyedValidPathInfo,
 }
 
-// JSON format version 2, matching upstream Nix
-
 fn is_false(b: &bool) -> bool {
     !b
 }
@@ -53,8 +51,8 @@ fn is_none_store_path(opt: &Option<Cow<'_, StorePath>>) -> bool {
 }
 
 #[expect(clippy::ptr_arg, reason = "needed for serde skip_serializing_if")]
-fn is_empty_signatures(set: &Cow<'_, BTreeSet<Signature>>) -> bool {
-    set.is_empty()
+fn is_empty_structured_signatures(set: &Cow<'_, Structured<BTreeSet<Signature>>>) -> bool {
+    set.0.is_empty()
 }
 
 /// Pure format: omits default impure fields during serialization
@@ -69,8 +67,8 @@ struct RawUnkeyedValidPathInfoPure<'a> {
     references: Cow<'a, BTreeSet<StorePath>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     registration_time: Option<DaemonTime>,
-    #[serde(skip_serializing_if = "is_empty_signatures")]
-    signatures: Cow<'a, BTreeSet<Signature>>,
+    #[serde(skip_serializing_if = "is_empty_structured_signatures")]
+    signatures: Cow<'a, Structured<BTreeSet<Signature>>>,
     store_dir: Cow<'a, StoreDir>,
     #[serde(skip_serializing_if = "is_false")]
     ultimate: bool,
@@ -83,6 +81,10 @@ fn default_cow_set<T: Ord + Clone>() -> Cow<'static, BTreeSet<T>> {
 
 fn default_cow_store_dir() -> Cow<'static, StoreDir> {
     Cow::Owned(StoreDir::default())
+}
+
+fn default_cow_structured_set() -> Cow<'static, Structured<BTreeSet<Signature>>> {
+    Cow::Owned(Structured(BTreeSet::new()))
 }
 
 /// Impure format: includes all fields, used for both serialize and deserialize
@@ -98,8 +100,8 @@ struct RawUnkeyedValidPathInfo<'a> {
     references: Cow<'a, BTreeSet<StorePath>>,
     #[serde(default)]
     registration_time: Option<DaemonTime>,
-    #[serde(default = "default_cow_set")]
-    signatures: Cow<'a, BTreeSet<Signature>>,
+    #[serde(default = "default_cow_structured_set")]
+    signatures: Cow<'a, Structured<BTreeSet<Signature>>>,
     #[serde(default = "default_cow_store_dir")]
     store_dir: Cow<'a, StoreDir>,
     #[serde(default)]
@@ -118,10 +120,10 @@ where
         nar_size: info.nar_size,
         references: Cow::Borrowed(&info.references),
         registration_time: info.registration_time.map(|n| n.get()),
-        signatures: Cow::Borrowed(&info.signatures),
+        signatures: Cow::Owned(Structured(info.signatures.clone())),
         store_dir: Cow::Borrowed(&info.store_dir),
         ultimate: info.ultimate,
-        version: 2,
+        version: 3,
     };
     raw.serialize(serializer)
 }
@@ -131,9 +133,9 @@ where
     D: serde::Deserializer<'de>,
 {
     let raw = RawUnkeyedValidPathInfo::deserialize(deserializer)?;
-    if raw.version != 2 {
+    if raw.version != 3 {
         return Err(serde::de::Error::custom(format!(
-            "unsupported path-info version: {}, expected 2",
+            "unsupported path-info version: {}, expected 3",
             raw.version
         )));
     }
@@ -144,7 +146,7 @@ where
         registration_time: raw.registration_time.and_then(NonZero::new),
         nar_size: raw.nar_size,
         ultimate: raw.ultimate,
-        signatures: raw.signatures.into_owned(),
+        signatures: raw.signatures.into_owned().0,
         ca: raw.ca,
         store_dir: raw.store_dir.into_owned(),
     })
@@ -181,10 +183,10 @@ impl Serialize for Pure<UnkeyedValidPathInfo> {
             nar_size: self.0.nar_size,
             references: Cow::Borrowed(&self.0.references),
             registration_time: self.0.registration_time.map(|n| n.get()),
-            signatures: Cow::Borrowed(&self.0.signatures),
+            signatures: Cow::Owned(Structured(self.0.signatures.clone())),
             store_dir: Cow::Borrowed(&self.0.store_dir),
             ultimate: self.0.ultimate,
-            version: 2,
+            version: 3,
         };
         raw.serialize(serializer)
     }
