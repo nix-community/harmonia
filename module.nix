@@ -99,6 +99,26 @@ in
           default = "info";
           description = "Log level for the daemon";
         };
+
+        sandbox = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Enable build sandbox.  On Linux this uses user namespaces;
+            when running as root, build UIDs are auto-allocated via
+            file locks.  On macOS this requires `buildUsersGroup`.
+          '';
+        };
+
+        buildUsersGroup = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            Unix group whose members serve as build users.  Only used
+            on macOS.  On Linux, UIDs are auto-allocated and this is
+            ignored.
+          '';
+        };
       };
     };
   };
@@ -199,13 +219,20 @@ in
     (lib.mkIf daemonCfg.enable {
       systemd.services.harmonia-daemon =
         let
-          daemonConfig = {
-            socket_path = daemonCfg.socketPath;
-            store_dir = daemonCfg.storeDir;
-            db_path = daemonCfg.dbPath;
-            log_level = daemonCfg.logLevel;
-          };
+          daemonConfig =
+            {
+              socket_path = daemonCfg.socketPath;
+              store_dir = daemonCfg.storeDir;
+              db_path = daemonCfg.dbPath;
+              log_level = daemonCfg.logLevel;
+              sandbox = daemonCfg.sandbox;
+            }
+            // lib.optionalAttrs (daemonCfg.buildUsersGroup != null) {
+              build_users_group = daemonCfg.buildUsersGroup;
+            };
           daemonConfigFile = format.generate "harmonia-daemon.toml" daemonConfig;
+          usesSandbox = daemonCfg.sandbox;
+          poolDir = "/nix/var/nix/userpool";
         in
         {
           description = "Harmonia Nix daemon protocol server";
@@ -218,76 +245,76 @@ in
             HARMONIA_DAEMON_CONFIG = daemonConfigFile;
           };
 
-          serviceConfig = {
-            Type = "simple";
-            ExecStart = "${cfg.package}/bin/harmonia-daemon";
-            Restart = "on-failure";
-            RestartSec = 5;
+          serviceConfig =
+            if usesSandbox then
+              {
+                # Sandbox enabled: the daemon uses user namespaces and
+                # (when root) auto-allocated build UIDs.  Most systemd
+                # sandboxing is incompatible because the builder child
+                # processes need to create user/mount namespaces.
+                Type = "simple";
+                ExecStart = "${cfg.package}/bin/harmonia-daemon";
+                Restart = "on-failure";
+                RestartSec = 5;
+                RuntimeDirectory = "harmonia-daemon";
+                LimitNOFILE = 65536;
+              }
+            else
+              {
+                # No build users: daemon only serves store queries, so
+                # we can lock it down tightly.
+                Type = "simple";
+                ExecStart = "${cfg.package}/bin/harmonia-daemon";
+                Restart = "on-failure";
+                RestartSec = 5;
+                RuntimeDirectory = "harmonia-daemon";
 
-            # Socket will be created at runtime
-            RuntimeDirectory = "harmonia-daemon";
+                NoNewPrivileges = true;
+                CapabilityBoundingSet = "";
 
-            # Run as root to access the Nix database
-            # Note: The Nix database is owned by root and requires root access
-            NoNewPrivileges = true;
-            PrivateTmp = true;
-            ProtectSystem = "strict";
-            ProtectHome = true;
-            # SQLite needs write access for WAL mode
-            ReadWritePaths = [
-              (builtins.dirOf daemonCfg.dbPath) # Need write access for WAL and SHM files
-            ];
-            ReadOnlyPaths = [
-              daemonCfg.storeDir
-            ];
+                PrivateTmp = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                ReadWritePaths = [
+                  (builtins.dirOf daemonCfg.dbPath)
+                ];
+                ReadOnlyPaths = [
+                  daemonCfg.storeDir
+                ];
 
-            # System call filtering
-            SystemCallFilter = [
-              "@system-service"
-              "~@privileged"
-              "@chown" # for sockets
-              "~@resources"
-            ];
-            SystemCallArchitectures = "native";
+                SystemCallFilter = [
+                  "@system-service"
+                  "@chown"
+                ];
+                SystemCallArchitectures = "native";
 
-            # Capabilities
-            CapabilityBoundingSet = "";
+                DeviceAllow = [ "" ];
+                PrivateDevices = true;
 
-            # Device access
-            DeviceAllow = [ "" ];
-            PrivateDevices = true;
+                ProtectKernelModules = true;
+                ProtectKernelTunables = true;
+                ProtectControlGroups = true;
+                ProtectKernelLogs = true;
+                ProtectHostname = true;
+                ProtectClock = true;
 
-            # Kernel protection
-            ProtectKernelModules = true;
-            ProtectKernelTunables = true;
-            ProtectControlGroups = true;
-            ProtectKernelLogs = true;
-            ProtectHostname = true;
-            ProtectClock = true;
+                MemoryDenyWriteExecute = true;
+                LockPersonality = true;
 
-            # Memory protection
-            MemoryDenyWriteExecute = true;
-            LockPersonality = true;
+                ProcSubset = "pid";
+                ProtectProc = "invisible";
 
-            # Process visibility
-            ProcSubset = "pid";
-            ProtectProc = "invisible";
+                RestrictNamespaces = true;
+                PrivateMounts = true;
 
-            # Namespace restrictions
-            RestrictNamespaces = true;
-            PrivateMounts = true;
+                RestrictAddressFamilies = "AF_UNIX";
+                PrivateNetwork = false;
 
-            # Network restrictions
-            RestrictAddressFamilies = "AF_UNIX";
-            PrivateNetwork = false;
+                LimitNOFILE = 65536;
+                RestrictRealtime = true;
 
-            # Resource limits
-            LimitNOFILE = 65536;
-            RestrictRealtime = true;
-
-            # Misc restrictions
-            UMask = "0077";
-          };
+                UMask = "0077";
+              };
         };
     })
   ];

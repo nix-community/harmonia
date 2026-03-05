@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2024 griff
-// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-FileCopyrightText: 2026 Jörg Thalheim
 // SPDX-License-Identifier: EUPL-1.2 OR MIT
 //
 // This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
@@ -36,6 +36,7 @@ pub mod derivation;
 pub mod derived_path;
 pub mod placeholder;
 pub mod realisation;
+pub mod references;
 pub mod signature;
 pub mod store_path;
 
