@@ -13,19 +13,29 @@ harmonia-utils-io = { version = "0.0.0-alpha.0" }
 harmonia-utils-hash = { version = "0.0.0-alpha.0" }
 harmonia-store-core = { version = "0.0.0-alpha.0" }
 harmonia-store-db = { version = "3.0.0" }
+harmonia-nar = { version = "3.0.0" }
 harmonia-protocol = { version = "3.0.0" }
-tokio = { workspace = true }
-log = { workspace = true }
+bzip2 = "0.6"
+compress-tools = "0.15"
+bytes = { workspace = true }
+libc = "0.2"
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+nix = { version = "0.31", features = ["user", "fs", "sched", "mount"] }
+tokio = { workspace = true, features = ["process"] }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
-env_logger = { workspace = true }
+tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
 futures = { workspace = true }
 
 [dev-dependencies]
+harmonia-nar = { version = "3.0.0", features = ["test"] }
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
-tempfile = "3"
+ring = { workspace = true }
+tokio-test = "0.4"
 
 [lints]
 workspace = true

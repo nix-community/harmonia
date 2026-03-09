@@ -70,9 +70,10 @@
               inherit (packageSet) tests;
             }
             // lib.optionalAttrs pkgs.stdenv.isLinux {
-              nix-daemon = import ./tests/nix-daemon.nix testArgs;
-              harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
+              cache = import ./tests/cache.nix testArgs;
+              daemon-cache = import ./tests/daemon-cache.nix testArgs;
               chroot-store = import ./tests/chroot-store.nix testArgs;
+              privileged-sandbox = import ./tests/privileged-sandbox.nix testArgs;
             }
             // packages
             // devShells;

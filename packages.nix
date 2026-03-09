@@ -36,6 +36,10 @@ let
     pname = "harmonia";
     strictDeps = true;
 
+    # compress-tools-rs links against libarchive via pkg-config
+    nativeBuildInputs = [ pkgs.pkg-config ];
+    buildInputs = [ pkgs.libarchive ];
+
     # Use mold linker for faster builds on ELF platforms
     stdenv =
       p: if p.stdenv.hostPlatform.isElf then p.stdenvAdapters.useMoldLinker p.stdenv else p.stdenv;
@@ -67,7 +71,7 @@ let
       inherit cargoArtifacts;
 
       # Add runtime dependencies
-      nativeBuildInputs = [ makeWrapper ];
+      nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ makeWrapper ];
 
       doCheck = false;
 
@@ -99,7 +103,7 @@ let
       # Use same RUSTFLAGS as cargoArtifactsCov to avoid rebuilding dependencies
       CARGO_BUILD_RUSTFLAGS = coverageRustflags;
 
-      nativeBuildInputs = [
+      nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
         nix
         curl
         pkgs.cargo-llvm-cov

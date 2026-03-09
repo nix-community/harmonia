@@ -31,7 +31,7 @@ dependencies = [
  "actix-web",
  "bitflags",
  "bytes",
- "derive_more",
+ "derive_more 2.1.1",
  "futures-core",
  "http-range",
  "log",
@@ -56,7 +56,7 @@ dependencies = [
  "bitflags",
  "bytes",
  "bytestring",
- "derive_more",
+ "derive_more 2.1.1",
  "encoding_rs",
  "foldhash 0.1.5",
  "futures-core",
@@ -186,7 +186,7 @@ dependencies = [
  "bytestring",
  "cfg-if",
  "cookie",
- "derive_more",
+ "derive_more 2.1.1",
  "encoding_rs",
  "foldhash 0.1.5",
  "futures-core",
@@ -522,6 +522,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "compress-tools"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecbcea9a172acabd98f272919faf0b1830a2ccec90d518d67c5eb13742e769a7"
+dependencies = [
+ "derive_more 0.99.20",
+ "libc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "compression-codecs"
 version = "0.4.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -694,6 +706,17 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
+version = "0.99.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "derive_more"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134"
@@ -754,7 +777,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a1c3cc8e57274ec99de65301228b537f1e4eedc1b8e0f9411c6caac8ae7308f"
 dependencies = [
  "log",
- "regex",
 ]
 
 [[package]]
@@ -1014,6 +1036,7 @@ dependencies = [
  "harmonia-nar",
  "harmonia-store-core",
  "harmonia-store-remote",
+ "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
  "harmonia-utils-test",
  "http-range",
@@ -1043,21 +1066,30 @@ version = "3.0.0"
 name = "harmonia-daemon"
 version = "3.0.0"
 dependencies = [
- "env_logger",
+ "bytes",
+ "bzip2",
+ "compress-tools",
  "futures",
+ "harmonia-nar",
  "harmonia-protocol",
  "harmonia-store-core",
  "harmonia-store-db",
  "harmonia-utils-hash",
  "harmonia-utils-io",
  "harmonia-utils-test",
- "log",
+ "libc",
+ "nix",
+ "ring",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-test",
+ "tokio-util",
  "toml",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1066,7 +1098,7 @@ version = "3.0.0"
 dependencies = [
  "bstr",
  "bytes",
- "derive_more",
+ "derive_more 2.1.1",
  "futures",
  "harmonia-utils-io",
  "harmonia-utils-test",
@@ -1092,7 +1124,7 @@ dependencies = [
  "async-stream",
  "bstr",
  "bytes",
- "derive_more",
+ "derive_more 2.1.1",
  "futures",
  "harmonia-nar",
  "harmonia-protocol-derive",
@@ -1139,7 +1171,9 @@ version = "0.0.0-alpha.0"
 dependencies = [
  "bytes",
  "data-encoding",
- "derive_more",
+ "derive_more 2.1.1",
+ "futures",
+ "harmonia-nar",
  "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
  "harmonia-utils-test",
@@ -1194,7 +1228,7 @@ name = "harmonia-utils-base-encoding"
 version = "0.0.0-alpha.0"
 dependencies = [
  "data-encoding",
- "derive_more",
+ "derive_more 2.1.1",
  "hex-literal",
  "proptest",
  "rstest",
@@ -1207,10 +1241,11 @@ name = "harmonia-utils-hash"
 version = "0.0.0-alpha.0"
 dependencies = [
  "data-encoding",
- "derive_more",
+ "derive_more 2.1.1",
  "harmonia-utils-base-encoding",
  "hex-literal",
  "md5",
+ "pin-project-lite",
  "proptest",
  "proptest-derive",
  "ring",
@@ -2863,6 +2898,7 @@ dependencies = [
  "once_cell",
  "regex-automata",
  "sharded-slab",
+ "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
