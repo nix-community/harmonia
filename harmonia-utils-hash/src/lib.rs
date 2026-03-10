@@ -128,6 +128,7 @@ impl Sha256 {
     ///
     /// ```
     /// # use harmonia_utils_hash::Sha256;
+    /// # use harmonia_utils_hash::fmt::CommonHash;
     /// let hash = Sha256::digest("abc");
     ///
     /// assert_eq!("1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s", hash.as_base32().as_bare().to_string());

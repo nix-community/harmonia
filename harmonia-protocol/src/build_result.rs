@@ -14,7 +14,7 @@ use crate::de::{Error as _, NixDeserialize as NixDeserializeTrait, NixRead};
 use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
 use crate::types::{DaemonInt, DaemonString, DaemonTime};
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::realisation::Realisation;
+use harmonia_store_core::realisation::UnkeyedRealisation;
 
 /// Success status values for BuildResult.
 ///
@@ -82,7 +82,7 @@ pub struct BuildResultSuccess {
     pub status: SuccessStatus,
     /// For derivations, a mapping from output names to realisations.
     #[serde(default)]
-    pub built_outputs: BTreeMap<OutputName, Realisation>,
+    pub built_outputs: BTreeMap<OutputName, UnkeyedRealisation>,
 }
 
 /// Failed build result data.
@@ -159,7 +159,7 @@ impl NixDeserializeTrait for BuildResult {
         let stop_time: DaemonTime = reader.read_value().await?;
         let cpu_user: Option<Microseconds> = reader.read_value().await?;
         let cpu_system: Option<Microseconds> = reader.read_value().await?;
-        let built_outputs: BTreeMap<OutputName, Realisation> = reader.read_value().await?;
+        let built_outputs: BTreeMap<OutputName, UnkeyedRealisation> = reader.read_value().await?;
 
         let inner = if let Ok(status) = SuccessStatus::try_from(status_raw) {
             BuildResultInner::Success(BuildResultSuccess {
@@ -199,14 +199,14 @@ impl NixSerializeTrait for BuildResult {
             u16,
             &DaemonString,
             bool,
-            &BTreeMap<OutputName, Realisation>,
+            &BTreeMap<OutputName, UnkeyedRealisation>,
         ) = match &self.inner {
             BuildResultInner::Success(s) => {
                 static EMPTY_STRING: DaemonString = DaemonString::new();
                 (s.status.into(), &EMPTY_STRING, false, &s.built_outputs)
             }
             BuildResultInner::Failure(f) => {
-                static EMPTY_MAP: BTreeMap<OutputName, Realisation> = BTreeMap::new();
+                static EMPTY_MAP: BTreeMap<OutputName, UnkeyedRealisation> = BTreeMap::new();
                 (
                     f.status.into(),
                     &f.error_msg,
