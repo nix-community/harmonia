@@ -63,6 +63,14 @@ impl StorePath {
         self.to_string()
     }
 
+    /// Convert to absolute path by combining with the store directory
+    ///
+    /// Unlike the `StoreDirDisplay` instance for `Path`, this will use a native
+    /// path separator to the current OS.
+    pub fn to_absolute_path(&self, store_dir: &StoreDir) -> PathBuf {
+        store_dir.to_path().join(self.to_string())
+    }
+
     /// Parse from base path (just the hash-name part, without store directory)
     pub fn from_base_path(s: &str) -> Result<Self, ParseStorePathError> {
         s.parse()
@@ -896,6 +904,25 @@ mod unittests {
         let store = StoreDir::default();
         let s = store.display(&base_path).to_string();
         assert_eq!(store_path, s);
+    }
+
+    #[test]
+    fn to_absolute_path() {
+        let (store_str, expected) = if cfg!(windows) {
+            (
+                r"X:\foo\bar",
+                r"X:\foo\bar\ywrs8hr8fa4244bpdxi88bd87qxqgmy0-app-home",
+            )
+        } else {
+            (
+                "/foo/bar",
+                "/foo/bar/ywrs8hr8fa4244bpdxi88bd87qxqgmy0-app-home",
+            )
+        };
+        let store = StoreDir::new(store_str).unwrap();
+        let path: StorePath = "ywrs8hr8fa4244bpdxi88bd87qxqgmy0-app-home".parse().unwrap();
+        let absolute = path.to_absolute_path(&store);
+        assert_eq!(absolute, PathBuf::from(expected));
     }
 }
 
