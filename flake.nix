@@ -11,7 +11,7 @@
   inputs.treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   inputs.crane.url = "github:ipetkov/crane";
   inputs.nix = {
-    url = "github:nixos/nix";
+    url = "github:nixos/nix/2.34-maintenance";
     # We just need some test data, we're not building upstream nix.
     flake = false;
   };
