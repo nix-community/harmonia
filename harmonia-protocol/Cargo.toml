@@ -26,7 +26,7 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_with = "3.17"
+serde_with = "3.18"
 test-strategy = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util"] }
