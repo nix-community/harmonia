@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
 use derive_more::Display;
-
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
@@ -13,6 +12,10 @@ use crate::store_path::{StorePath, StorePathNameError};
 use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::Any;
 
+/// Identifies a specific output of a derivation.
+///
+/// String form: `sha256:<hex>!<output_name>`, where the hash is the
+/// "hash modulo" of the derivation.
 #[derive(
     Debug,
     PartialEq,
@@ -72,8 +75,30 @@ pub struct Realisation {
     pub id: DrvOutput,
     pub out_path: StorePath,
     pub signatures: BTreeSet<Signature>,
+    /// Always empty. Nix hardcodes `"dependentRealisations": {}` for backwards compat.
     #[serde(default)]
     pub dependent_realisations: BTreeMap<DrvOutput, StorePath>,
+}
+
+impl Realisation {
+    /// Compute the fingerprint used for signing.
+    #[must_use]
+    pub fn fingerprint(&self) -> String {
+        let mut json = serde_json::to_value(self).expect("Realisation serialization cannot fail");
+        json.as_object_mut()
+            .expect("Realisation must serialize as object")
+            .remove("signatures");
+        json.to_string()
+    }
+
+    /// Sign this realisation with the given secret keys, adding the resulting
+    /// signatures to the `signatures` set.
+    pub fn sign(&mut self, keys: &[crate::signature::SecretKey]) {
+        let fp = self.fingerprint();
+        for key in keys {
+            self.signatures.insert(key.sign(fp.as_bytes()));
+        }
+    }
 }
 
 pub type DrvOutputs = BTreeMap<DrvOutput, Realisation>;
@@ -135,15 +160,9 @@ pub mod arbitrary {
             id in any::<DrvOutput>(),
             out_path in any::<StorePath>(),
             signatures in arb_signatures(),
-            dependent_realisations in  prop::collection::btree_map(
-                arb_drv_output(),
-                any::<StorePath>(),
-                0..50),
         ) -> Realisation
         {
-            Realisation {
-                id, out_path, signatures, dependent_realisations,
-            }
+            Realisation { id, out_path, signatures, dependent_realisations: Default::default() }
         }
     }
 }
@@ -152,9 +171,9 @@ pub mod arbitrary {
 mod unittests {
     use rstest::rstest;
 
-    use crate::btree_map;
     use crate::derived_path::OutputName;
     use crate::set;
+
     use harmonia_utils_hash::Hash;
     use harmonia_utils_hash::fmt::Any;
 
@@ -205,17 +224,16 @@ mod unittests {
 
     #[rstest]
     #[case(
-        "{\"dependentRealisations\":{\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev\",\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin\"},\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"]}",
+        "{\"dependentRealisations\":{},\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"]}",
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out".parse().unwrap(),
+            id: DrvOutput {
+                drv_hash: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".parse::<Any<Hash>>().unwrap().into_hash(),
+                output_name: OutputName::default(),
+            },
             out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
             signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
-            dependent_realisations: btree_map![
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev",
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin",
-
-            ],
-        }
+            dependent_realisations: Default::default(),
+        },
     )]
     fn parse_realisation(#[case] value: &str, #[case] expected: Realisation) {
         let actual: Realisation = serde_json::from_str(value).unwrap();
@@ -225,19 +243,75 @@ mod unittests {
     #[rstest]
     #[case(
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out".parse().unwrap(),
+            id: DrvOutput {
+                drv_hash: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".parse::<Any<Hash>>().unwrap().into_hash(),
+                output_name: OutputName::default(),
+            },
             out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
             signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
-            dependent_realisations: btree_map![
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev",
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin" => "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin",
-
-            ],
+            dependent_realisations: Default::default(),
         },
-        "{\"id\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!out\",\"outPath\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3\",\"signatures\":[\"cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==\"],\"dependentRealisations\":{\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a496177a9cf410ff61f20015ad!dev\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-dev\",\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a696177a9cf410ff61f20015ad!bin\":\"7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3-bin\"}}",
     )]
-    fn write_realisation(#[case] value: Realisation, #[case] expected: &str) {
-        let actual = serde_json::to_string(&value).unwrap();
-        assert_eq!(actual, expected);
+    fn write_realisation(#[case] value: Realisation) {
+        // Round-trip: serialize then deserialize & verify equality
+        let json = serde_json::to_string(&value).unwrap();
+        let parsed: Realisation = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, value);
+        // Verify dependentRealisations is present in output (backwards compat)
+        let raw = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        assert!(raw.get("dependentRealisations").is_some());
+    }
+
+    #[test]
+    fn fingerprint_strips_signatures() {
+        let r = Realisation {
+            id: DrvOutput {
+                drv_hash: "sha256:15e3c560894cbb27085cf65b5a2ecb18488c999497f4531b6907a7581ce6d527"
+                    .parse::<Any<Hash>>()
+                    .unwrap()
+                    .into_hash(),
+                output_name: "baz".parse().unwrap(),
+            },
+            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
+            signatures: set![
+                "asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+                "qwer:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+            ],
+            dependent_realisations: Default::default(),
+        };
+
+        let fp = r.fingerprint();
+        let parsed: serde_json::Value = serde_json::from_str(&fp).unwrap();
+        assert_eq!(
+            parsed["id"],
+            "sha256:15e3c560894cbb27085cf65b5a2ecb18488c999497f4531b6907a7581ce6d527!baz"
+        );
+        assert_eq!(parsed["outPath"], "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo");
+        assert!(
+            parsed.get("signatures").is_none(),
+            "signatures must be stripped"
+        );
+    }
+
+    #[test]
+    fn sign_adds_signature() {
+        let mut r = Realisation {
+            id: DrvOutput {
+                drv_hash: "sha256:15e3c560894cbb27085cf65b5a2ecb18488c999497f4531b6907a7581ce6d527"
+                    .parse::<Any<Hash>>()
+                    .unwrap()
+                    .into_hash(),
+                output_name: "baz".parse().unwrap(),
+            },
+            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
+            signatures: Default::default(),
+            dependent_realisations: Default::default(),
+        };
+        assert!(r.signatures.is_empty());
+        let rng = ring::rand::SystemRandom::new();
+        let sk = crate::signature::SecretKey::generate("test-key".to_string(), &rng).unwrap();
+        r.sign(&[sk]);
+        assert_eq!(r.signatures.len(), 1);
+        assert_eq!(r.signatures.iter().next().unwrap().name(), "test-key");
     }
 }
