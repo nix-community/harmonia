@@ -1,6 +1,7 @@
 //! Realisation JSON tests
 
 use crate::libstore_test_data_path;
+use crate::read_upstream_json;
 use crate::test_upstream_json;
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::signature::{RawSignature, SIGNATURE_BYTES, SecretKey, Signature};
@@ -87,20 +88,22 @@ test_upstream_json!(
 fn sign_simple_matches_upstream() {
     let r = simple_realisation();
     let sk: SecretKey = TEST_SECRET_KEY.parse().unwrap();
-    let sig = sk.sign(r.value.fingerprint(&r.key).as_bytes());
+    let sig = r.value.sign(&r.key, &sk);
 
-    let expected_sig: Signature = "test-key:WsjxK4/EI74COtzMDI+VCjQU9O4FydK0+YeY1CE5hUevogd+T+CPvNXza7oog3GTMS+ZlBwsC2S3ppwusKnJDg==".parse().unwrap();
-    assert_eq!(sig, expected_sig);
+    let expected = read_upstream_json(&libstore_test_data_path("realisation/simple-sig.json"));
+    assert_eq!(sig, expected);
 }
 
 #[test]
 fn sign_with_signature_matches_upstream() {
     let r = with_signature_realisation();
     let sk: SecretKey = TEST_SECRET_KEY.parse().unwrap();
-    let sig = sk.sign(r.value.fingerprint(&r.key).as_bytes());
+    let sig = r.value.sign(&r.key, &sk);
 
-    let expected_sig: Signature = "test-key:ZE30UrOh26/EYvUaczjJtz6c4WcRYke6IEhDNN5TiFRF6Uu+H8lHofponlhfZxDDrCUlfstS/vtv3Xm2F6M/AA==".parse().unwrap();
-    assert_eq!(sig, expected_sig);
+    let expected = read_upstream_json(&libstore_test_data_path(
+        "realisation/with-signature-sig.json",
+    ));
+    assert_eq!(sig, expected);
 }
 
 /// Verifying the upstream signatures works.
@@ -110,7 +113,7 @@ fn verify_simple_upstream_signature() {
     let sk: SecretKey = TEST_SECRET_KEY.parse().unwrap();
     let pk = sk.to_public_key();
 
-    let sig: Signature = "test-key:WsjxK4/EI74COtzMDI+VCjQU9O4FydK0+YeY1CE5hUevogd+T+CPvNXza7oog3GTMS+ZlBwsC2S3ppwusKnJDg==".parse().unwrap();
+    let sig = read_upstream_json(&libstore_test_data_path("realisation/simple-sig.json"));
     assert!(pk.verify(r.value.fingerprint(&r.key).as_bytes(), &sig));
 }
 
@@ -120,6 +123,8 @@ fn verify_with_signature_upstream_signature() {
     let sk: SecretKey = TEST_SECRET_KEY.parse().unwrap();
     let pk = sk.to_public_key();
 
-    let sig: Signature = "test-key:ZE30UrOh26/EYvUaczjJtz6c4WcRYke6IEhDNN5TiFRF6Uu+H8lHofponlhfZxDDrCUlfstS/vtv3Xm2F6M/AA==".parse().unwrap();
+    let sig = read_upstream_json(&libstore_test_data_path(
+        "realisation/with-signature-sig.json",
+    ));
     assert!(pk.verify(r.value.fingerprint(&r.key).as_bytes(), &sig));
 }
