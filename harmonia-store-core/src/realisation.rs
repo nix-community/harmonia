@@ -95,12 +95,17 @@ impl UnkeyedRealisation {
         json.to_string()
     }
 
+    /// Sign this realisation, returning the signature without modifying `self`.
+    #[must_use]
+    pub fn sign(&self, key: &DrvOutput, signer: &crate::signature::SecretKey) -> Signature {
+        signer.sign(self.fingerprint(key).as_bytes())
+    }
+
     /// Sign this realisation with the given secret keys, adding the resulting
     /// signatures to the `signatures` set.
-    pub fn sign(&mut self, key: &DrvOutput, keys: &[crate::signature::SecretKey]) {
-        let fp = self.fingerprint(key);
+    pub fn sign_mut(&mut self, key: &DrvOutput, keys: &[crate::signature::SecretKey]) {
         for k in keys {
-            self.signatures.insert(k.sign(fp.as_bytes()));
+            self.signatures.insert(self.sign(key, k));
         }
     }
 }
@@ -281,7 +286,7 @@ mod unittests {
         let rng = ring::rand::SystemRandom::new();
         let sk = crate::signature::SecretKey::generate("test-key".to_string(), &rng).unwrap();
         let key = r.key.clone();
-        r.value.sign(&key, &[sk]);
+        r.value.sign_mut(&key, std::slice::from_ref(&sk));
         assert_eq!(r.value.signatures.len(), 1);
         assert_eq!(r.value.signatures.iter().next().unwrap().name(), "test-key");
     }
