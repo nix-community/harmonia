@@ -36,7 +36,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["sync", "fs", "io-util", "rt", "rt-multi-thread", "macros", "time", "net", "signal"] }
 env_logger = "0.11"
-toml = "1.0"
+toml = "1.1"
 thiserror = "2"
 hex = "0.4"
 prometheus = { version = "0.14", default-features = false }
@@ -64,11 +64,11 @@ syn = "2.0"
 proptest = "1.10"
 proptest-derive = "0.8"
 rstest = "0.26"
-tempfile = "3.25"
+tempfile = "3.27"
 test-strategy = "0.4"
 
 # Database
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

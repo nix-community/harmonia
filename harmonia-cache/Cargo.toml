@@ -22,14 +22,14 @@ log = { workspace = true }
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml = "1.0"
+toml = "1.1"
 mime = "0.3"
 tokio = { workspace = true }
 http-range = "0.1"
 askama_escape = "0.15.4"
 percent-encoding = "2.3.2"
 thiserror = { workspace = true }
-tempfile = "3.25"
+tempfile = "3.27"
 url = "2.5.7"
 async-compression = { version = "0.4.41", features = ["tokio", "bzip2"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
