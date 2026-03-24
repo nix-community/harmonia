@@ -651,10 +651,13 @@ mod tests {
     use crate::de::NixRead;
     use crate::ser::NixWrite;
     use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
-    use harmonia_store_core::signature::Signature;
+    use harmonia_store_core::signature::{RawSignature, SIGNATURE_BYTES, Signature};
 
     fn test_sig() -> Signature {
-        Signature::from_parts("asdf", &[0u8; 64]).unwrap()
+        Signature {
+            key_name: "asdf".to_string(),
+            sig: RawSignature([0u8; SIGNATURE_BYTES]),
+        }
     }
 
     fn test_realisation() -> Realisation {

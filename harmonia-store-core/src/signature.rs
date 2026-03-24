@@ -7,15 +7,13 @@ use std::sync::Arc;
 
 use data_encoding::BASE64;
 
+use crate::store_path::{StoreDir, StorePath};
+use harmonia_utils_base_encoding::base64_len;
 use ring::error::{KeyRejected, Unspecified};
 use ring::rand;
 use ring::signature::{self, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::error;
-
-use crate::store_path::{StoreDir, StorePath};
-use harmonia_utils_base_encoding::base64_len;
 
 pub const SIGNATURE_BYTES: usize = 64;
 const SIGNATURE_BASE64_LEN: usize = base64_len(SIGNATURE_BYTES);
@@ -81,8 +79,8 @@ impl<'de> Deserialize<'de> for RawSignature {
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Signature {
-    key_name: String,
-    sig: RawSignature,
+    pub key_name: String,
+    pub sig: RawSignature,
 }
 
 impl Signature {
@@ -92,24 +90,6 @@ impl Signature {
 
     pub fn signature_bytes(&self) -> &[u8] {
         &self.sig.0
-    }
-
-    pub fn from_parts(name: &str, signature: &[u8]) -> Result<Signature, ParseSignatureError> {
-        if signature.len() != SIGNATURE_BYTES {
-            error!(
-                "Signature wrong length {}!={}",
-                signature.len(),
-                SIGNATURE_BYTES
-            );
-            return Err(ParseSignatureError::InvalidSignature);
-        }
-        let mut data = [0u8; SIGNATURE_BYTES];
-        data.copy_from_slice(signature);
-
-        Ok(Self {
-            key_name: name.to_string(),
-            sig: RawSignature(data),
-        })
     }
 }
 
