@@ -1134,6 +1134,20 @@ name = "harmonia-ssh-store"
 version = "3.0.0"
 
 [[package]]
+name = "harmonia-store-aterm"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "bytes",
+ "harmonia-store-core",
+ "harmonia-utils-hash",
+ "harmonia-utils-test",
+ "memchr",
+ "rstest",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "harmonia-store-core"
 version = "0.0.0-alpha.0"
 dependencies = [
