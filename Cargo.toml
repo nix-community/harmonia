@@ -7,6 +7,7 @@ members = [
   "harmonia-store-core",
   "harmonia-store-db",
   "harmonia-store-remote",
+  "harmonia-store-aterm",
   "harmonia-nar",
   "harmonia-protocol",
   "harmonia-protocol-derive",
@@ -51,6 +52,7 @@ derive_more = { version = "2.1", features = ["display"] }
 pin-project-lite = "0.2"
 futures = "0.3"
 tokio-util = "0.7"
+memchr = "2"
 ring = "0.17"
 tracing = "0.1"
 tracing-futures = "0.2"
@@ -85,6 +87,7 @@ harmonia-nar = { path = "harmonia-nar" }
 harmonia-protocol-derive = { path = "harmonia-protocol-derive" }
 harmonia-store-db = { path = "harmonia-store-db" }
 harmonia-store-remote = { path = "harmonia-store-remote" }
+harmonia-store-aterm = { path = "harmonia-store-aterm" }
 
 # Profiling profile: release optimizations with debug info for flamegraphs/perf
 [profile.profiling]
