@@ -2,21 +2,27 @@ use std::collections::BTreeMap;
 
 use harmonia_store_core::ByteString;
 use harmonia_store_core::derivation::{
-    Derivation, DerivationInputs, DerivationOutput, OutputInputs, StructuredAttrs,
+    DerivationInputs, DerivationOutput, DerivationT, OutputInputs, StructuredAttrs,
 };
 use harmonia_store_core::derived_path::OutputName;
 use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 use harmonia_utils_hash::fmt::CommonHash as _;
 
 /// Print a derivation in Nix ATerm format.
-pub fn print_derivation_aterm(store_dir: &StoreDir, drv: &Derivation) -> String {
+pub fn print_derivation_aterm<I>(store_dir: &StoreDir, drv: &DerivationT<I>) -> String
+where
+    for<'a> DerivationInputs: From<&'a I>,
+{
     let mut out = String::new();
     write_derivation(store_dir, drv, &mut out);
     out
 }
 
 /// Write a derivation in Nix ATerm format to a string buffer.
-pub fn write_derivation(store_dir: &StoreDir, drv: &Derivation, out: &mut String) {
+pub fn write_derivation<I>(store_dir: &StoreDir, drv: &DerivationT<I>, out: &mut String)
+where
+    for<'a> DerivationInputs: From<&'a I>,
+{
     out.push_str("Derive(");
 
     // Outputs

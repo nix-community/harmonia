@@ -1,6 +1,7 @@
 mod basic_derivation;
 mod derivation_output;
 mod inputs;
+mod resolve;
 
 pub use basic_derivation::{BasicDerivation, Derivation, DerivationT, StructuredAttrs};
 pub use derivation_output::{DerivationOutput, DerivationOutputs, OutputPathName};
