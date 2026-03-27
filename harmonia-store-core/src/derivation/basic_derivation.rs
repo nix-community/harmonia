@@ -231,6 +231,57 @@ impl<'de> Deserialize<'de> for Derivation {
     }
 }
 
+impl<Inputs> DerivationT<Inputs> {
+    /// Replace all occurrences of each rewrite's key with its value in builder,
+    /// args, env (keys and values), and structured_attrs.
+    ///
+    /// This is used during derivation resolution to substitute CA output
+    /// placeholders with their actual store paths.
+    pub fn apply_rewrites(&mut self, rewrites: &BTreeMap<ByteString, ByteString>) {
+        if rewrites.is_empty() {
+            return;
+        }
+
+        fn rewrite(s: &ByteString, rewrites: &BTreeMap<ByteString, ByteString>) -> ByteString {
+            let mut buf = Vec::from(s.as_ref());
+            for (from, to) in rewrites {
+                // Repeatedly scan for the pattern and replace all occurrences.
+                // TODO: after https://github.com/tokio-rs/bytes/issues/824 is resolved, use the replace method on BytesMut.
+                let mut i = 0;
+                while i + from.len() <= buf.len() {
+                    if buf[i..i + from.len()] == **from {
+                        buf.splice(i..i + from.len(), to.iter().copied());
+                        i += to.len();
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            ByteString::from(buf)
+        }
+
+        self.builder = rewrite(&self.builder, rewrites);
+
+        for arg in &mut self.args {
+            *arg = rewrite(arg, rewrites);
+        }
+
+        let old_env = std::mem::take(&mut self.env);
+        for (k, v) in old_env {
+            self.env
+                .insert(rewrite(&k, rewrites), rewrite(&v, rewrites));
+        }
+
+        if let Some(ref mut sa) = self.structured_attrs {
+            let json_bytes = ByteString::from(serde_json::to_string(&sa.attrs).unwrap());
+            let rewritten = rewrite(&json_bytes, rewrites);
+            if let Ok(attrs) = serde_json::from_slice(&rewritten) {
+                sa.attrs = attrs;
+            }
+        }
+    }
+}
+
 impl Derivation {
     /// Create a new derivation with the given name, platform, and builder, which are the minimal
     /// fields for a derivation.
