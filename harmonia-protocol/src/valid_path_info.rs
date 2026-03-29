@@ -42,6 +42,8 @@ pub struct ValidPathInfo {
     pub info: UnkeyedValidPathInfo,
 }
 
+// JSON format version 2, matching upstream Nix
+
 fn is_false(b: &bool) -> bool {
     !b
 }
@@ -119,7 +121,7 @@ where
         signatures: Cow::Borrowed(&info.signatures),
         store_dir: Cow::Borrowed(&info.store_dir),
         ultimate: info.ultimate,
-        version: 3,
+        version: 2,
     };
     raw.serialize(serializer)
 }
@@ -129,9 +131,9 @@ where
     D: serde::Deserializer<'de>,
 {
     let raw = RawUnkeyedValidPathInfo::deserialize(deserializer)?;
-    if raw.version != 3 {
+    if raw.version != 2 {
         return Err(serde::de::Error::custom(format!(
-            "unsupported path-info version: {}, expected 3",
+            "unsupported path-info version: {}, expected 2",
             raw.version
         )));
     }
@@ -182,7 +184,7 @@ impl Serialize for Pure<UnkeyedValidPathInfo> {
             signatures: Cow::Borrowed(&self.0.signatures),
             store_dir: Cow::Borrowed(&self.0.store_dir),
             ultimate: self.0.ultimate,
-            version: 3,
+            version: 2,
         };
         raw.serialize(serializer)
     }

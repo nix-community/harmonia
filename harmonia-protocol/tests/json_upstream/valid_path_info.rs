@@ -83,25 +83,25 @@ fn impure_info() -> UnkeyedValidPathInfo {
 // Pure format
 test_upstream_json!(
     test_valid_path_info_empty_pure,
-    libstore_test_data_path("path-info/json-3/empty_pure.json"),
+    libstore_test_data_path("path-info/json-2/empty_pure.json"),
     Pure(empty_info())
 );
 
 test_upstream_json!(
     test_valid_path_info_pure,
-    libstore_test_data_path("path-info/json-3/pure.json"),
+    libstore_test_data_path("path-info/json-2/pure.json"),
     Pure(pure_info())
 );
 
-// Impure format
+// Impure format tests - default serialization
 test_upstream_json!(
     test_valid_path_info_empty_impure,
-    libstore_test_data_path("path-info/json-3/empty_impure.json"),
+    libstore_test_data_path("path-info/json-2/empty_impure.json"),
     empty_info()
 );
 
 test_upstream_json!(
     test_valid_path_info_impure,
-    libstore_test_data_path("path-info/json-3/impure.json"),
+    libstore_test_data_path("path-info/json-2/impure.json"),
     impure_info()
 );
