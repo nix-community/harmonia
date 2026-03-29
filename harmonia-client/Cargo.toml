@@ -1,12 +1,12 @@
 [package]
-name = "harmonia-client"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-client"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-readme = "README.md"
+readme               = "README.md"
 
 [[bin]]
 name = "harmonia"

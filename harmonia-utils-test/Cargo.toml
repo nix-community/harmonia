@@ -3,23 +3,23 @@
 # SPDX-License-Identifier: MIT
 
 [package]
-name = "harmonia-utils-test"
-version = "0.0.0-alpha.0"
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-utils-test"
+version              = "0.0.0-alpha.0"
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-description = "Test utilities for Harmonia (proptest strategies, macros)"
-readme = "README.md"
+description          = "Test utilities for Harmonia (proptest strategies, macros)"
+readme               = "README.md"
 
 [dependencies]
-bytes = { workspace = true }
-paste = "1.0"
-proptest = { workspace = true }
-serde = { workspace = true }
+bytes      = { workspace = true }
+paste      = "1.0"
+proptest   = { workspace = true }
+serde      = { workspace = true }
 serde_json = { workspace = true }
-tempfile = { workspace = true }
+tempfile   = { workspace = true }
 
 [lints]
 workspace = true
