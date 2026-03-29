@@ -232,6 +232,20 @@ impl<'de> Deserialize<'de> for Derivation {
 }
 
 impl<Inputs> DerivationT<Inputs> {
+    /// Transform inputs, keeping everything else the same.
+    pub fn map_inputs<T>(self, f: impl FnOnce(Inputs) -> T) -> DerivationT<T> {
+        DerivationT {
+            name: self.name,
+            outputs: self.outputs,
+            inputs: f(self.inputs),
+            platform: self.platform,
+            builder: self.builder,
+            args: self.args,
+            env: self.env,
+            structured_attrs: self.structured_attrs,
+        }
+    }
+
     /// Replace all occurrences of each rewrite's key with its value in builder,
     /// args, env (keys and values), and structured_attrs.
     ///
