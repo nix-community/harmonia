@@ -3,26 +3,26 @@
 # SPDX-License-Identifier: MIT
 
 [package]
-name = "harmonia-utils-base-encoding"
-version = "0.0.0-alpha.0"
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-utils-base-encoding"
+version              = "0.0.0-alpha.0"
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-description = "Base encoding utilities for Harmonia (Nix base32, hex, base64)"
-readme = "README.md"
+description          = "Base encoding utilities for Harmonia (Nix base32, hex, base64)"
+readme               = "README.md"
 
 [dependencies]
 data-encoding = { workspace = true }
-derive_more = { workspace = true }
-serde = { workspace = true }
+derive_more   = { workspace = true }
+serde         = { workspace = true }
 
 [dev-dependencies]
 hex-literal = "1.1"
-proptest = { workspace = true }
-rstest = { workspace = true }
-serde_json = { workspace = true }
+proptest    = { workspace = true }
+rstest      = { workspace = true }
+serde_json  = { workspace = true }
 
 [lints]
 workspace = true

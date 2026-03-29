@@ -3,41 +3,41 @@
 # SPDX-License-Identifier: MIT
 
 [package]
-name = "harmonia-nar"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-nar"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-description = "NAR (Nix ARchive) format packing and unpacking"
-readme = "README.md"
+description          = "NAR (Nix ARchive) format packing and unpacking"
+readme               = "README.md"
 
 [dependencies]
-bstr = "1.11"
-bytes = { workspace = true }
-derive_more = { workspace = true }
-futures = { workspace = true }
+bstr              = "1.11"
+bytes             = { workspace = true }
+derive_more       = { workspace = true }
+futures           = { workspace = true }
 harmonia-utils-io = { version = "0.0.0-alpha.0" }
-pin-project-lite = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util"] }
-tokio-util = { workspace = true, features = ["io", "io-util"] }
-tracing = { workspace = true }
-nix.workspace = true
-walkdir = "2.5"
+nix.workspace     = true
+pin-project-lite  = { workspace = true }
+thiserror         = { workspace = true }
+tokio             = { workspace = true, features = [ "fs", "io-util" ] }
+tokio-util        = { workspace = true, features = [ "io", "io-util" ] }
+tracing           = { workspace = true }
+walkdir           = "2.5"
 
 [dev-dependencies]
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
-proptest = { workspace = true }
-rstest = { workspace = true }
-tempfile = { workspace = true }
-test-strategy = { workspace = true }
-tokio-test = "0.4"
-test-log = "0.2"
+proptest            = { workspace = true }
+rstest              = { workspace = true }
+tempfile            = { workspace = true }
+test-log            = "0.2"
+test-strategy       = { workspace = true }
+tokio-test          = "0.4"
 
 [features]
-test = []
+test = [  ]
 
 [lints]
 workspace = true

@@ -1,50 +1,63 @@
 [package]
-name = "harmonia-cache"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-cache"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-readme = "README.md"
+readme               = "README.md"
 
 [[bin]]
 name = "harmonia-cache"
 path = "src/main.rs"
 
 [dependencies]
-actix-web = { version = "4", default-features = false, features = ["macros", "compress-zstd", "cookies", "rustls-0_23"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+actix-files = "0.6.10"
+actix-web = { version = "4", default-features = false, features = [
+    "macros",
+    "compress-zstd",
+    "cookies",
+    "rustls-0_23",
+] }
+askama_escape = "0.15.4"
+async-compression = { version = "0.4.41", features = [ "tokio", "bzip2" ] }
+env_logger = { version = "0.11", default-features = false, features = [
+    "auto-color",
+    "humantime",
+] }
+http-range = "0.1"
+log = { workspace = true }
+mime = "0.3"
+percent-encoding = "2.3.2"
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+    "logging",
+] }
 rustls-pemfile = "2"
 rustls-pki-types = "1"
-actix-files = "0.6.10"
-log = { workspace = true }
-env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml = "1.1"
-mime = "0.3"
-tokio = { workspace = true }
-http-range = "0.1"
-askama_escape = "0.15.4"
-percent-encoding = "2.3.2"
-thiserror = { workspace = true }
 tempfile = "3.27"
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { version = "0.7.18", features = [ "io" ] }
+toml = "1.1"
 url = "2.5.7"
-async-compression = { version = "0.4.41", features = ["tokio", "bzip2"] }
-tokio-util = { version = "0.7.18", features = ["io"] }
 # Nix.rs-based crates
-harmonia-store-core = { version = "0.0.0-alpha.0" }
+futures               = { workspace = true }
+harmonia-nar          = { version = "3.0.0" }
+harmonia-store-core   = { version = "0.0.0-alpha.0" }
 harmonia-store-remote = { version = "3.0.0" }
-harmonia-nar = { version = "3.0.0" }
-harmonia-utils-hash = { version = "0.0.0-alpha.0" }
-futures = { workspace = true }
-prometheus = { workspace = true }
+harmonia-utils-hash   = { version = "0.0.0-alpha.0" }
+prometheus            = { workspace = true }
 
 [dev-dependencies]
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
-nix = { workspace = true }
-tokio = { workspace = true, features = ["process"] }
+nix                 = { workspace = true }
+tokio               = { workspace = true, features = [ "process" ] }
 
 [lints]
 workspace = true

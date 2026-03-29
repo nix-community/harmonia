@@ -1,95 +1,105 @@
 [workspace]
 members = [
-  "harmonia-client",
-  "harmonia-utils-io",
-  "harmonia-utils-base-encoding",
-  "harmonia-utils-hash",
-  "harmonia-store-core",
-  "harmonia-store-db",
-  "harmonia-store-remote",
-  "harmonia-store-aterm",
-  "harmonia-nar",
-  "harmonia-protocol",
-  "harmonia-protocol-derive",
-  "harmonia-ssh-store",
-  "harmonia-cache",
-  "harmonia-daemon",
-  "harmonia-utils-test",
-  "harmonia-bench",
+    "harmonia-client",
+    "harmonia-utils-io",
+    "harmonia-utils-base-encoding",
+    "harmonia-utils-hash",
+    "harmonia-store-core",
+    "harmonia-store-db",
+    "harmonia-store-remote",
+    "harmonia-store-aterm",
+    "harmonia-nar",
+    "harmonia-protocol",
+    "harmonia-protocol-derive",
+    "harmonia-ssh-store",
+    "harmonia-cache",
+    "harmonia-daemon",
+    "harmonia-utils-test",
+    "harmonia-bench",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "3.0.0"
 authors = [
-  "Jörg Thalheim <joerg@thalheim.io>",
-  "Simon Hauser <simon.hauser@helsinki-systems.de>",
-  "John Ericson <John.Ericson@Obsidian.Systems>",
+    "Jörg Thalheim <joerg@thalheim.io>",
+    "Simon Hauser <simon.hauser@helsinki-systems.de>",
+    "John Ericson <John.Ericson@Obsidian.Systems>",
 ]
 edition = "2024"
-license = "MIT"
 homepage = "https://github.com/nix-community/harmonia"
+license = "MIT"
 repository = "https://github.com/nix-community/harmonia.git"
+version = "3.0.0"
 
 [workspace.dependencies]
-log = "0.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1", features = ["sync", "fs", "io-util", "rt", "rt-multi-thread", "macros", "time", "net", "signal"] }
 env_logger = "0.11"
-toml = "1.1"
-thiserror = "2"
 hex = "0.4"
+log = "0.4"
+nix = { version = "0.31", features = [ "signal", "mman" ] }
 prometheus = { version = "0.14", default-features = false }
-nix = { version = "0.31", features = ["signal", "mman"] }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0"
+thiserror = "2"
+tokio = { version = "1", features = [
+    "sync",
+    "fs",
+    "io-util",
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "net",
+    "signal",
+] }
+toml = "1.1"
 
 # Dependencies for Nix.rs import (spec 001-nixrs-base)
-bytes = "1.11"
-data-encoding = "2.6"
-md5 = "0.8"
-num_enum = "0.7"
-derive_more = { version = "2.1", features = ["display"] }
+bytes            = "1.11"
+data-encoding    = "2.6"
+derive_more      = { version = "2.1", features = [ "display" ] }
+futures          = "0.3"
+md5              = "0.8"
+memchr           = "2"
+num_enum         = "0.7"
 pin-project-lite = "0.2"
-futures = "0.3"
-tokio-util = "0.7"
-memchr = "2"
-ring = "0.17"
-tracing = "0.1"
-tracing-futures = "0.2"
+ring             = "0.17"
+tokio-util       = "0.7"
+tracing          = "0.1"
+tracing-futures  = "0.2"
 
 # Proc macro dependencies for harmonia-protocol
 proc-macro2 = "1.0"
-quote = "1.0"
-syn = "2.0"
+quote       = "1.0"
+syn         = "2.0"
 
 # Dev dependencies for property-based testing
-proptest = "1.10"
+proptest        = "1.10"
 proptest-derive = "0.8"
-rstest = "0.26"
-tempfile = "3.27"
-test-strategy = "0.4"
+rstest          = "0.26"
+tempfile        = "3.27"
+test-strategy   = "0.4"
 
 # Database
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.39", features = [ "bundled" ] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
 
 # Patch internal crates to use local paths during development
 [patch.crates-io]
+harmonia-nar                 = { path = "harmonia-nar" }
+harmonia-protocol            = { path = "harmonia-protocol" }
+harmonia-protocol-derive     = { path = "harmonia-protocol-derive" }
+harmonia-store-aterm         = { path = "harmonia-store-aterm" }
+harmonia-store-core          = { path = "harmonia-store-core" }
+harmonia-store-db            = { path = "harmonia-store-db" }
+harmonia-store-remote        = { path = "harmonia-store-remote" }
 harmonia-utils-base-encoding = { path = "harmonia-utils-base-encoding" }
-harmonia-utils-hash = { path = "harmonia-utils-hash" }
-harmonia-utils-test = { path = "harmonia-utils-test" }
-harmonia-store-core = { path = "harmonia-store-core" }
-harmonia-utils-io = { path = "harmonia-utils-io" }
-harmonia-protocol = { path = "harmonia-protocol" }
-harmonia-nar = { path = "harmonia-nar" }
-harmonia-protocol-derive = { path = "harmonia-protocol-derive" }
-harmonia-store-db = { path = "harmonia-store-db" }
-harmonia-store-remote = { path = "harmonia-store-remote" }
-harmonia-store-aterm = { path = "harmonia-store-aterm" }
+harmonia-utils-hash          = { path = "harmonia-utils-hash" }
+harmonia-utils-io            = { path = "harmonia-utils-io" }
+harmonia-utils-test          = { path = "harmonia-utils-test" }
 
 # Profiling profile: release optimizations with debug info for flamegraphs/perf
 [profile.profiling]
+debug    = true
 inherits = "release"
-debug = true

@@ -6,27 +6,27 @@
 # Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
 
 [package]
-name = "harmonia-store-remote"
-description = "Nix daemon client library for remote store access"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-store-remote"
+description          = "Nix daemon client library for remote store access"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-readme = "README.md"
+readme               = "README.md"
 
 [dependencies]
 # Harmonia crates
-harmonia-utils-io = { version = "0.0.0-alpha.0" }
+harmonia-nar        = { version = "3.0.0" }
+harmonia-protocol   = { version = "3.0.0" }
 harmonia-store-core = { version = "0.0.0-alpha.0" }
-harmonia-protocol = { version = "3.0.0" }
-harmonia-nar = { version = "3.0.0" }
+harmonia-utils-io   = { version = "0.0.0-alpha.0" }
 
 # Async runtime
-tokio = { workspace = true }
-futures = { workspace = true }
 async-stream = "0.3"
+futures      = { workspace = true }
+tokio        = { workspace = true }
 
 # Utilities
 tracing = { workspace = true }
