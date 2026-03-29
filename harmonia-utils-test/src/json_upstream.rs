@@ -31,17 +31,23 @@ pub fn libutil_test_data_path(relative_path: &str) -> PathBuf {
         .join(relative_path)
 }
 
+/// Read and deserialize a value from an upstream Nix JSON file.
+pub fn read_upstream_json<T>(path: &Path) -> T
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let json_str = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
+    serde_json::from_str(&json_str)
+        .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path.display(), e))
+}
+
 /// Test reading (deserializing) from upstream Nix JSON format.
 pub fn test_upstream_json_from_json<T>(path: &Path, expected: &T)
 where
     T: for<'de> Deserialize<'de> + PartialEq + Debug,
 {
-    let json_str = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
-
-    let parsed: T = serde_json::from_str(&json_str)
-        .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path.display(), e));
-
+    let parsed = read_upstream_json::<T>(path);
     assert_eq!(parsed, *expected);
 }
 
@@ -50,11 +56,7 @@ pub fn test_upstream_json_to_json<T>(path: &Path, value: &T)
 where
     T: Serialize + for<'de> Deserialize<'de> + PartialEq + Debug,
 {
-    let json_str = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
-
-    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-
+    let json = read_upstream_json::<serde_json::Value>(path);
     let serialized = serde_json::to_value(value).unwrap();
     assert_eq!(json, serialized);
 }
