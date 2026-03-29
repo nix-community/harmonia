@@ -454,7 +454,7 @@ impl NixSerialize for Realisation {
     where
         W: NixWrite,
     {
-        writer.write_value(&self.id).await?;
+        writer.write_value(&self.key).await?;
         writer.write_value(&self.value).await
     }
 }
@@ -464,11 +464,11 @@ impl NixDeserialize for Realisation {
     where
         R: ?Sized + NixRead + Send,
     {
-        let Some(id) = reader.try_read_value::<DrvOutput>().await? else {
+        let Some(key) = reader.try_read_value::<DrvOutput>().await? else {
             return Ok(None);
         };
         let value = reader.read_value().await?;
-        Ok(Some(Realisation { id, value }))
+        Ok(Some(Realisation { key, value }))
     }
 }
 
@@ -742,7 +742,7 @@ mod tests {
 
     fn sample_realisation() -> Realisation {
         Realisation {
-            id: DrvOutput {
+            key: DrvOutput {
                 drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
                 output_name: "out".parse().unwrap(),
             },
@@ -772,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn nix_write_drv_output_missing_feature() {
-        let value = sample_realisation().id;
+        let value = sample_realisation().key;
         let mut mock = crate::ser::mock::Builder::new()
             .features(Default::default())
             .build();
