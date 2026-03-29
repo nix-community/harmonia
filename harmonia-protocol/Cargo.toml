@@ -3,59 +3,65 @@
 # SPDX-License-Identifier: MIT
 
 [package]
-name = "harmonia-protocol"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-protocol"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-description = "Nix daemon wire protocol types and serialization"
-readme = "README.md"
+description          = "Nix daemon wire protocol types and serialization"
+readme               = "README.md"
 
 [dependencies]
-async-stream = "0.3"
-bstr = "1.11"
-bytes = { workspace = true }
-derive_more = { workspace = true }
-futures = { workspace = true }
-libc = "0.2"
-num_enum = { workspace = true }
+async-stream     = "0.3"
+bstr             = "1.11"
+bytes            = { workspace = true }
+derive_more      = { workspace = true }
+futures          = { workspace = true }
+libc             = "0.2"
+num_enum         = { workspace = true }
 pin-project-lite = { workspace = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-serde_with = "3.17"
-test-strategy = { workspace = true, optional = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util"] }
-tokio-util = { workspace = true, features = ["io"] }
-tracing = { workspace = true }
+proptest         = { workspace = true, optional = true }
+proptest-derive  = { workspace = true, optional = true }
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+serde_with       = "3.17"
+test-strategy    = { workspace = true, optional = true }
+thiserror        = { workspace = true }
+tokio            = { workspace = true, features = [ "io-util" ] }
+tokio-util       = { workspace = true, features = [ "io" ] }
+tracing          = { workspace = true }
 
 # Internal dependencies
-harmonia-utils-test = { version = "0.0.0-alpha.0", optional = true }
-harmonia-utils-io = { version = "0.0.0-alpha.0" }
-harmonia-utils-hash = { version = "0.0.0-alpha.0" }
-harmonia-store-core = { version = "0.0.0-alpha.0" }
+harmonia-nar             = { version = "3.0.0" }
 harmonia-protocol-derive = { version = "3.0.0" }
-harmonia-nar = { version = "3.0.0" }
+harmonia-store-core      = { version = "0.0.0-alpha.0" }
+harmonia-utils-hash      = { version = "0.0.0-alpha.0" }
+harmonia-utils-io        = { version = "0.0.0-alpha.0" }
+harmonia-utils-test      = { version = "0.0.0-alpha.0", optional = true }
 
 [dev-dependencies]
-harmonia-store-core = { version = "0.0.0-alpha.0", features = ["test"] }
-harmonia-nar = { version = "3.0.0", features = ["test"] }
+harmonia-nar        = { version = "3.0.0", features = [ "test" ] }
+harmonia-store-core = { version = "0.0.0-alpha.0", features = [ "test" ] }
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
-paste = "1.0"
-proptest = { workspace = true }
-proptest-derive = { workspace = true }
-rstest = { workspace = true }
-test-strategy = { workspace = true }
-tokio-test = "0.4"
-hex-literal = "1.1"
-test-log = "0.2"
+hex-literal         = "1.1"
+paste               = "1.0"
+proptest            = { workspace = true }
+proptest-derive     = { workspace = true }
+rstest              = { workspace = true }
+test-log            = "0.2"
+test-strategy       = { workspace = true }
+tokio-test          = "0.4"
 
 [features]
-test = ["proptest", "proptest-derive", "test-strategy", "harmonia-utils-test", "harmonia-utils-hash/test"]
+test = [
+    "proptest",
+    "proptest-derive",
+    "test-strategy",
+    "harmonia-utils-test",
+    "harmonia-utils-hash/test",
+]
 
 [[test]]
 name = "json_upstream"

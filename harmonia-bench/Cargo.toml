@@ -1,18 +1,18 @@
 [package]
-name = "harmonia-bench"
+name              = "harmonia-bench"
 version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
-criterion = { version = "0.8", features = ["html_reports"] }
+criterion          = { version = "0.8", features = [ "html_reports" ] }
+nix.workspace      = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "io-util"] }
-nix.workspace = true
+tokio              = { workspace = true, features = [ "rt-multi-thread", "time", "net", "io-util" ] }
 
 [[bench]]
-name = "closure_download"
 harness = false
+name    = "closure_download"
 
 [[bench]]
-name = "http_download"
 harness = false
+name    = "http_download"

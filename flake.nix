@@ -91,6 +91,7 @@
             programs.nixfmt.enable = true;
             programs.deadnix.enable = true;
             programs.clang-format.enable = true;
+            programs.taplo.enable = true;
           };
         };
       flake.nixosModules.harmonia =
