@@ -6,7 +6,7 @@ use harmonia_protocol::daemon_wire::types2::{
     Microseconds, SuccessStatus,
 };
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::realisation::UnkeyedRealisation;
+use harmonia_store_core::realisation::Realisation;
 
 test_upstream_json!(
     test_build_result_success,
@@ -18,16 +18,24 @@ test_upstream_json!(
                 built_outputs: [
                     (
                         "bar".parse::<OutputName>().unwrap(),
-                        UnkeyedRealisation {
+                        Realisation {
+                            id: "sha256:6f869f9ea2823bda165e06076fd0de4366dead2c0e8d2dbbad277d4f15c373f5!bar"
+                                .parse()
+                                .unwrap(),
                             out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar".parse().unwrap(),
                             signatures: Default::default(),
+                            dependent_realisations: Default::default(),
                         },
                     ),
                     (
                         "foo".parse::<OutputName>().unwrap(),
-                        UnkeyedRealisation {
+                        Realisation {
+                            id: "sha256:6f869f9ea2823bda165e06076fd0de4366dead2c0e8d2dbbad277d4f15c373f5!foo"
+                                .parse()
+                                .unwrap(),
                             out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
                             signatures: Default::default(),
+                            dependent_realisations: Default::default(),
                         },
                     ),
                 ]
