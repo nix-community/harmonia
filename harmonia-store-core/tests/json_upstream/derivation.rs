@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
-use harmonia_store_core::derivation::{Derivation, DerivationOutput, StructuredAttrs};
+use harmonia_store_core::derivation::{
+    BasicDerivation, Derivation, DerivationOutput, StructuredAttrs,
+};
 use harmonia_store_core::derived_path::{OutputName, SingleDerivedPath};
 use harmonia_store_core::placeholder::Placeholder;
 use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
@@ -346,6 +348,217 @@ test_upstream_json!(
                 "name": "advanced-attributes-structured-attrs-defaults",
                 "outputs": ["out", "dev"],
                 "system": "my-system"
+            }))
+            .unwrap(),
+        }),
+    }
+);
+
+// try-resolve "before" tests (Derivation JSON format)
+
+test_upstream_json!(
+    test_try_resolve_no_inputs_before,
+    libstore_test_data_path("derivation/try-resolve/no-inputs-before.json"),
+    Derivation {
+        name: "no-inputs".parse().unwrap(),
+        outputs: {
+            let mut map = BTreeMap::new();
+            map.insert("out".parse().unwrap(), ca_floating_output());
+            map
+        },
+        inputs: BTreeSet::new(),
+        platform: bytes::Bytes::from("x86_64-linux"),
+        builder: bytes::Bytes::from("/bin/bash"),
+        args: vec![],
+        env: {
+            let mut map = BTreeMap::new();
+            map.insert(bytes::Bytes::from("FOO"), bytes::Bytes::from("bar"));
+            map
+        },
+        structured_attrs: None,
+    }
+);
+
+test_upstream_json!(
+    test_try_resolve_with_inputs_before,
+    libstore_test_data_path("derivation/try-resolve/with-inputs-before.json"),
+    {
+        let dep1_drv = Arc::new(SingleDerivedPath::Opaque(
+            "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep1.drv".parse().unwrap(),
+        ));
+        let dep2_drv = Arc::new(SingleDerivedPath::Opaque(
+            "h1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep2.drv".parse().unwrap(),
+        ));
+
+        let dep1_drv_path: harmonia_store_core::store_path::StorePath =
+            "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep1.drv".parse().unwrap();
+        let dep2_drv_path: harmonia_store_core::store_path::StorePath =
+            "h1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep2.drv".parse().unwrap();
+
+        let placeholder1_out =
+            Placeholder::ca_output(&dep1_drv_path, &"out".parse().unwrap()).render();
+        let placeholder1_dev =
+            Placeholder::ca_output(&dep1_drv_path, &"dev".parse().unwrap()).render();
+        let placeholder2_out =
+            Placeholder::ca_output(&dep2_drv_path, &"out".parse().unwrap()).render();
+
+        let ph1_out = placeholder1_out.to_string_lossy().to_string();
+        let ph1_dev = placeholder1_dev.to_string_lossy().to_string();
+        let ph2_out = placeholder2_out.to_string_lossy().to_string();
+
+        Derivation {
+            name: "with-inputs".parse().unwrap(),
+            outputs: {
+                let mut map = BTreeMap::new();
+                map.insert("dev".parse().unwrap(), ca_floating_output());
+                map.insert("out".parse().unwrap(), ca_floating_output());
+                map
+            },
+            inputs: [
+                SingleDerivedPath::Built {
+                    drv_path: dep1_drv.clone(),
+                    output: "dev".parse().unwrap(),
+                },
+                SingleDerivedPath::Built {
+                    drv_path: dep1_drv,
+                    output: "out".parse().unwrap(),
+                },
+                SingleDerivedPath::Built {
+                    drv_path: dep2_drv,
+                    output: "out".parse().unwrap(),
+                },
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>(),
+            platform: bytes::Bytes::from("x86_64-linux"),
+            builder: bytes::Bytes::from("/bin/bash"),
+            args: vec![],
+            env: {
+                let mut map = BTreeMap::new();
+                map.insert(bytes::Bytes::from("DEP1_DEV"), bytes::Bytes::from(ph1_dev));
+                map.insert(
+                    bytes::Bytes::from("DEP1_OUT"),
+                    bytes::Bytes::from(format!("prefix-{ph1_out}-suffix")),
+                );
+                map.insert(
+                    bytes::Bytes::from("DEP2"),
+                    bytes::Bytes::from(ph2_out.clone()),
+                );
+                map
+            },
+            structured_attrs: Some(StructuredAttrs {
+                attrs: serde_json::from_value(serde_json::json!({
+                    "dep1out": ph1_out,
+                    "nested": {
+                        "dep2": format!("before {ph2_out} after")
+                    }
+                }))
+                .unwrap(),
+            }),
+        }
+    }
+);
+
+test_upstream_json!(
+    test_try_resolve_resolution_failure_before,
+    libstore_test_data_path("derivation/try-resolve/resolution-failure-before.json"),
+    {
+        let dep_drv = Arc::new(SingleDerivedPath::Opaque(
+            "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep.drv".parse().unwrap(),
+        ));
+
+        Derivation {
+            name: "resolution-failure".parse().unwrap(),
+            outputs: {
+                let mut map = BTreeMap::new();
+                map.insert("out".parse().unwrap(), ca_floating_output());
+                map
+            },
+            inputs: [SingleDerivedPath::Built {
+                drv_path: dep_drv,
+                output: "out".parse().unwrap(),
+            }]
+            .into_iter()
+            .collect::<BTreeSet<_>>(),
+            platform: bytes::Bytes::from("x86_64-linux"),
+            builder: bytes::Bytes::from("/bin/bash"),
+            args: vec![],
+            env: BTreeMap::new(),
+            structured_attrs: None,
+        }
+    }
+);
+
+// try-resolve "after" tests (BasicDerivation / resolved derivation JSON format)
+
+test_upstream_json!(
+    test_try_resolve_no_inputs_after,
+    libstore_test_data_path("derivation/try-resolve/no-inputs-after.json"),
+    BasicDerivation {
+        name: "no-inputs".parse().unwrap(),
+        outputs: {
+            let mut map = BTreeMap::new();
+            map.insert("out".parse().unwrap(), ca_floating_output());
+            map
+        },
+        inputs: BTreeSet::new(),
+        platform: bytes::Bytes::from("x86_64-linux"),
+        builder: bytes::Bytes::from("/bin/bash"),
+        args: vec![],
+        env: {
+            let mut map = BTreeMap::new();
+            map.insert(bytes::Bytes::from("FOO"), bytes::Bytes::from("bar"));
+            map
+        },
+        structured_attrs: None,
+    }
+);
+
+test_upstream_json!(
+    test_try_resolve_with_inputs_after,
+    libstore_test_data_path("derivation/try-resolve/with-inputs-after.json"),
+    BasicDerivation {
+        name: "with-inputs".parse().unwrap(),
+        outputs: {
+            let mut map = BTreeMap::new();
+            map.insert("dev".parse().unwrap(), ca_floating_output());
+            map.insert("out".parse().unwrap(), ca_floating_output());
+            map
+        },
+        inputs: [
+            "f1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep1-out".parse().unwrap(),
+            "i1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep2-out".parse().unwrap(),
+            "j1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep1-dev".parse().unwrap(),
+        ]
+        .into_iter()
+        .collect(),
+        platform: bytes::Bytes::from("x86_64-linux"),
+        builder: bytes::Bytes::from("/bin/bash"),
+        args: vec![],
+        env: {
+            let mut map = BTreeMap::new();
+            map.insert(
+                bytes::Bytes::from("DEP1_DEV"),
+                bytes::Bytes::from("/nix/store/j1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep1-dev"),
+            );
+            map.insert(
+                bytes::Bytes::from("DEP1_OUT"),
+                bytes::Bytes::from(
+                    "prefix-/nix/store/f1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep1-out-suffix",
+                ),
+            );
+            map.insert(
+                bytes::Bytes::from("DEP2"),
+                bytes::Bytes::from("/nix/store/i1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep2-out"),
+            );
+            map
+        },
+        structured_attrs: Some(StructuredAttrs {
+            attrs: serde_json::from_value(serde_json::json!({
+                "dep1out": "/nix/store/f1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep1-out",
+                "nested": {
+                    "dep2": "before /nix/store/i1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep2-out after"
+                }
             }))
             .unwrap(),
         }),
