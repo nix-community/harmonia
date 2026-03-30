@@ -20,7 +20,7 @@ actix-web = { version = "4", default-features = false, features = [
     "cookies",
     "rustls-0_23",
 ] }
-askama_escape = "0.15.4"
+askama_escape = "0.15.6"
 async-compression = { version = "0.4.41", features = [ "tokio", "bzip2" ] }
 env_logger = { version = "0.11", default-features = false, features = [
     "auto-color",

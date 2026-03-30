@@ -306,9 +306,9 @@ dependencies = [
 
 [[package]]
 name = "askama_escape"
-version = "0.15.4"
+version = "0.15.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7416d225cbbaf6dbd8c983d3544adfa5688e2184bf404c6d8d0d9b53c59a9a0a"
+checksum = "9052d81ace9a973fdd8d9c35e8d06e6338945fbf462c7fa72ed4f0767d6a0d4b"
 
 [[package]]
 name = "async-compression"
