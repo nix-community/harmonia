@@ -1,0 +1,42 @@
+name: Sync main into nix-next
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: nix-next
+          fetch-depth: 0
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+      - name: Create PR to merge main into nix-next
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # Check if a sync PR already exists
+          existing=$(gh pr list --base nix-next --head main --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "Sync PR #$existing already exists, skipping"
+            exit 0
+          fi
+
+          # Check if main is already merged into nix-next
+          if git merge-base --is-ancestor origin/main origin/nix-next; then
+            echo "nix-next is already up to date with main"
+            exit 0
+          fi
+
+          gh pr create \
+            --base nix-next \
+            --head main \
+            --title "Merge \`main\` into \`nix-next\`" \
+            --body "Automated PR to keep \`nix-next\` in sync with \`main\`." \
+            --label auto-merge
