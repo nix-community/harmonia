@@ -34,15 +34,12 @@ tracing                      = { workspace = true }
 zerocopy                     = { version = "0.8", features = [ "derive" ] }
 
 [dev-dependencies]
-harmonia-utils-test = { version = "0.0.0-alpha.0" }
+harmonia-store-core = { path = ".", features = [ "test" ] }
 hex-literal         = "1.1"
-proptest            = { workspace = true }
-proptest-derive     = { workspace = true }
 rstest              = { workspace = true }
 rstest_reuse        = "0.7"
 tempfile            = { workspace = true }
 test-log            = "0.2"
-test-strategy       = { workspace = true }
 tokio-test          = "0.4"
 
 [features]
