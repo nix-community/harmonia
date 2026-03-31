@@ -23,6 +23,7 @@ Supporting the latest Nix `master` branch.
 
 ### Added
 
+- `BasicDerivation` JSON serialization and deserialization, using a flat store-path array for inputs (vs. `Derivation`'s nested `{srcs, drvs}` format).
 - `UnkeyedRealisation` type with `out_path` and `signatures` fields.
 
 ## [Unreleased]
