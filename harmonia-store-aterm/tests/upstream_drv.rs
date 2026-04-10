@@ -29,6 +29,7 @@ use rstest::rstest;
 #[case::ia_advanced_attributes_structured_attrs_defaults(
     "derivation/ia/advanced-attributes-structured-attrs-defaults"
 )]
+#[case::dyn_dep("derivation/dyn-dep-derivation")]
 fn drv_matches_json_and_roundtrips(#[case] base_path: &str) {
     let store_dir = StoreDir::default();
 
@@ -52,4 +53,18 @@ fn drv_matches_json_and_roundtrips(#[case] base_path: &str) {
     // Print back to ATerm and verify roundtrip
     let printed = print_derivation_aterm(&store_dir, &from_aterm);
     assert_eq!(printed, drv_str);
+}
+
+#[rstest]
+#[case::bad_version("derivation/bad-version.drv")]
+#[case::bad_old_version_dyn_deps("derivation/bad-old-version-dyn-deps.drv")]
+fn drv_parse_error(#[case] relative_path: &str) {
+    let store_dir = StoreDir::default();
+    let drv_path = libstore_test_data_path(relative_path);
+    let drv_str = std::fs::read_to_string(&drv_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", drv_path.display()));
+    assert!(
+        parse_derivation_aterm(&store_dir, &drv_str, "test".parse().unwrap()).is_err(),
+        "{relative_path} should fail to parse"
+    );
 }

@@ -16,6 +16,15 @@ use harmonia_utils_hash::fmt::NonSRI;
 
 use crate::ParseError;
 
+/// ATerm derivation format version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ATermVersion {
+    /// Traditional unversioned form.
+    Traditional,
+    /// Supports dynamic derivation inputs.
+    DynamicDerivations,
+}
+
 pub(crate) struct Parser<'a> {
     bytes: &'a [u8],
     pos: usize,
@@ -44,12 +53,12 @@ impl<'a> Parser<'a> {
         &mut self,
         name: StorePathName,
     ) -> Result<Derivation, ParseError> {
-        self.expect_str("Derive(")?;
+        let version = self.parse_drv_header()?;
 
         let raw_outputs = self.parse_raw_outputs()?;
         self.expect_char(',')?;
 
-        let input_drvs = self.parse_input_drvs()?;
+        let input_drvs = self.parse_input_drvs(version)?;
         self.expect_char(',')?;
 
         let input_srcs = self.parse_input_srcs()?;
@@ -105,6 +114,31 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_drv_header(&mut self) -> Result<ATermVersion, ParseError> {
+        if self.bytes[self.pos..].starts_with(b"Derive(") {
+            self.pos += b"Derive(".len();
+            Ok(ATermVersion::Traditional)
+        } else if self.bytes[self.pos..].starts_with(b"DrvWithVersion(") {
+            self.pos += b"DrvWithVersion(".len();
+            let version_bytes = self.parse_string()?;
+            let version_str = std::str::from_utf8(&version_bytes)
+                .map_err(|_| ParseError::InvalidUtf8 { pos: self.pos })?;
+            if version_str != "xp-dyn-drv" {
+                return Err(ParseError::UnexpectedEof {
+                    expected: "xp-dyn-drv",
+                    pos: self.pos,
+                });
+            }
+            self.expect_char(',')?;
+            Ok(ATermVersion::DynamicDerivations)
+        } else {
+            Err(ParseError::UnexpectedEof {
+                expected: "Derive(",
+                pos: self.pos,
+            })
+        }
+    }
+
     fn parse_raw_outputs(&mut self) -> Result<Vec<RawOutput>, ParseError> {
         self.expect_char('[')?;
         let mut outputs = Vec::new();
@@ -138,7 +172,10 @@ impl<'a> Parser<'a> {
         Ok(outputs)
     }
 
-    fn parse_input_drvs(&mut self) -> Result<BTreeMap<StorePath, OutputInputs>, ParseError> {
+    fn parse_input_drvs(
+        &mut self,
+        version: ATermVersion,
+    ) -> Result<BTreeMap<StorePath, OutputInputs>, ParseError> {
         self.expect_char('[')?;
         let mut drvs = BTreeMap::new();
 
@@ -147,27 +184,10 @@ impl<'a> Parser<'a> {
             let path = self.parse_store_path()?;
             self.expect_char(',')?;
 
-            self.expect_char('[')?;
-            let mut output_names = BTreeSet::new();
-            while self.peek() != Some(b']') {
-                let name_bytes = self.parse_string()?;
-                let name_str = std::str::from_utf8(&name_bytes)
-                    .map_err(|_| ParseError::InvalidUtf8 { pos: self.pos })?;
-                output_names.insert(name_str.parse::<OutputName>()?);
-                if self.peek() == Some(b',') {
-                    self.advance();
-                }
-            }
-            self.expect_char(']')?;
+            let output_inputs = self.parse_output_inputs(version)?;
             self.expect_char(')')?;
 
-            drvs.insert(
-                path,
-                OutputInputs {
-                    outputs: output_names,
-                    dynamic_outputs: BTreeMap::new(),
-                },
-            );
+            drvs.insert(path, output_inputs);
 
             if self.peek() == Some(b',') {
                 self.advance();
@@ -176,6 +196,74 @@ impl<'a> Parser<'a> {
 
         self.expect_char(']')?;
         Ok(drvs)
+    }
+
+    fn parse_output_inputs(&mut self, version: ATermVersion) -> Result<OutputInputs, ParseError> {
+        match version {
+            ATermVersion::Traditional => {
+                let outputs = self.parse_output_names()?;
+                Ok(OutputInputs {
+                    outputs,
+                    dynamic_outputs: BTreeMap::new(),
+                })
+            }
+            ATermVersion::DynamicDerivations => match self.peek() {
+                Some(b'[') => {
+                    let outputs = self.parse_output_names()?;
+                    Ok(OutputInputs {
+                        outputs,
+                        dynamic_outputs: BTreeMap::new(),
+                    })
+                }
+                Some(b'(') => {
+                    self.expect_char('(')?;
+                    let outputs = self.parse_output_names()?;
+                    self.expect_char(',')?;
+                    self.expect_char('[')?;
+                    let mut dynamic_outputs = BTreeMap::new();
+                    while self.peek() != Some(b']') {
+                        self.expect_char('(')?;
+                        let name_bytes = self.parse_string()?;
+                        let name_str = std::str::from_utf8(&name_bytes)
+                            .map_err(|_| ParseError::InvalidUtf8 { pos: self.pos })?;
+                        let output_name: OutputName = name_str.parse()?;
+                        self.expect_char(',')?;
+                        let child = self.parse_output_inputs(version)?;
+                        self.expect_char(')')?;
+                        dynamic_outputs.insert(output_name, child);
+                        if self.peek() == Some(b',') {
+                            self.advance();
+                        }
+                    }
+                    self.expect_char(']')?;
+                    self.expect_char(')')?;
+                    Ok(OutputInputs {
+                        outputs,
+                        dynamic_outputs,
+                    })
+                }
+                _ => Err(ParseError::UnexpectedEof {
+                    expected: "[ or (",
+                    pos: self.pos,
+                }),
+            },
+        }
+    }
+
+    fn parse_output_names(&mut self) -> Result<BTreeSet<OutputName>, ParseError> {
+        self.expect_char('[')?;
+        let mut output_names = BTreeSet::new();
+        while self.peek() != Some(b']') {
+            let name_bytes = self.parse_string()?;
+            let name_str = std::str::from_utf8(&name_bytes)
+                .map_err(|_| ParseError::InvalidUtf8 { pos: self.pos })?;
+            output_names.insert(name_str.parse::<OutputName>()?);
+            if self.peek() == Some(b',') {
+                self.advance();
+            }
+        }
+        self.expect_char(']')?;
+        Ok(output_names)
     }
 
     fn parse_input_srcs(&mut self) -> Result<StorePathSet, ParseError> {
@@ -294,18 +382,6 @@ impl<'a> Parser<'a> {
 
         self.expect_char(']')?;
         Ok(items)
-    }
-
-    fn expect_str(&mut self, expected: &'static str) -> Result<(), ParseError> {
-        if self.bytes[self.pos..].starts_with(expected.as_bytes()) {
-            self.pos += expected.len();
-            Ok(())
-        } else {
-            Err(ParseError::UnexpectedEof {
-                expected,
-                pos: self.pos,
-            })
-        }
     }
 
     fn expect_char(&mut self, expected: char) -> Result<(), ParseError> {

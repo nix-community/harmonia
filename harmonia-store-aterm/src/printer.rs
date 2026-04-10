@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use harmonia_store_core::ByteString;
 use harmonia_store_core::derivation::{
@@ -23,15 +23,24 @@ pub fn write_derivation<I>(store_dir: &StoreDir, drv: &DerivationT<I>, out: &mut
 where
     for<'a> DerivationInputs: From<&'a I>,
 {
-    out.push_str("Derive(");
+    let inputs = DerivationInputs::from(&drv.inputs);
+    let has_dynamic = inputs
+        .drvs
+        .values()
+        .any(|oi| !oi.dynamic_outputs.is_empty());
+
+    if has_dynamic {
+        out.push_str("DrvWithVersion(\"xp-dyn-drv\",");
+    } else {
+        out.push_str("Derive(");
+    }
 
     // Outputs
     write_outputs(store_dir, &drv.name, &drv.outputs, out);
     out.push(',');
 
     // Input derivations and input sources
-    let inputs = DerivationInputs::from(&drv.inputs);
-    write_input_drvs(store_dir, &inputs.drvs, out);
+    write_input_drvs(store_dir, &inputs.drvs, has_dynamic, out);
     out.push(',');
     write_input_srcs(store_dir, &inputs.srcs, out);
     out.push(',');
@@ -128,6 +137,7 @@ fn write_outputs(
 fn write_input_drvs(
     store_dir: &StoreDir,
     drvs: &BTreeMap<StorePath, OutputInputs>,
+    versioned: bool,
     out: &mut String,
 ) {
     out.push('[');
@@ -141,17 +151,41 @@ fn write_input_drvs(
         write_escaped(out, abs.to_string_lossy().as_bytes());
         out.push(',');
 
-        // Output names
-        out.push('[');
-        for (j, name) in output_inputs.outputs.iter().enumerate() {
-            if j > 0 {
-                out.push(',');
-            }
-            write_escaped(out, name.as_ref().as_bytes());
-        }
-        out.push(']');
+        write_output_inputs(output_inputs, versioned, out);
 
         out.push(')');
+    }
+    out.push(']');
+}
+
+fn write_output_inputs(oi: &OutputInputs, versioned: bool, out: &mut String) {
+    if versioned && !oi.dynamic_outputs.is_empty() {
+        out.push('(');
+        write_output_names(&oi.outputs, out);
+        out.push_str(",[");
+        for (i, (name, child)) in oi.dynamic_outputs.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push('(');
+            write_escaped(out, name.as_ref().as_bytes());
+            out.push(',');
+            write_output_inputs(child, versioned, out);
+            out.push(')');
+        }
+        out.push_str("])");
+    } else {
+        write_output_names(&oi.outputs, out);
+    }
+}
+
+fn write_output_names(outputs: &BTreeSet<OutputName>, out: &mut String) {
+    out.push('[');
+    for (j, name) in outputs.iter().enumerate() {
+        if j > 0 {
+            out.push(',');
+        }
+        write_escaped(out, name.as_ref().as_bytes());
     }
     out.push(']');
 }
