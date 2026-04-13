@@ -12,7 +12,7 @@
 //! fixed_path = 'output:out:', ':sha256', fixed_out_hash, ':', store_dir, ':', name
 //! fixed_output_path = source_path | fixed_path
 //! fixed_out_hash = digest(fixed_out_hash_input)
-//! fixed_out_hash_input = 'fixed:out:', ingestion_method, fixed_output_hash
+//! fixed_out_hash_input = 'fixed:out:', ingestion_method, fixed_output_hash, ':'
 //! ingestion_method = '' | 'r:'
 //! fixed_output_hash = algorithm, ':', base16
 //! ```
@@ -114,12 +114,14 @@ impl StoreDirDisplay for PathType {
                 write!(f, ":sha256:{digest:x}")
             }
             PathType::Output { hash } => {
-                let digest_input = format!("fixed:out:r:{hash:x}");
+                // Nix's makeFixedOutputPath hashes
+                // "fixed:out:<method><algo>:<hex>:" (note the trailing ':').
+                let digest_input = format!("fixed:out:r:{hash:x}:");
                 let digest = harmonia_utils_hash::Sha256::digest(digest_input);
                 write!(f, "output:out:sha256:{digest:x}")
             }
             PathType::FlatOutput { hash } => {
-                let digest_input = format!("fixed:out:{hash:x}");
+                let digest_input = format!("fixed:out:{hash:x}:");
                 let digest = harmonia_utils_hash::Sha256::digest(digest_input);
                 write!(f, "output:out:sha256:{digest:x}")
             }
