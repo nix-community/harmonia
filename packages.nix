@@ -14,21 +14,24 @@ let
   cargoToml = lib.importTOML ./Cargo.toml;
   version = cargoToml.workspace.package.version;
 
-  # Filter source to include only rust-related files
-  src = lib.cleanSourceWith {
-    src = craneLib.path ./.;
-    filter =
-      path: type:
-      (lib.hasSuffix "\.toml" path)
-      || (lib.hasSuffix "\.lock" path)
-      || (lib.hasSuffix "\.rs" path)
-      || (lib.hasInfix "/harmonia-" path)
-      ||
-        # Include test keys
-        (lib.hasSuffix ".pk" path)
-      || (lib.hasSuffix ".sk" path)
-      || (lib.hasSuffix ".pem" path)
-      || (craneLib.filterCargoSources path type);
+  # Filter source to include only files that affect the cargo build.
+  # Avoid path-substring matching (e.g. "/harmonia-") so docs and other
+  # unrelated files do not trigger rebuilds.
+  fs = lib.fileset;
+  crateDirs = lib.filter (p: lib.hasPrefix "harmonia-" p) (
+    lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir ./.))
+  );
+  src = fs.toSource {
+    root = ./.;
+    fileset = fs.difference (fs.unions (
+      [
+        ./Cargo.toml
+        ./Cargo.lock
+        # test fixtures referenced via include_str! from harmonia-cache/tests
+        (fs.fileFilter (f: f.hasExt "pk" || f.hasExt "sk" || f.hasExt "pem") ./tests)
+      ]
+      ++ map (d: ./. + "/${d}") crateDirs
+    )) (fs.fileFilter (f: f.hasExt "md") ./.);
   };
 
   commonArgs = {
