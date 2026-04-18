@@ -34,7 +34,6 @@ rustls-pemfile = "2"
 rustls-pki-types = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
-tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = [ "io" ] }
@@ -43,7 +42,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = "2.5.7"
 # Nix.rs-based crates
-futures               = { workspace = true }
+futures-core          = { workspace = true }
+futures-util          = { workspace = true }
 harmonia-nar          = { version = "3.0.0" }
 harmonia-store-core   = { version = "0.0.0-alpha.0" }
 harmonia-store-remote = { version = "3.0.0" }
@@ -53,6 +53,7 @@ prometheus            = { workspace = true }
 [dev-dependencies]
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
 nix                 = { workspace = true }
+tempfile            = { workspace = true }
 tokio               = { workspace = true, features = [ "process" ] }
 
 [lints]

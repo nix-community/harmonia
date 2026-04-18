@@ -202,14 +202,14 @@ fn create_range_stream<S>(
     stream: S,
     offset: u64,
     length: u64,
-) -> impl futures::Stream<Item = std::result::Result<Bytes, std::io::Error>>
+) -> impl futures_core::Stream<Item = std::result::Result<Bytes, std::io::Error>>
 where
-    S: futures::Stream<Item = std::result::Result<Bytes, std::io::Error>> + Unpin,
+    S: futures_core::Stream<Item = std::result::Result<Bytes, std::io::Error>> + Unpin,
 {
-    futures::stream::unfold(
+    futures_util::stream::unfold(
         (stream, offset, length, 0u64),
         |(mut stream, offset, length, mut sent)| async move {
-            use futures::StreamExt;
+            use futures_util::StreamExt;
 
             loop {
                 match stream.next().await {
@@ -255,7 +255,7 @@ where
 mod test {
     use super::*;
     use crate::error::{IoErrorContext, Result};
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -263,7 +263,7 @@ mod test {
 
     async fn dump_to_vec(path: PathBuf) -> Vec<u8> {
         let stream = NarByteStream::new(path);
-        futures::pin_mut!(stream);
+        futures_util::pin_mut!(stream);
 
         let mut result = Vec::new();
         while let Some(chunk) = stream.next().await {

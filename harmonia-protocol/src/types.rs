@@ -5,7 +5,7 @@ use std::pin::Pin;
 
 use bstr::ByteSlice;
 use bytes::Bytes;
-use futures::Stream;
+use futures_core::Stream;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::io::AsyncBufRead;

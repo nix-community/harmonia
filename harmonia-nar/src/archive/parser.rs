@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
 use bytes::Buf;
-use futures::Stream;
+use futures_core::Stream;
 use pin_project_lite::pin_project;
 use tokio::io::AsyncRead;
 use tracing::trace;
@@ -152,7 +152,7 @@ pub async fn read_nar<R>(source: R) -> io::Result<crate::archive::test_data::Tes
 where
     R: AsyncRead + Unpin,
 {
-    use futures::stream::TryStreamExt as _;
+    use futures_util::stream::TryStreamExt as _;
     parse_nar(source)
         .and_then(NarEvent::read_file)
         .try_collect()
@@ -164,7 +164,7 @@ mod unittests {
     use std::io::Cursor;
 
     use bytes::Bytes;
-    use futures::TryStreamExt;
+    use futures_util::TryStreamExt;
     use rstest::rstest;
     use tokio::fs::File;
     use tokio::io::AsyncReadExt as _;
