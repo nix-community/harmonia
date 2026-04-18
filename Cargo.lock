@@ -1263,7 +1263,6 @@ version = "3.0.0"
 name = "harmonia-store-aterm"
 version = "0.0.0-alpha.0"
 dependencies = [
- "bytes",
  "harmonia-store-core",
  "harmonia-utils-hash",
  "harmonia-utils-test",
@@ -1287,7 +1286,6 @@ dependencies = [
  "harmonia-utils-hash",
  "harmonia-utils-test",
  "hex-literal",
- "num_enum",
  "proptest",
  "proptest-derive",
  "rstest",
@@ -1297,10 +1295,7 @@ dependencies = [
  "serde_with",
  "tempfile",
  "test-log",
- "test-strategy",
  "thiserror",
- "tokio",
- "tokio-test",
  "tracing",
  "zerocopy",
 ]
