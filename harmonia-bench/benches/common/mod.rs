@@ -104,6 +104,26 @@ async fn wait_for_port(port: u16, pid: u32, timeout_duration: Duration) {
     }
 }
 
+/// Return the current Nix system (e.g. "x86_64-linux").
+pub fn current_system() -> String {
+    let output = Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command",
+            "config",
+            "show",
+            "system",
+        ])
+        .output()
+        .expect("nix config show system failed");
+    assert!(
+        output.status.success(),
+        "nix config show system failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
 /// Build a flake output and return the store path.
 pub fn nix_build(flake_ref: &str) -> String {
     let output = Command::new("nix")
@@ -165,8 +185,8 @@ pub fn build_harmonia() -> String {
 
 /// Build the benchmark closure and return its store path.
 pub fn build_closure() -> String {
-    let closure_flake =
-        std::env::var("BENCH_CLOSURE_FLAKE").unwrap_or_else(|_| ".#bench-closure".to_string());
+    let closure_flake = std::env::var("BENCH_CLOSURE_FLAKE")
+        .unwrap_or_else(|_| format!(".#checks.{}.bench-closure", current_system()));
     eprintln!("Building benchmark closure from {}...", closure_flake);
     let closure_path = nix_build(&closure_flake);
     eprintln!("Closure built: {}", closure_path);
