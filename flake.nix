@@ -2,11 +2,6 @@
   description = "Nix binary cache implemented in rust using libnix-store";
 
   inputs.nixpkgs.url = "git+https://github.com/NixOS/nixpkgs?shallow=1&ref=nixpkgs-unstable";
-
-  inputs.flake-parts = {
-    url = "github:hercules-ci/flake-parts";
-    inputs.nixpkgs-lib.follows = "nixpkgs";
-  };
   inputs.treefmt-nix.url = "github:numtide/treefmt-nix";
   inputs.treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   inputs.crane.url = "github:ipetkov/crane";
@@ -15,94 +10,90 @@
     # We just need some test data, we're not building upstream nix.
     flake = false;
   };
+
   outputs =
-    inputs@{ flake-parts, ... }:
-    flake-parts.lib.mkFlake { inherit inputs; } {
+    {
+      self,
+      nixpkgs,
+      treefmt-nix,
+      crane,
+      nix,
+    }:
+    let
+      inherit (nixpkgs) lib;
+
       systems = [
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
         "x86_64-darwin"
       ];
-      imports = [
-        inputs.treefmt-nix.flakeModule
-        ./herculesCI.nix
-      ];
-      perSystem =
-        {
-          lib,
-          pkgs,
-          self',
-          ...
-        }:
-        let
-          packageSet = pkgs.callPackages ./packages.nix {
-            crane = inputs.crane;
-            nix-src = inputs.nix;
-          };
-        in
-        {
-          packages = {
-            inherit (packageSet)
-              clippy
-              default
-              harmonia
-              ;
-            # Benchmark closure - a decent-sized Python environment for download benchmarks
-            bench-closure = pkgs.python3.withPackages (
-              ps: with ps; [
-                numpy
-                pandas
-                requests
-              ]
-            );
-          };
-          checks =
-            let
-              testArgs = {
-                inherit pkgs;
-                inherit (inputs) self;
-              };
-              packages = lib.mapAttrs' (n: lib.nameValuePair "package-${n}") self'.packages;
-              devShells = lib.mapAttrs' (n: lib.nameValuePair "devShell-${n}") self'.devShells;
-            in
-            {
-              inherit (packageSet) tests;
-            }
-            // lib.optionalAttrs pkgs.stdenv.isLinux {
-              nix-daemon = import ./tests/nix-daemon.nix testArgs;
-              harmonia-daemon = import ./tests/harmonia-daemon.nix testArgs;
-              chroot-store = import ./tests/chroot-store.nix testArgs;
-            }
-            // packages
-            // devShells;
-          devShells.default = pkgs.callPackage ./devShell.nix {
-            nix-src = inputs.nix;
-          };
 
-          treefmt = {
-            # Used to find the project root
-            projectRootFile = "flake.lock";
+      eachSystem =
+        f:
+        lib.genAttrs systems (
+          system:
+          f {
+            inherit system;
+            pkgs = nixpkgs.legacyPackages.${system};
+          }
+        );
 
-            programs.rustfmt = {
-              enable = true;
-              edition = "2024";
-            };
-            programs.nixfmt.enable = true;
-            programs.deadnix.enable = true;
-            programs.clang-format.enable = true;
-            programs.taplo.enable = true;
-          };
-        };
-      flake.nixosModules.harmonia =
+      packageSet = eachSystem (
+        { pkgs, ... }:
+        pkgs.callPackages ./nix/packages.nix {
+          inherit crane;
+          nix-src = nix;
+        }
+      );
+
+      treefmt = eachSystem ({ pkgs, ... }: treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix);
+    in
+    {
+      packages = eachSystem (
+        { system, ... }:
+        {
+          inherit (packageSet.${system}) clippy default harmonia;
+        }
+      );
+
+      checks = eachSystem (
+        { pkgs, system }:
+        import ./nix/checks.nix {
+          inherit
+            self
+            lib
+            pkgs
+            system
+            ;
+          packageSet = packageSet.${system};
+          treefmt = treefmt.${system};
+        }
+      );
+
+      devShells = eachSystem (
+        { pkgs, ... }:
+        {
+          default = pkgs.callPackage ./nix/devShell.nix { nix-src = nix; };
+        }
+      );
+
+      formatter = eachSystem ({ system, ... }: treefmt.${system}.config.build.wrapper);
+
+      nixosModules.harmonia =
         { lib, ... }:
         {
           imports = [
-            (lib.modules.importApply ./module.nix {
-              crane = inputs.crane;
-              nix-src = inputs.nix;
+            (lib.modules.importApply ./nix/module.nix {
+              inherit crane;
+              nix-src = nix;
             })
           ];
         };
+
+      herculesCI = import ./nix/herculesCI.nix {
+        inherit self lib systems;
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      };
     };
 }

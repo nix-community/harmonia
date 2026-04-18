@@ -157,7 +157,7 @@ All checks must pass before merging.
 
 ## NixOS Module Development
 
-The NixOS module is in `module.nix`. To test changes:
+The NixOS module is in `nix/module.nix`. To test changes:
 
 ```bash
 # Test with nix-daemon backend
