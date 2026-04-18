@@ -308,8 +308,7 @@ mod unittests {
             dependent_realisations: Default::default(),
         };
         assert!(r.signatures.is_empty());
-        let rng = ring::rand::SystemRandom::new();
-        let sk = crate::signature::SecretKey::generate("test-key".to_string(), &rng).unwrap();
+        let sk = crate::signature::SecretKey::generate("test-key".to_string()).unwrap();
         r.sign(&[sk]);
         assert_eq!(r.signatures.len(), 1);
         assert_eq!(r.signatures.iter().next().unwrap().name(), "test-key");

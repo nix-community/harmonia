@@ -20,8 +20,9 @@ harmonia-utils-base-encoding = { version = "0.0.0-alpha.0" }
 md5                          = { workspace = true }
 proptest                     = { workspace = true, optional = true }
 proptest-derive              = { workspace = true, optional = true }
-ring                         = { workspace = true }
 serde                        = { workspace = true }
+sha1                         = { workspace = true }
+sha2                         = { workspace = true }
 thiserror                    = { workspace = true }
 tokio                        = { workspace = true, features = [ "io-util" ] }
 

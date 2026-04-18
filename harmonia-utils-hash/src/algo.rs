@@ -1,8 +1,6 @@
-use std::convert::TryFrom;
 use std::str::FromStr;
 
 use derive_more::Display;
-use ring::digest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
@@ -42,18 +40,6 @@ impl Algorithm {
         }
     }
 
-    #[inline]
-    pub(super) fn digest_algorithm(&self) -> &'static digest::Algorithm {
-        match self {
-            Algorithm::SHA1 => &digest::SHA1_FOR_LEGACY_USE_ONLY,
-            Algorithm::SHA256 => &digest::SHA256,
-            Algorithm::SHA512 => &digest::SHA512,
-            Algorithm::MD5 => unreachable!(
-                "MD5 is not supported by ring's digest::Algorithm; use md5 crate directly"
-            ),
-        }
-    }
-
     /// Returns the digest of `data` using the given digest algorithm.
     ///
     /// ```
@@ -64,33 +50,15 @@ impl Algorithm {
     /// assert_eq!("sha256:1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s", hash.as_base32().to_string());
     /// ```
     pub fn digest<B: AsRef<[u8]>>(&self, data: B) -> Hash {
-        match *self {
-            Algorithm::MD5 => Hash::new(Algorithm::MD5, md5::compute(data).as_ref()),
-            _ => digest::digest(self.digest_algorithm(), data.as_ref())
-                .try_into()
-                .unwrap(),
-        }
+        let mut ctx = super::Context::new(*self);
+        ctx.update(data);
+        ctx.finish()
     }
 }
 
 #[derive(Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 #[error("unsupported digest algorithm '{0}'")]
 pub struct UnknownAlgorithm(pub(super) String);
-
-impl<'a> TryFrom<&'a digest::Algorithm> for Algorithm {
-    type Error = UnknownAlgorithm;
-    fn try_from(value: &'a digest::Algorithm) -> Result<Self, Self::Error> {
-        if *value == digest::SHA1_FOR_LEGACY_USE_ONLY {
-            Ok(Algorithm::SHA1)
-        } else if *value == digest::SHA256 {
-            Ok(Algorithm::SHA256)
-        } else if *value == digest::SHA512 {
-            Ok(Algorithm::SHA512)
-        } else {
-            Err(UnknownAlgorithm(format!("{value:?}")))
-        }
-    }
-}
 
 impl FromStr for Algorithm {
     type Err = UnknownAlgorithm;
