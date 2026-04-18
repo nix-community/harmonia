@@ -140,7 +140,7 @@ in
             credential: "%d/${credential.id}"
           ) credentials;
           # print stack traces
-          RUST_LOG = "actix_web=debug";
+          RUST_LOG = "info,actix_web=debug";
           RUST_BACKTRACE = "1";
         };
 
