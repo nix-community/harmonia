@@ -32,7 +32,7 @@ repository = "https://github.com/nix-community/harmonia.git"
 version = "3.0.0"
 
 [workspace.dependencies]
-env_logger = "0.11"
+env_logger = { version = "0.11", default-features = false, features = [ "auto-color" ] }
 hex = "0.4"
 log = "0.4"
 nix = { version = "0.31", features = [ "signal", "mman" ] }
