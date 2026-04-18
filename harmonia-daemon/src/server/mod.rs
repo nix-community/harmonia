@@ -1008,7 +1008,19 @@ where
             QueryRealisation(output_id) => {
                 let logs = store.query_realisation(&output_id);
                 let value = self.process_logs(logs).await?;
-                self.writer.write_value(&value).await?;
+                /*
+                ### Outputs
+                realisations :: [Set][se-Set] of [Realisation][se-Realisation]
+
+                The daemon protocol encodes this as a set, but Nix only ever
+                returns 0 or 1 entries, so the trait exposes it as Option.
+                */
+                if let Some(value) = value {
+                    self.writer.write_number(1).await?;
+                    self.writer.write_value(&value).await?;
+                } else {
+                    self.writer.write_number(0).await?;
+                }
             }
             AddMultipleToStore(req) => {
                 let builder = NixReader::builder()

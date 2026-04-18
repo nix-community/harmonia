@@ -914,7 +914,13 @@ where
                 .write_value(&Operation::QueryRealisation)
                 .await?;
             self.writer.write_value(output_id).await?;
-            Ok(self.process_stderr())
+            Ok(self.process_stderr::<Vec<Realisation>>().map_ok(|mut r| {
+                if r.is_empty() {
+                    None
+                } else {
+                    Some(r.swap_remove(0))
+                }
+            }))
         }
         .future_result()
         .fill_operation(Operation::QueryRealisation)
