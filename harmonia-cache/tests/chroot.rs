@@ -227,6 +227,32 @@ real_nix_store = "{}"
         "Expected 'test contents', got '{content}'"
     );
 
+    // Test serve endpoint - HEAD request returns metadata without body
+    // (regression test for https://github.com/nix-community/harmonia/issues/569)
+    let output = Command::new("curl")
+        .args([
+            "--fail",
+            "--head",
+            "--max-time",
+            "5",
+            &format!("http://127.0.0.1:{port}/serve/{dir_hash}/my-file"),
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "HEAD request on /serve file failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let head_response = String::from_utf8(output.stdout)?;
+    let content_len = "test contents".len();
+    assert!(
+        head_response
+            .lines()
+            .any(|l| l.to_ascii_lowercase() == format!("content-length: {content_len}")),
+        "Expected content-length: {content_len} header in HEAD response, got:\n{head_response}"
+    );
+
     // Test that we can fetch narinfo for the file with the virtual path
     println!("Testing narinfo fetch with virtual path...");
 

@@ -8,6 +8,7 @@ use ::proptest::prelude::TestCaseError;
 use thiserror::Error;
 
 use crate::ProtocolVersion;
+use crate::version::FeatureSet;
 use harmonia_store_core::store_path::StoreDir;
 
 use super::NixWrite;
@@ -106,6 +107,7 @@ impl From<Operation> for OperationType {
 
 pub struct Builder {
     version: ProtocolVersion,
+    features: FeatureSet,
     store_dir: StoreDir,
     ops: VecDeque<Operation>,
 }
@@ -114,6 +116,7 @@ impl Builder {
     pub fn new() -> Builder {
         Builder {
             version: Default::default(),
+            features: crate::version::supported_features(),
             store_dir: Default::default(),
             ops: VecDeque::new(),
         }
@@ -121,6 +124,11 @@ impl Builder {
 
     pub fn version<V: Into<ProtocolVersion>>(&mut self, version: V) -> &mut Self {
         self.version = version.into();
+        self
+    }
+
+    pub fn features(&mut self, features: FeatureSet) -> &mut Self {
+        self.features = features;
         self
     }
 
@@ -225,6 +233,7 @@ impl Builder {
     pub fn build(&mut self) -> Mock {
         Mock {
             version: self.version,
+            features: self.features.clone(),
             store_dir: self.store_dir.clone(),
             ops: self.ops.clone(),
         }
@@ -239,6 +248,7 @@ impl Default for Builder {
 
 pub struct Mock {
     version: ProtocolVersion,
+    features: FeatureSet,
     store_dir: StoreDir,
     ops: VecDeque<Operation>,
 }
@@ -312,6 +322,10 @@ impl NixWrite for Mock {
 
     fn store_dir(&self) -> &StoreDir {
         &self.store_dir
+    }
+
+    fn features(&self) -> &FeatureSet {
+        &self.features
     }
 
     async fn write_number(&mut self, value: u64) -> Result<(), Self::Error> {

@@ -2,70 +2,94 @@
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
-use harmonia_store_core::realisation::{DrvOutput, Realisation};
+use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
+use harmonia_store_core::signature::Signature;
+
+fn drv_output() -> DrvOutput {
+    DrvOutput {
+        drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+        output_name: "foo".parse().unwrap(),
+    }
+}
+
+test_upstream_json!(
+    test_unkeyed_realisation_simple,
+    libstore_test_data_path("realisation/unkeyed-simple.json"),
+    {
+        UnkeyedRealisation {
+            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
+            signatures: Default::default(),
+        }
+    }
+);
+
+test_upstream_json!(
+    test_unkeyed_realisation_with_signature,
+    libstore_test_data_path("realisation/unkeyed-with-signature.json"),
+    {
+        UnkeyedRealisation {
+            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
+            signatures: ["asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==".parse::<Signature>().unwrap()].into(),
+        }
+    }
+);
 
 test_upstream_json!(
     test_realisation_simple,
     libstore_test_data_path("realisation/simple.json"),
     {
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!foo"
-                .parse::<DrvOutput>()
-                .unwrap(),
-            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
-            signatures: Default::default(),
-            dependent_realisations: Default::default(),
+            id: drv_output(),
+            value: UnkeyedRealisation {
+                out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
+                signatures: Default::default(),
+            },
         }
     }
 );
 
 test_upstream_json!(
-    test_realisation_with_dependent,
-    libstore_test_data_path("realisation/with-dependent-realisations.json"),
+    test_realisation_with_signature,
+    libstore_test_data_path("realisation/with-signature.json"),
     {
         Realisation {
-            id: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!foo"
-                .parse::<DrvOutput>()
-                .unwrap(),
-            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
-            signatures: Default::default(),
-            dependent_realisations: [(
-                "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad!foo"
-                    .parse::<DrvOutput>()
-                    .unwrap(),
-                "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
-            )]
-            .into_iter()
-            .collect(),
+            id: drv_output(),
+            value: UnkeyedRealisation {
+                out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
+                signatures: ["asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==".parse::<Signature>().unwrap()].into(),
+            },
         }
     }
 );
 
-test_upstream_json!(
-    test_realisation_worker_protocol,
-    libstore_test_data_path("worker-protocol/realisation.json"),
-    vec![
-        Realisation {
-            id: "sha256:15e3c560894cbb27085cf65b5a2ecb18488c999497f4531b6907a7581ce6d527!baz"
-                .parse::<DrvOutput>()
-                .unwrap(),
+#[test]
+fn test_realisation_fingerprint_simple() {
+    let r = Realisation {
+        id: drv_output(),
+        value: UnkeyedRealisation {
             out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
             signatures: Default::default(),
-            dependent_realisations: Default::default(),
         },
-        Realisation {
-            id: "sha256:15e3c560894cbb27085cf65b5a2ecb18488c999497f4531b6907a7581ce6d527!baz"
-                .parse::<DrvOutput>()
-                .unwrap(),
-            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
-            signatures: [
-                "asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-                "qwer:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-            ]
-            .into_iter()
-            .map(|s| s.parse().unwrap())
-            .collect(),
-            dependent_realisations: Default::default(),
+    };
+    let expected = std::fs::read_to_string(libstore_test_data_path(
+        "realisation/simple-fingerprint.txt",
+    ))
+    .unwrap();
+    assert_eq!(r.fingerprint(), expected.trim_end());
+}
+
+#[test]
+fn test_realisation_fingerprint_with_signature() {
+    let r = Realisation {
+        id: drv_output(),
+        value: UnkeyedRealisation {
+            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
+            signatures: ["asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==".parse::<Signature>().unwrap()].into(),
         },
-    ]
-);
+    };
+    let expected = std::fs::read_to_string(libstore_test_data_path(
+        "realisation/with-signature-fingerprint.txt",
+    ))
+    .unwrap();
+    assert_eq!(r.fingerprint(), expected.trim_end());
+}

@@ -8,6 +8,9 @@ use std::sync::Arc;
 use data_encoding::BASE64;
 
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+use serde::de::{self, Deserializer, MapAccess, Visitor};
+use serde::ser::{SerializeStruct, Serializer};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::error;
 
@@ -37,7 +40,6 @@ pub type SignatureSet = BTreeSet<Signature>;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signature(Arc<String>, [u8; SIGNATURE_BYTES]);
-crate::impl_serde_via_string!(Signature);
 
 impl Signature {
     pub fn name(&self) -> &str {
@@ -83,6 +85,60 @@ impl<const N: usize> fmt::Display for Base64Display<'_, N> {
 impl fmt::Display for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.name(), self.signature())
+    }
+}
+
+/// JSON serialization matches upstream Nix `adl_serializer<Signature>`:
+/// always writes the structured `{"keyName": ..., "sig": <base64>}` form,
+/// accepts either that form or the legacy `"name:base64"` string when reading.
+impl Serialize for Signature {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("Signature", 2)?;
+        s.serialize_field("keyName", self.name())?;
+        s.serialize_field("sig", &self.signature().to_string())?;
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Signature {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SigVisitor;
+        impl<'de> Visitor<'de> for SigVisitor {
+            type Value = Signature;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a signature string or {keyName, sig} object")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Signature, E> {
+                v.parse().map_err(E::custom)
+            }
+            fn visit_map<A>(self, mut map: A) -> Result<Signature, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut key_name: Option<String> = None;
+                let mut sig: Option<String> = None;
+                while let Some(k) = map.next_key::<String>()? {
+                    match k.as_str() {
+                        "keyName" => key_name = Some(map.next_value()?),
+                        "sig" => sig = Some(map.next_value()?),
+                        _ => {
+                            let _ignored: de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                let key_name = key_name.ok_or_else(|| de::Error::missing_field("keyName"))?;
+                let sig = sig.ok_or_else(|| de::Error::missing_field("sig"))?;
+                let bytes = BASE64.decode(sig.as_bytes()).map_err(de::Error::custom)?;
+                Signature::from_parts(&key_name, &bytes).map_err(de::Error::custom)
+            }
+        }
+        deserializer.deserialize_any(SigVisitor)
     }
 }
 
@@ -481,6 +537,12 @@ mod unittests {
     }
 
     #[test]
+    fn test_serde_json_errors() {
+        assert!(serde_json::from_value::<Signature>(serde_json::json!({"keyName": "x"})).is_err());
+        assert!(serde_json::from_value::<Signature>(serde_json::json!({"sig": "x"})).is_err());
+    }
+
+    #[test]
     fn test_sign() {
         let data = "1;/nix/store/02bfycjg1607gpcnsg8l13lc45qa8qj3-libssh2-1.10.0;sha256:1l29f8r5q2739wnq4i7m2v545qx77b3wrdsw9xz2ajiy3hv1al8b;294664;/nix/store/02bfycjg1607gpcnsg8l13lc45qa8qj3-libssh2-1.10.0,/nix/store/1l4r0r4ab3v3a3ppir4jwiah3icalk9d-zlib-1.2.11,/nix/store/gf6j3k1flnhayvpnwnhikkg0s5dxrn1i-openssl-1.1.1l,/nix/store/z56jcx3j1gfyk4sv7g8iaan0ssbdkhz1-glibc-2.33-56";
         let sk_s = "cache.example.org-1:ZJui+kG6vPCSRD4+p1P4DyUVlASmp/zsaeN84PTFW28tj2/PtQWvFWK6Mw+ay8kGif8AZkR5KosHLvuwlzDlgg==";
@@ -513,6 +575,26 @@ mod unittests {
         fn proptest_signature_display_parse(sig in proptest::prelude::any::<Signature>()) {
             let s = sig.to_string();
             proptest::prop_assert_eq!(s.parse::<Signature>().unwrap(), sig);
+        }
+
+        /// `Serialize` always emits the `{keyName, sig}` object; `Deserialize`
+        /// must accept that, the legacy `"name:b64"` string, and ignore unknown
+        /// fields.
+        #[test]
+        fn proptest_signature_json(sig in proptest::prelude::any::<Signature>()) {
+            let json = serde_json::to_value(&sig).unwrap();
+            proptest::prop_assert_eq!(json["keyName"].as_str().unwrap(), sig.name());
+            proptest::prop_assert_eq!(serde_json::from_value::<Signature>(json).unwrap(), sig.clone());
+
+            let legacy = serde_json::Value::String(sig.to_string());
+            proptest::prop_assert_eq!(serde_json::from_value::<Signature>(legacy).unwrap(), sig.clone());
+
+            let with_extra = serde_json::json!({
+                "keyName": sig.name(),
+                "sig": sig.signature().to_string(),
+                "extra": 1,
+            });
+            proptest::prop_assert_eq!(serde_json::from_value::<Signature>(with_extra).unwrap(), sig);
         }
     }
 }

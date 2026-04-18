@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::{
     fmt,
     ops::{
@@ -13,9 +14,26 @@ use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 pub const NIX_VERSION: &str = "Harmonia 2.1.0";
 const PROTOCOL_VERSION_MAJOR: u8 = 1;
 pub const PROTOCOL_VERSION: ProtocolVersion =
-    ProtocolVersion::from_parts(PROTOCOL_VERSION_MAJOR, 37);
+    ProtocolVersion::from_parts(PROTOCOL_VERSION_MAJOR, 38);
 pub const PROTOCOL_VERSION_MIN: ProtocolVersion =
     ProtocolVersion::from_parts(PROTOCOL_VERSION_MAJOR, 37);
+
+/// A worker-protocol feature flag.
+///
+/// Since protocol 1.38 the version number is augmented with a set of feature
+/// strings exchanged during the handshake. The negotiated feature set is the
+/// intersection of the client's and server's advertised features.
+pub type Feature = String;
+pub type FeatureSet = BTreeSet<Feature>;
+
+/// `DrvOutput`/`UnkeyedRealisation` are transmitted as raw store-path fields
+/// instead of the legacy `sha256:<hex>!out` JSON-string format.
+pub const FEATURE_REALISATION_WITH_PATH: &str = "realisation-with-path-not-hash";
+
+/// Features harmonia advertises during handshake.
+pub fn supported_features() -> FeatureSet {
+    [FEATURE_REALISATION_WITH_PATH.to_owned()].into()
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, NixDeserialize, NixSerialize,

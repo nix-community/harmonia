@@ -185,3 +185,46 @@ async fn test_handler_with_nix_store() {
         "Should return None for non-existent hash part"
     );
 }
+
+/// `query_realisation` against a hand-populated `BuildTraceV3` table.
+#[tokio::test]
+async fn test_handler_query_realisation() {
+    let temp_dir = CanonicalTempDir::new().unwrap();
+    let store_dir = StoreDir::new("/nix/store").unwrap();
+    let db_path = temp_dir.path().join("db.sqlite");
+
+    let drv_base = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ca.drv";
+    let out_full = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-out";
+    let sig = "cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==";
+
+    {
+        let db = StoreDb::open(&db_path, harmonia_store_db::OpenMode::Create).unwrap();
+        db.create_schema().unwrap();
+        db.register_realisation(drv_base, "out", out_full, Some(sig))
+            .unwrap();
+    }
+
+    let handler = LocalStoreHandler::new(store_dir, db_path).await.unwrap();
+    let mut store = handler.handshake().await.unwrap();
+
+    let id = harmonia_store_core::realisation::DrvOutput {
+        drv_path: StorePath::from_base_path(drv_base).unwrap(),
+        output_name: "out".parse().unwrap(),
+    };
+    let r = store.query_realisation(&id).await.unwrap().unwrap();
+    assert_eq!(
+        r.out_path,
+        StorePath::from_base_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-out").unwrap()
+    );
+    assert_eq!(r.signatures.len(), 1);
+    assert_eq!(
+        r.signatures.iter().next().unwrap().name(),
+        "cache.nixos.org-1"
+    );
+
+    let miss = harmonia_store_core::realisation::DrvOutput {
+        drv_path: StorePath::from_base_path(drv_base).unwrap(),
+        output_name: "dev".parse().unwrap(),
+    };
+    assert!(store.query_realisation(&miss).await.unwrap().is_none());
+}

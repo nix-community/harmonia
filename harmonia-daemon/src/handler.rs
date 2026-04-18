@@ -20,6 +20,7 @@ use harmonia_protocol::daemon::{
     ResultLog, TrustLevel,
 };
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
+use harmonia_store_core::realisation::{DrvOutput, UnkeyedRealisation};
 use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_store_db::StoreDb;
 use harmonia_utils_hash::{Hash, fmt::Any};
@@ -189,6 +190,55 @@ impl DaemonStore for LocalStoreHandler {
                     .file_name()
                     .and_then(|n| n.to_str())?;
                 StorePath::from_base_path(base_name).ok()
+            }))
+        }
+        .empty_logs()
+    }
+
+    fn query_realisation<'a>(
+        &'a mut self,
+        output_id: &'a DrvOutput,
+    ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedRealisation>>> + Send + 'a {
+        async move {
+            let drv_path = output_id.drv_path.to_string();
+            let output_name = output_id.output_name.to_string();
+            let db = self.db.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let db = db.blocking_lock();
+                if !db.has_ca_schema().unwrap_or(false) {
+                    return Ok(None);
+                }
+                db.query_realisation(&drv_path, &output_name)
+            })
+            .await
+            .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
+            .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
+
+            let Some(row) = result else {
+                return Ok(None);
+            };
+
+            let base_name = std::path::Path::new(&row.output_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&row.output_path);
+            let out_path = StorePath::from_base_path(base_name).map_err(|e| {
+                ProtocolError::custom(format!(
+                    "Invalid output path '{}' in BuildTraceV3: {e}",
+                    row.output_path
+                ))
+            })?;
+            let signatures = row
+                .signatures
+                .as_deref()
+                .unwrap_or("")
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
+
+            Ok(Some(UnkeyedRealisation {
+                out_path,
+                signatures,
             }))
         }
         .empty_logs()

@@ -3,6 +3,7 @@ use std::future::Future;
 use std::{fmt, io};
 
 use super::ProtocolVersion;
+use crate::version::FeatureSet;
 use harmonia_store_core::store_path::StoreDir;
 
 mod bytes;
@@ -57,6 +58,12 @@ pub trait NixWrite: Send {
     fn version(&self) -> ProtocolVersion;
     fn store_dir(&self) -> &StoreDir;
 
+    /// Negotiated worker-protocol feature set (>= 1.38).
+    fn features(&self) -> &FeatureSet;
+    fn has_feature(&self, feature: &str) -> bool {
+        self.features().contains(feature)
+    }
+
     fn write_number(&mut self, value: u64) -> impl Future<Output = Result<(), Self::Error>> + Send;
     fn write_slice(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), Self::Error>> + Send;
     fn write_display<D>(&mut self, msg: D) -> impl Future<Output = Result<(), Self::Error>> + Send
@@ -90,6 +97,10 @@ impl<T: NixWrite> NixWrite for &mut T {
 
     fn store_dir(&self) -> &StoreDir {
         (**self).store_dir()
+    }
+
+    fn features(&self) -> &FeatureSet {
+        (**self).features()
     }
 
     fn write_number(&mut self, value: u64) -> impl Future<Output = Result<(), Self::Error>> + Send {

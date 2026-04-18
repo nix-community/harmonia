@@ -146,7 +146,7 @@ impl StoreDb {
     /// Check if the database has CA-derivations tables.
     pub fn has_ca_schema(&self) -> Result<bool> {
         let count: i32 = self.conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Realisations'",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='BuildTraceV3'",
             [],
             |row| row.get(0),
         )?;

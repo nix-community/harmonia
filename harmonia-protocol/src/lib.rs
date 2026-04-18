@@ -39,13 +39,18 @@ pub mod version;
 
 pub use nar_hash::NarHash;
 
-pub use version::ProtocolVersion;
+pub use version::{
+    FEATURE_REALISATION_WITH_PATH, Feature, FeatureSet, ProtocolVersion, supported_features,
+};
 
 // Re-exports required by derive macros (harmonia_protocol_derive generates code using crate::store_path, etc.)
 pub use harmonia_store_core::store_path;
 
 // Hand-written serialization impls for harmonia-store-core types
 mod store_impls;
+
+#[cfg(test)]
+mod wire_roundtrip;
 
 // Re-export structure for code that references harmonia_protocol::daemon::...
 pub mod daemon {

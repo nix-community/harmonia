@@ -68,28 +68,19 @@ pub struct DerivationOutput {
     pub path: String,
 }
 
-/// A content-addressed derivation realisation.
+/// A content-addressed derivation realisation (`BuildTraceV3` row).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Realisation {
     /// Database row ID
     pub id: i64,
-    /// Path to the derivation
+    /// Base name of the derivation store path (e.g. `xxxx-foo.drv`)
     pub drv_path: String,
     /// Output name (usually "out")
     pub output_name: String,
-    /// ID of the output path in ValidPaths
-    pub output_path_id: i64,
+    /// Full store path of the output
+    pub output_path: String,
     /// Space-separated signatures
     pub signatures: Option<String>,
-}
-
-/// A reference between realisations.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RealisationRef {
-    /// ID of the realisation that has the reference
-    pub referrer_id: i64,
-    /// ID of the realisation being referenced
-    pub reference_id: Option<i64>,
 }
 
 /// Convert Unix timestamp to SystemTime.

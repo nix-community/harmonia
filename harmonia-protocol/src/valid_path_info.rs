@@ -57,6 +57,35 @@ fn is_empty_signatures(set: &Cow<'_, BTreeSet<Signature>>) -> bool {
     set.is_empty()
 }
 
+/// path-info JSON v2 keeps signatures as `name:base64` strings; the default
+/// `Signature` serde impl now emits the structured `{keyName, sig}` form, so
+/// we override it here.
+mod sig_strings {
+    use super::*;
+    use serde::ser::SerializeSeq;
+
+    #[expect(clippy::ptr_arg, reason = "needed for serde with")]
+    pub fn serialize<S>(set: &Cow<'_, BTreeSet<Signature>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = s.serialize_seq(Some(set.len()))?;
+        for sig in set.iter() {
+            seq.serialize_element(&sig.to_string())?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<Cow<'static, BTreeSet<Signature>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // `Signature`'s Deserialize already accepts both string and object form.
+        let set = BTreeSet::<Signature>::deserialize(d)?;
+        Ok(Cow::Owned(set))
+    }
+}
+
 /// Pure format: omits default impure fields during serialization
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,7 +98,7 @@ struct RawUnkeyedValidPathInfoPure<'a> {
     references: Cow<'a, BTreeSet<StorePath>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     registration_time: Option<DaemonTime>,
-    #[serde(skip_serializing_if = "is_empty_signatures")]
+    #[serde(skip_serializing_if = "is_empty_signatures", with = "sig_strings")]
     signatures: Cow<'a, BTreeSet<Signature>>,
     store_dir: Cow<'a, StoreDir>,
     #[serde(skip_serializing_if = "is_false")]
@@ -98,7 +127,7 @@ struct RawUnkeyedValidPathInfo<'a> {
     references: Cow<'a, BTreeSet<StorePath>>,
     #[serde(default)]
     registration_time: Option<DaemonTime>,
-    #[serde(default = "default_cow_set")]
+    #[serde(default = "default_cow_set", with = "sig_strings")]
     signatures: Cow<'a, BTreeSet<Signature>>,
     #[serde(default = "default_cow_store_dir")]
     store_dir: Cow<'a, StoreDir>,

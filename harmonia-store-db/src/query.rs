@@ -244,7 +244,10 @@ impl StoreDb {
         Ok(count as u64)
     }
 
-    /// Query a realisation by derivation path and output name.
+    /// Query a realisation by derivation path base name and output name.
+    ///
+    /// `drv_path` is the *base name* of the derivation store path (without the
+    /// store directory prefix), matching how Nix populates `BuildTraceV3`.
     pub fn query_realisation(
         &self,
         drv_path: &str,
@@ -253,7 +256,7 @@ impl StoreDb {
         let mut stmt = self.conn.prepare_cached(
             r#"
             SELECT id, drvPath, outputName, outputPath, signatures
-            FROM Realisations
+            FROM BuildTraceV3
             WHERE drvPath = ?1 AND outputName = ?2
             "#,
         )?;
@@ -263,7 +266,7 @@ impl StoreDb {
                 id: row.get(0)?,
                 drv_path: row.get(1)?,
                 output_name: row.get(2)?,
-                output_path_id: row.get(3)?,
+                output_path: row.get(3)?,
                 signatures: row.get(4)?,
             })
         });
