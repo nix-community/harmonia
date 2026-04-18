@@ -27,11 +27,11 @@ thiserror                    = { workspace = true }
 tokio                        = { workspace = true, features = [ "io-util" ] }
 
 [dev-dependencies]
-hex-literal  = "1.1"
-proptest     = { workspace = true }
-rstest       = { workspace = true }
-rstest_reuse = "0.7"
-serde_json   = { workspace = true }
+hex-literal     = "1.1"
+proptest        = { workspace = true }
+proptest-derive = { workspace = true }
+rstest          = { workspace = true }
+serde_json      = { workspace = true }
 
 [features]
 test = [ "proptest", "proptest-derive" ]
