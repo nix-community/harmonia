@@ -8,7 +8,6 @@ use std::sync::Arc;
 use data_encoding::BASE64;
 
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 use tracing::error;
 
@@ -36,10 +35,9 @@ pub enum ParseSignatureError {
 
 pub type SignatureSet = BTreeSet<Signature>;
 
-#[derive(
-    Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, DeserializeFromStr, SerializeDisplay,
-)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signature(Arc<String>, [u8; SIGNATURE_BYTES]);
+crate::impl_serde_via_string!(Signature);
 
 impl Signature {
     pub fn name(&self) -> &str {

@@ -3,7 +3,6 @@ use std::str::FromStr;
 
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
 use crate::derived_path::OutputName;
@@ -16,23 +15,13 @@ use harmonia_utils_hash::fmt::Any;
 ///
 /// String form: `sha256:<hex>!<output_name>`, where the hash is the
 /// "hash modulo" of the derivation.
-#[derive(
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Clone,
-    Display,
-    SerializeDisplay,
-    DeserializeFromStr,
-)]
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Display)]
 #[display("{drv_hash:x}!{output_name}")]
 pub struct DrvOutput {
     pub drv_hash: harmonia_utils_hash::Hash,
     pub output_name: OutputName,
 }
+crate::impl_serde_via_string!(DrvOutput);
 
 #[derive(Debug, PartialEq, Clone, Error)]
 pub enum ParseDrvOutputError {
