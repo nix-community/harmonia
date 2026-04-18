@@ -32,7 +32,8 @@ use harmonia_protocol::daemon_wire::types2::{
     BuildMode, CollectGarbageResponse, GCAction, KeyedBuildResult, QueryMissingResult,
 };
 use harmonia_protocol::daemon_wire::{
-    CLIENT_MAGIC, FramedWriter, IgnoredOne, SERVER_MAGIC, write_add_multiple_to_store_stream,
+    CLIENT_MAGIC, FramedWriter, IgnoredOne, IgnoredZero, SERVER_MAGIC,
+    write_add_multiple_to_store_stream,
 };
 use harmonia_protocol::de::{NixDeserialize, NixRead as _, NixReader, NixReaderBuilder};
 use harmonia_protocol::ser::{NixWrite, NixWriter, NixWriterBuilder};
@@ -694,7 +695,7 @@ where
         async move {
             self.writer.write_value(&Operation::EnsurePath).await?;
             self.writer.write_value(path).await?;
-            Ok(self.process_stderr())
+            Ok(self.process_stderr().map_ok(|_: IgnoredOne| ()))
         }
         .future_result()
         .fill_operation(Operation::EnsurePath)
@@ -707,7 +708,7 @@ where
         async move {
             self.writer.write_value(&Operation::AddTempRoot).await?;
             self.writer.write_value(path).await?;
-            Ok(self.process_stderr())
+            Ok(self.process_stderr().map_ok(|_: IgnoredOne| ()))
         }
         .future_result()
         .fill_operation(Operation::AddTempRoot)
@@ -720,7 +721,7 @@ where
         async move {
             self.writer.write_value(&Operation::AddIndirectRoot).await?;
             self.writer.write_value(path).await?;
-            Ok(self.process_stderr())
+            Ok(self.process_stderr().map_ok(|_: IgnoredOne| ()))
         }
         .future_result()
         .fill_operation(Operation::AddIndirectRoot)
@@ -750,6 +751,10 @@ where
             self.writer.write_value(paths_to_delete).await?;
             self.writer.write_value(&ignore_liveness).await?;
             self.writer.write_value(&max_freed).await?;
+            // obsolete fields the daemon still reads
+            self.writer.write_value(&IgnoredZero).await?;
+            self.writer.write_value(&IgnoredZero).await?;
+            self.writer.write_value(&IgnoredZero).await?;
             Ok(self.process_stderr())
         }
         .future_result()
@@ -804,7 +809,7 @@ where
     fn optimise_store(&mut self) -> impl ResultLog<Output = DaemonResult<()>> + Send + '_ {
         async move {
             self.writer.write_value(&Operation::OptimiseStore).await?;
-            Ok(self.process_stderr())
+            Ok(self.process_stderr().map_ok(|_: IgnoredOne| ()))
         }
         .future_result()
         .fill_operation(Operation::OptimiseStore)
@@ -834,7 +839,7 @@ where
             self.writer.write_value(&Operation::AddSignatures).await?;
             self.writer.write_value(path).await?;
             self.writer.write_value(&signatures).await?;
-            Ok(self.process_stderr())
+            Ok(self.process_stderr().map_ok(|_: IgnoredOne| ()))
         }
         .future_result()
         .fill_operation(Operation::AddSignatures)
@@ -902,6 +907,7 @@ where
             self.writer.flush().await?;
             Ok(ProcessStderr::new(&mut self.reader)
                 .stream()
+                .map_ok(|_: IgnoredOne| ())
                 .drive_result(async {
                     let mut source = source;
                     let mut framed = FramedWriter::new(&mut self.writer);
