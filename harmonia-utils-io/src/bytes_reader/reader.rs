@@ -235,7 +235,7 @@ mod unittests {
 
     use crate::{BytesReader, TryReadBytesLimited, TryReadU64};
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn test_read_u64_partial() {
         let mock = Builder::new()
             .read(&hex!("0100 0000"))
@@ -255,7 +255,7 @@ mod unittests {
         assert_eq!(hex!("0123 4567 89AB CDEF 0100 0000"), &buf[..]);
     }
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn test_read_twice() {
         let mock = Builder::new()
             .read(&hex!("0100 0000"))
@@ -280,7 +280,7 @@ mod unittests {
         assert_eq!(0, reader.read(&mut buf[..]).await.unwrap());
     }
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn test_force_fill() {
         let mock = Builder::new()
             .read(&hex!("0100"))

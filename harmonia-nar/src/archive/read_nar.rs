@@ -811,7 +811,7 @@ mod unittests {
 
     use super::NarReader;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     #[rstest]
     #[case::text_file(text_file())]
     #[case::exec_file(exec_file())]
@@ -898,7 +898,7 @@ mod proptests {
     use crate::archive::NarReader;
     use crate::test::arbitrary::archive::arb_nar_contents;
 
-    #[test_log::test]
+    #[test]
     fn proptest_read_nar() {
         let r = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

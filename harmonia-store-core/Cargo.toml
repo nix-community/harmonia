@@ -35,7 +35,6 @@ harmonia-store-core = { path = ".", features = [ "test" ] }
 hex-literal         = { workspace = true }
 rstest              = { workspace = true }
 tempfile            = { workspace = true }
-test-log            = { workspace = true }
 
 [features]
 test = [ "proptest", "proptest-derive", "harmonia-utils-test", "harmonia-utils-hash/test" ]

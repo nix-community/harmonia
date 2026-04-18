@@ -84,7 +84,6 @@ proptest        = "1.11"
 proptest-derive = "0.8"
 rstest          = "0.26"
 tempfile        = "3.27"
-test-log        = "0.2"
 test-strategy   = "0.4"
 tokio-test      = "0.4"
 

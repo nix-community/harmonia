@@ -173,7 +173,7 @@ mod unittests {
 
     use super::*;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     #[rstest]
     #[case::dir_example("test-data/test-dir.nar", test_data::dir_example())]
     #[case::exec_file("test-data/test-exec.nar", test_data::exec_file())]
@@ -209,7 +209,7 @@ mod unittests {
         assert_eq!(s, expected);
     }
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     #[rstest]
     #[case::text_file(test_data::text_file())]
     #[case::exec_file(test_data::exec_file())]

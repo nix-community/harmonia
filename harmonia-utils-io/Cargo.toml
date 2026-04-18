@@ -24,7 +24,6 @@ tracing          = { workspace = true }
 hex-literal   = { workspace = true }
 proptest      = { workspace = true }
 rstest        = { workspace = true }
-test-log      = { workspace = true }
 test-strategy = { workspace = true }
 tokio-test    = { workspace = true }
 
