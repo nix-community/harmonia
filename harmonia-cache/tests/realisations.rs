@@ -14,6 +14,14 @@ fn curl_status(url: &str) -> Result<String> {
         ])
         .arg(url)
         .output()?;
+    if !output.status.success() {
+        return Err(format!(
+            "curl {url} exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
     Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
