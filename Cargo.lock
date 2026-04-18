@@ -1101,7 +1101,6 @@ dependencies = [
 name = "harmonia-store-db"
 version = "3.0.0"
 dependencies = [
- "rstest",
  "rusqlite",
  "tempfile",
  "thiserror",
