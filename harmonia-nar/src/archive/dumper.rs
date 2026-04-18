@@ -13,7 +13,7 @@ use std::{collections::VecDeque, io};
 
 use bstr::{ByteSlice as _, ByteVec as _};
 use bytes::Bytes;
-use futures::Stream;
+use futures_core::Stream;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncRead, BufReader};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -464,7 +464,7 @@ impl Stream for NarDumper {
 mod unittests {
     use std::fs::create_dir_all;
 
-    use futures::TryStreamExt as _;
+    use futures_util::TryStreamExt as _;
     use tempfile::Builder;
 
     use super::*;

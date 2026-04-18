@@ -4,7 +4,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
 use bytes::{Bytes, BytesMut};
-use futures::{SinkExt, Stream, StreamExt};
+use futures_core::Stream;
+use futures_util::{SinkExt, StreamExt};
 use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
@@ -116,7 +117,7 @@ impl NarByteStream {
             let mut nar_writer = NarWriter::new(writer);
             let events = DumpOptions::new().dump(path);
 
-            futures::pin_mut!(events);
+            futures_util::pin_mut!(events);
             while let Some(event_result) = events.next().await {
                 match event_result {
                     Ok(event) => {

@@ -18,7 +18,8 @@ async-stream     = { workspace = true }
 bstr             = { workspace = true }
 bytes            = { workspace = true }
 derive_more      = { workspace = true }
-futures          = { workspace = true }
+futures-core     = { workspace = true }
+futures-util     = { workspace = true }
 libc             = "0.2"
 num_enum         = { workspace = true }
 pin-project-lite = { workspace = true }

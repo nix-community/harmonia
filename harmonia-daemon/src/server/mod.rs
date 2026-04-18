@@ -15,8 +15,8 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::pin::{Pin, pin};
 
-use futures::future::TryFutureExt;
-use futures::{FutureExt, Stream, StreamExt as _};
+use futures_core::Stream;
+use futures_util::{FutureExt, StreamExt as _, TryFutureExt};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt, copy_buf};
 use tokio::net::UnixListener;
 use tracing::{Instrument, debug, error, info, instrument, trace};

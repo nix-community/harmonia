@@ -1,7 +1,8 @@
 use std::pin::pin;
 
 use async_stream::try_stream;
-use futures::{Stream, StreamExt};
+use futures_core::Stream;
+use futures_util::StreamExt;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, copy_buf};
 use tracing::{Instrument, debug, debug_span, instrument, trace};
@@ -127,8 +128,8 @@ mod unittests {
     use std::io::Cursor;
 
     use bytes::Bytes;
-    use futures::stream::iter;
-    use futures::{TryFutureExt as _, TryStreamExt as _};
+    use futures_util::stream::iter;
+    use futures_util::{TryFutureExt as _, TryStreamExt as _};
     use rstest::rstest;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::try_join;
@@ -249,7 +250,7 @@ mod unittests {
         ],
     )]
     async fn test_read_written(#[case] infos: Vec<(ValidPathInfo, test_data::TestNarEvents)>) {
-        use futures::FutureExt as _;
+        use futures_util::FutureExt as _;
         use tokio::io::simplex;
 
         use harmonia_nar::archive::read_nar;

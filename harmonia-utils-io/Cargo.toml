@@ -15,7 +15,7 @@ readme               = "README.md"
 
 [dependencies]
 bytes            = { workspace = true }
-futures          = { workspace = true }
+futures-util     = { workspace = true }
 pin-project-lite = { workspace = true }
 tokio            = { workspace = true, features = [ "io-util", "sync" ] }
 tracing          = { workspace = true }

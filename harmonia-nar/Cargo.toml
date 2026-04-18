@@ -17,7 +17,9 @@ readme               = "README.md"
 bstr              = { workspace = true }
 bytes             = { workspace = true }
 derive_more       = { workspace = true }
-futures           = { workspace = true }
+futures-core      = { workspace = true }
+futures-sink      = { workspace = true }
+futures-util      = { workspace = true }
 harmonia-utils-io = { version = "0.0.0-alpha.0" }
 nix.workspace     = true
 pin-project-lite  = { workspace = true }

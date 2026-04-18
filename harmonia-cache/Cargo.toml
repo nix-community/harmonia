@@ -43,7 +43,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = "2.5.7"
 # Nix.rs-based crates
-futures               = { workspace = true }
+futures-core          = { workspace = true }
+futures-util          = { workspace = true }
 harmonia-nar          = { version = "3.0.0" }
 harmonia-store-core   = { version = "0.0.0-alpha.0" }
 harmonia-store-remote = { version = "3.0.0" }

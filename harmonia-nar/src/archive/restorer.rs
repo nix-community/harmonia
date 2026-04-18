@@ -12,7 +12,8 @@ use std::task::{Poll, ready};
 use bstr::ByteSlice as _;
 use bytes::Bytes;
 use derive_more::Display;
-use futures::{Sink, Stream};
+use futures_core::Stream;
+use futures_sink::Sink;
 use pin_project_lite::pin_project;
 use thiserror::Error;
 use tokio::io::AsyncBufRead;
@@ -349,7 +350,7 @@ impl RestoreOptions {
         P: Into<PathBuf>,
         R: AsyncBufRead + Send + 'static,
     {
-        use futures::stream::StreamExt as _;
+        use futures_util::stream::StreamExt as _;
         let restorer = NarRestorer::new_restorer(path, self.use_case_hack);
         stream.map(|item| item.into()).forward(restorer).await
     }
@@ -375,7 +376,7 @@ where
 mod unittests {
     use super::*;
     use crate::archive::{NarEvent, dump, test_data};
-    use futures::stream::{StreamExt as _, TryStreamExt as _, iter};
+    use futures_util::stream::{StreamExt as _, TryStreamExt as _, iter};
     use rstest::rstest;
     use tempfile::Builder;
 
@@ -409,8 +410,8 @@ mod unittests {
 
 #[cfg(test)]
 mod proptests {
-    use futures::stream::iter;
-    use futures::{StreamExt as _, TryStreamExt as _};
+    use futures_util::stream::iter;
+    use futures_util::{StreamExt as _, TryStreamExt as _};
     use proptest::proptest;
     use tempfile::tempdir;
 

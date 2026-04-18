@@ -12,9 +12,10 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
 
 use async_stream::stream;
-use futures::Stream;
-use futures::future::Either;
-use futures::io::Cursor;
+use std::io::Cursor;
+
+use futures_core::Stream;
+use futures_util::future::Either;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt as _, copy_buf};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
