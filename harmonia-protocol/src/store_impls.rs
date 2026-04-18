@@ -341,8 +341,8 @@ impl NixDeserialize for ActivityResult {
 //
 // Wire format requires the `realisation-with-path-not-hash` feature.
 // Harmonia only advertises/accepts the new format; if the peer did not
-// negotiate the feature these serializers fail explicitly so the protocol
-// doesn't get desynced.
+// negotiate the feature these serializers fail explicitly before touching the
+// stream.
 
 fn require_realisation_feature_ser<W: NixWrite>(writer: &W) -> Result<(), W::Error> {
     use crate::ser::Error;
@@ -384,10 +384,10 @@ impl NixDeserialize for DrvOutput {
     where
         R: ?Sized + NixRead + Send,
     {
+        require_realisation_feature_de(reader)?;
         let Some(drv_path) = reader.try_read_value::<StorePath>().await? else {
             return Ok(None);
         };
-        require_realisation_feature_de(reader)?;
         let output_name = reader.read_value().await?;
         Ok(Some(DrvOutput {
             drv_path,
@@ -412,10 +412,10 @@ impl NixDeserialize for UnkeyedRealisation {
     where
         R: ?Sized + NixRead + Send,
     {
+        require_realisation_feature_de(reader)?;
         let Some(out_path) = reader.try_read_value::<StorePath>().await? else {
             return Ok(None);
         };
-        require_realisation_feature_de(reader)?;
         let signatures = reader.read_value().await?;
         Ok(Some(UnkeyedRealisation {
             out_path,

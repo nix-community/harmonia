@@ -205,7 +205,7 @@ impl DaemonStore for LocalStoreHandler {
             let db = self.db.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                if !db.has_ca_schema().unwrap_or(false) {
+                if !db.has_ca_schema()? {
                     return Ok(None);
                 }
                 db.query_realisation(&drv_path, &output_name)

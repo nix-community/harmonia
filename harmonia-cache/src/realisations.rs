@@ -8,7 +8,7 @@ use actix_web::{HttpResponse, web};
 use harmonia_store_core::derived_path::OutputName;
 use harmonia_store_core::realisation::DrvOutput;
 use harmonia_store_core::store_path::StorePath;
-use harmonia_store_remote::DaemonStore;
+use harmonia_store_remote::{DaemonStore, FEATURE_REALISATION_WITH_PATH};
 
 use crate::config::Config;
 use crate::{ServerResult, cache_control_max_age_1y, cache_control_no_store};
@@ -45,20 +45,21 @@ pub async fn get(path: web::Path<(String, String)>, settings: web::Data<Config>)
     };
 
     let mut guard = settings.store.acquire().await?;
-    let realisation = match guard.client().query_realisation(&drv_output).await {
-        Ok(r) => r,
-        Err(e) => {
-            // Daemon may lack the `realisation-with-path-not-hash` feature
-            // (e.g. talking to an older nix-daemon). Treat as not-found so
-            // clients fall back gracefully.
-            tracing::debug!(
-                "Failed to query realisation for {drv_output}: {e} (treating as not found)"
-            );
-            return Ok(HttpResponse::NotFound()
-                .insert_header(cache_control_no_store())
-                .body("realisation not found"));
-        }
-    };
+    // Older nix-daemon without `realisation-with-path-not-hash` can't answer
+    // this at all; degrade to 404 so clients fall back. Any other error from
+    // the actual query is a real failure and must surface as 5xx.
+    if !guard.client().has_feature(FEATURE_REALISATION_WITH_PATH) {
+        tracing::debug!("Daemon missing {FEATURE_REALISATION_WITH_PATH}; returning 404");
+        return Ok(HttpResponse::NotFound()
+            .insert_header(cache_control_no_store())
+            .body("realisation not found"));
+    }
+    let realisation = guard
+        .client()
+        .query_realisation(&drv_output)
+        .await
+        .map_err(crate::error::StoreError::from)
+        .map_err(crate::error::CacheError::from)?;
 
     match realisation {
         Some(realisation) => Ok(HttpResponse::Ok()
