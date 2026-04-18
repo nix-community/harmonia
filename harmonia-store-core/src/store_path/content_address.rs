@@ -329,4 +329,20 @@ mod unittests {
         let actual = value.parse::<ContentAddressMethodAlgorithm>().unwrap();
         assert_eq!(actual, method);
     }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_content_address_display_parse(ca in proptest::prelude::any::<ContentAddress>()) {
+            let s = ca.to_string();
+            proptest::prop_assert_eq!(s.parse::<ContentAddress>().unwrap(), ca);
+        }
+
+        #[test]
+        fn proptest_method_algo_display_parse(
+            ma in proptest::prelude::any::<ContentAddressMethodAlgorithm>(),
+        ) {
+            let s = ma.to_string();
+            proptest::prop_assert_eq!(s.parse::<ContentAddressMethodAlgorithm>().unwrap(), ma);
+        }
+    }
 }

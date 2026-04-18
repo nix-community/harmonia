@@ -507,4 +507,12 @@ mod unittests {
         let expected = b"1;/nix/store/syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin;sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0;196040;/nix/store/0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0";
         assert_eq!(fingerprint, expected);
     }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_signature_display_parse(sig in proptest::prelude::any::<Signature>()) {
+            let s = sig.to_string();
+            proptest::prop_assert_eq!(s.parse::<Signature>().unwrap(), sig);
+        }
+    }
 }

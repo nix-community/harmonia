@@ -182,6 +182,20 @@ mod unittests {
         assert_eq!(actual, expected);
     }
 
+    proptest::proptest! {
+        #[test]
+        fn proptest_drv_output_display_parse(d in proptest::prelude::any::<DrvOutput>()) {
+            let s = d.to_string();
+            proptest::prop_assert_eq!(s.parse::<DrvOutput>().unwrap(), d);
+        }
+
+        #[test]
+        fn proptest_realisation_json_roundtrip(r in proptest::prelude::any::<Realisation>()) {
+            let json = serde_json::to_string(&r).unwrap();
+            proptest::prop_assert_eq!(serde_json::from_str::<Realisation>(&json).unwrap(), r);
+        }
+    }
+
     #[rstest]
     #[should_panic = "missing '!' in derivation output 'sha256:1h86vccx9vgcyrkj3zv4b7j3r8rrc0z0r4r6q3jvhf06s9hnm394'"]
     #[case("sha256:1h86vccx9vgcyrkj3zv4b7j3r8rrc0z0r4r6q3jvhf06s9hnm394")]
