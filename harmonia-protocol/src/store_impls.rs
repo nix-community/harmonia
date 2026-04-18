@@ -10,14 +10,17 @@
 //! This module breaks the circular dependency: store-core has no protocol knowledge,
 //! but protocol can impl traits for external store-core types.
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
+
+use bytes::Bytes;
 
 use crate::daemon_wire::logger::RawLogMessageType;
 use crate::de::{NixDeserialize, NixRead};
 use crate::log::{Activity, ActivityResult, LogMessage, StopActivity};
 use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
-use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput};
+use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, StructuredAttrs};
 use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::store_path::{
@@ -43,7 +46,21 @@ impl NixSerialize for (StorePath, BasicDerivation) {
         writer.write_value(&drv.platform).await?;
         writer.write_value(&drv.builder).await?;
         writer.write_value(&drv.args).await?;
-        writer.write_value(&drv.env).await?;
+        // The wire format (like ATerm) carries structured attrs as the
+        // `__json` env var, not as a separate field. Re-inject it so the
+        // remote daemon reconstructs the same derivation.
+        match &drv.structured_attrs {
+            None => writer.write_value(&drv.env).await?,
+            Some(sa) => {
+                use crate::ser::Error as _;
+                let mut env = drv.env.clone();
+                let json = serde_json::to_string(&sa.attrs).map_err(|e| {
+                    W::Error::custom(std::format_args!("failed to encode structured attrs: {e}"))
+                })?;
+                env.insert(Bytes::from_static(b"__json"), Bytes::from(json));
+                writer.write_value(&env).await?;
+            }
+        }
         Ok(())
     }
 }
@@ -72,7 +89,15 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
             let platform = reader.read_value().await?;
             let builder = reader.read_value().await?;
             let args = reader.read_value().await?;
-            let env = reader.read_value().await?;
+            let mut env: BTreeMap<Bytes, Bytes> = reader.read_value().await?;
+            // Mirror `StructuredAttrs::tryExtract`: pull `__json` out
+            // of env into the dedicated field so round-tripping is lossless.
+            let structured_attrs = env.remove(b"__json".as_slice()).and_then(|json_bytes| {
+                let json_str = std::str::from_utf8(&json_bytes).ok()?;
+                let attrs: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_str(json_str).ok()?;
+                Some(StructuredAttrs { attrs })
+            });
 
             Ok(Some((
                 drv_path,
@@ -84,7 +109,7 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
                     builder,
                     args,
                     env,
-                    structured_attrs: None, // TODO: Read from wire protocol if present
+                    structured_attrs,
                 },
             )))
         } else {
