@@ -76,14 +76,17 @@ where
 #[macro_export]
 macro_rules! test_upstream_json {
     ($test_name:ident, $path:expr, $value:expr) => {
-        $crate::paste::paste! {
+        mod $test_name {
+            #[allow(unused_imports)]
+            use super::*;
+
             #[test]
-            fn [<$test_name _from_json>]() {
+            fn from_json() {
                 $crate::json_upstream::test_upstream_json_from_json(&$path, &$value);
             }
 
             #[test]
-            fn [<$test_name _to_json>]() {
+            fn to_json() {
                 $crate::json_upstream::test_upstream_json_to_json(&$path, &$value);
             }
         }
