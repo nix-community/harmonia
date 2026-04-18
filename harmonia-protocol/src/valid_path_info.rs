@@ -2,9 +2,9 @@
 
 use std::{borrow::Cow, collections::BTreeSet, num::NonZero};
 
-use serde::{Deserialize, Serialize, Serializer};
 #[cfg(test)]
-use test_strategy::Arbitrary;
+use proptest_derive::Arbitrary;
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::NarHash;
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
@@ -29,7 +29,7 @@ pub struct UnkeyedValidPathInfo {
     pub registration_time: Option<NonZero<DaemonTime>>,
     pub nar_size: u64,
     pub ultimate: bool,
-    #[cfg_attr(test, strategy(arb_signatures()))]
+    #[cfg_attr(test, proptest(strategy = "arb_signatures()"))]
     pub signatures: BTreeSet<Signature>,
     pub ca: Option<ContentAddress>,
     pub store_dir: StoreDir,

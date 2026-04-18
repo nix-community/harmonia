@@ -137,7 +137,13 @@ impl From<CacheError> for ServerError {
 type ServerResult = std::result::Result<HttpResponse, ServerError>;
 
 async fn inner_main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Initialize tracing; bridges `log` records (actix, mio, rustls) via tracing-log.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
 
     let (metrics, pool_metrics) = prometheus::initialize_metrics()?;
     let config = config::load(Some(pool_metrics))?;
@@ -146,7 +152,7 @@ async fn inner_main() -> Result<()> {
     let config_data = c.clone();
     let metrics_data = web::Data::new(metrics.clone());
 
-    log::info!("listening on {}", c.bind);
+    tracing::info!("listening on {}", c.bind);
     let mut server = HttpServer::new(move || {
         App::new()
                 .wrap(middleware::Condition::new(config_data.enable_compression, middleware::Compress::default()))
@@ -201,7 +207,7 @@ async fn inner_main() -> Result<()> {
 
     if c.tls_cert_path.is_some() || c.tls_key_path.is_some() {
         if uds {
-            log::error!("TLS is not supported with Unix domain sockets.");
+            tracing::error!("TLS is not supported with Unix domain sockets.");
             std::process::exit(1);
         }
         let config = tls::load_tls_config(
@@ -222,7 +228,7 @@ async fn inner_main() -> Result<()> {
             .io_context("Failed to bind with TLS")?;
     } else if uds {
         if !cfg!(unix) {
-            log::error!("Binding to Unix domain sockets is only supported on Unix.");
+            tracing::error!("Binding to Unix domain sockets is only supported on Unix.");
             std::process::exit(1);
         } else {
             let socket_path = Path::new(bind);

@@ -24,7 +24,7 @@ harmonia-store-core = { version = "0.0.0-alpha.0" }
 harmonia-utils-io   = { version = "0.0.0-alpha.0" }
 
 # Async runtime
-async-stream = "0.3"
+async-stream = { workspace = true }
 futures      = { workspace = true }
 tokio        = { workspace = true }
 

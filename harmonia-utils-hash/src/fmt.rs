@@ -1205,41 +1205,52 @@ mod unittests {
         base64: "jpWbddrjE9qM9PcoFPwUP493ecbrn3+hcpmurbaIkBhQHSieSQD35DMbmd7EtUM6x9Mp7rbdJlReluVbh0vpCQ==",
     };
 
-    #[rstest_reuse::template]
-    #[rstest::rstest]
-    #[case::md5_empty(MD5_EMPTY)]
-    #[case::md5_abc(MD5_ABC)]
-    #[case::sha1_abc(SHA1_ABC)]
-    #[case::sha1_long(SHA1_LONG)]
-    #[case::sha256_abc(SHA256_ABC)]
-    #[case::sha256_long(SHA256_LONG)]
-    #[case::sha512_abc(SHA512_ABC)]
-    #[case::sha512_long(SHA512_LONG)]
-    fn hash_formats(#[case] hash: HashFormats) {}
+    const ALL_HASHES: &[(&str, &HashFormats)] = &[
+        ("md5_empty", &MD5_EMPTY),
+        ("md5_abc", &MD5_ABC),
+        ("sha1_abc", &SHA1_ABC),
+        ("sha1_long", &SHA1_LONG),
+        ("sha256_abc", &SHA256_ABC),
+        ("sha256_long", &SHA256_LONG),
+        ("sha512_abc", &SHA512_ABC),
+        ("sha512_long", &SHA512_LONG),
+    ];
 
-    #[rstest_reuse::apply(hash_formats)]
-    fn lower_hex(#[case] hash: HashFormats) {
-        let actual = format!("{:x}", hash.hash);
-        assert_eq!(hash.prefix_base16(), actual);
+    macro_rules! for_all_hashes {
+        ($name:ident, |$hash:ident| $body:block) => {
+            #[test]
+            fn $name() {
+                for (case, $hash) in ALL_HASHES {
+                    eprintln!("case: {case}");
+                    $body
+                }
+            }
+        };
     }
 
-    #[rstest_reuse::apply(hash_formats)]
-    fn lower_hex_alt(#[case] hash: HashFormats) {
-        let actual = format!("{:#x}", hash.hash);
-        assert_eq!(hash.base16, actual);
-    }
+    mod hex_fmt {
+        use super::*;
 
-    #[rstest_reuse::apply(hash_formats)]
-    fn upper_hex(#[case] hash: HashFormats) {
-        let expected = format!("{}:{}", hash.algorithm, hash.base16.to_uppercase());
-        let actual = format!("{:X}", hash.hash);
-        assert_eq!(expected, actual);
-    }
+        for_all_hashes!(lower_hex, |hash| {
+            let actual = format!("{:x}", hash.hash);
+            assert_eq!(hash.prefix_base16(), actual);
+        });
 
-    #[rstest_reuse::apply(hash_formats)]
-    fn upper_hex_alt(#[case] hash: HashFormats) {
-        let actual = format!("{:#X}", hash.hash);
-        assert_eq!(hash.base16.to_uppercase(), actual);
+        for_all_hashes!(lower_hex_alt, |hash| {
+            let actual = format!("{:#x}", hash.hash);
+            assert_eq!(hash.base16, actual);
+        });
+
+        for_all_hashes!(upper_hex, |hash| {
+            let expected = format!("{}:{}", hash.algorithm, hash.base16.to_uppercase());
+            let actual = format!("{:X}", hash.hash);
+            assert_eq!(expected, actual);
+        });
+
+        for_all_hashes!(upper_hex_alt, |hash| {
+            let actual = format!("{:#X}", hash.hash);
+            assert_eq!(hash.base16.to_uppercase(), actual);
+        });
     }
 
     mod base16 {
@@ -1247,48 +1258,41 @@ mod unittests {
 
         use super::*;
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_eq(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_eq, |hash| {
             let actual = hash.hash.base16();
             assert_eq!(*hash.hash.as_base16(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_bare_eq(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_bare_eq, |hash| {
             let actual = hash.hash.base16().bare();
             assert_eq!(*hash.hash.as_base16().as_bare(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display, |hash| {
             let actual = hash.hash.base16().to_string();
             assert_eq!(hash.prefix_base16(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_alt(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_alt, |hash| {
             let actual = format!("{:#}", hash.hash.base16());
             assert_eq!(hash.base16, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_bare(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_bare, |hash| {
             let actual = hash.hash.base16().bare().to_string();
             assert_eq!(hash.base16, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_bare_alt(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_bare_alt, |hash| {
             let actual = format!("{:#}", hash.hash.base16().bare());
             assert_eq!(hash.base16, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str, |hash| {
             let s = hash.prefix_base16();
             let actual = s.parse::<Base16<Hash>>().unwrap();
             assert_eq!(*hash.hash.as_base16(), actual);
-        }
+        });
 
         // UnknownAlgorithm
         // Base16 bad symbol
@@ -1312,95 +1316,81 @@ mod unittests {
     mod base32 {
         use super::*;
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_eq(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_eq, |hash| {
             let actual = hash.hash.base32();
             assert_eq!(*hash.hash.as_base32(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_bare_eq(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_bare_eq, |hash| {
             let actual = hash.hash.base32().bare();
             assert_eq!(*hash.hash.as_base32().as_bare(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display, |hash| {
             let actual = hash.hash.base32().to_string();
             assert_eq!(hash.prefix_base32(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_alt(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_alt, |hash| {
             let actual = format!("{:#}", hash.hash.base32());
             assert_eq!(hash.base32, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_bare(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_bare, |hash| {
             let actual = hash.hash.base32().bare().to_string();
             assert_eq!(hash.base32, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_bare_alt(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_bare_alt, |hash| {
             let actual = format!("{:#}", hash.hash.base32().bare());
             assert_eq!(hash.base32, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str, |hash| {
             let s = hash.prefix_base32();
             let actual = s.parse::<Base32<Hash>>().unwrap();
             assert_eq!(*hash.hash.as_base32(), actual);
-        }
+        });
     }
 
     mod base64 {
         use super::*;
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_eq(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_eq, |hash| {
             let actual = hash.hash.base64();
             assert_eq!(*hash.hash.as_base64(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_bare_eq(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_bare_eq, |hash| {
             let actual = hash.hash.base64().bare();
             assert_eq!(*hash.hash.as_base64().as_bare(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display, |hash| {
             let actual = hash.hash.base64().to_string();
             assert_eq!(hash.prefix_base64(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_alt(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_alt, |hash| {
             let actual = format!("{:#}", hash.hash.base64());
             assert_eq!(hash.base64, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_bare(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_bare, |hash| {
             let actual = hash.hash.base64().bare().to_string();
             assert_eq!(hash.base64, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_bare_alt(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_bare_alt, |hash| {
             let actual = format!("{:#}", hash.hash.base64().bare());
             assert_eq!(hash.base64, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str, |hash| {
             let s = hash.prefix_base64();
             let actual = s.parse::<Base64<Hash>>().unwrap();
             assert_eq!(*hash.hash.as_base64(), actual);
-        }
+        });
     }
 
     mod sri {
@@ -1408,30 +1398,26 @@ mod unittests {
 
         use super::*;
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_eq(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_eq, |hash| {
             let actual = hash.hash.sri();
             assert_eq!(*hash.hash.as_sri(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display, |hash| {
             let actual = format!("{}", hash.hash.sri());
             assert_eq!(hash.sri(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_display_alt(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_display_alt, |hash| {
             let actual = format!("{:#}", hash.hash.sri());
             assert_eq!(hash.sri(), actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str, |hash| {
             let s = hash.sri();
             let actual = s.parse::<SRI<Hash>>().unwrap();
             assert_eq!(*hash.hash.as_sri(), actual);
-        }
+        });
 
         // UnknownAlgorithm
         // Base16 bad symbol
@@ -1461,33 +1447,29 @@ mod unittests {
 
         use super::*;
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str_base16(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str_base16, |hash| {
             let s = hash.prefix_base16();
             let actual = s.parse::<Any<hash::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str_base32(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str_base32, |hash| {
             let s = hash.prefix_base32();
             let actual = s.parse::<Any<hash::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str_base64(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str_base64, |hash| {
             let s = hash.prefix_base64();
             let actual = s.parse::<Any<hash::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str_sri(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str_sri, |hash| {
             let s = hash.sri();
             let actual = s.parse::<Any<hash::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
-        }
+        });
 
         #[rstest]
         #[should_panic = "hash 'sha1:k9993e364706816aba3e25717850c26c9cd0d89d' has invalid symbol at 5 when decoding as base16"]
@@ -1515,26 +1497,23 @@ mod unittests {
     mod non_sri {
         use super::*;
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str_base16(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str_base16, |hash| {
             let s = hash.prefix_base16();
             let actual = s.parse::<NonSRI<hash::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str_base32(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str_base32, |hash| {
             let s = hash.prefix_base32();
             let actual = s.parse::<NonSRI<hash::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
-        }
+        });
 
-        #[rstest_reuse::apply(hash_formats)]
-        fn hash_from_str_base64(#[case] hash: HashFormats) {
+        for_all_hashes!(hash_from_str_base64, |hash| {
             let s = hash.prefix_base64();
             let actual = s.parse::<NonSRI<hash::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
-        }
+        });
 
         #[test]
         fn parse_non_sri_prefixed_missing() {
@@ -1547,38 +1526,4 @@ mod unittests {
             );
         }
     }
-
-    /*
-    mod hash_from_str {
-        use super::*;
-
-        #[rstest_reuse::apply(hash_formats)]
-        fn base16(#[case] hash: HashFormats) {
-            let s = hash.prefix_base16();
-            let actual = s.parse().unwrap();
-            assert_eq!(hash.hash, actual);
-        }
-
-        #[rstest_reuse::apply(hash_formats)]
-        fn base32(#[case] hash: HashFormats) {
-            let s = hash.prefix_base32();
-            let actual = s.parse().unwrap();
-            assert_eq!(hash.hash, actual);
-        }
-
-        #[rstest_reuse::apply(hash_formats)]
-        fn base64(#[case] hash: HashFormats) {
-            let s = hash.prefix_base64();
-            let actual = s.parse().unwrap();
-            assert_eq!(hash.hash, actual);
-        }
-
-        #[rstest_reuse::apply(hash_formats)]
-        fn sri(#[case] hash: HashFormats) {
-            let s = hash.sri();
-            let actual = s.parse().unwrap();
-            assert_eq!(hash.hash, actual);
-        }
-    }
-     */
 }

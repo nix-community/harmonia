@@ -105,13 +105,13 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
     }
 
     if let Some(sign_key_path) = &settings.sign_key_path {
-        log::warn!(
+        tracing::warn!(
             "The sign_key_path configuration option is deprecated. Use sign_key_paths instead."
         );
         settings.sign_key_paths.push(PathBuf::from(sign_key_path));
     }
     if let Ok(sign_key_path) = std::env::var("SIGN_KEY_PATH") {
-        log::warn!(
+        tracing::warn!(
             "The SIGN_KEY_PATH environment variable is deprecated. Use SIGN_KEY_PATHS instead."
         );
         settings.sign_key_paths.push(PathBuf::from(sign_key_path));

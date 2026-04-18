@@ -187,7 +187,7 @@ mod unittests {
         }))
     }
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     #[rstest]
     #[case::one(
         vec![

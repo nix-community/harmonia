@@ -3,7 +3,6 @@ use std::str::FromStr;
 
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
 use crate::derived_path::OutputName;
@@ -16,23 +15,13 @@ use harmonia_utils_hash::fmt::Any;
 ///
 /// String form: `sha256:<hex>!<output_name>`, where the hash is the
 /// "hash modulo" of the derivation.
-#[derive(
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Clone,
-    Display,
-    SerializeDisplay,
-    DeserializeFromStr,
-)]
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Display)]
 #[display("{drv_hash:x}!{output_name}")]
 pub struct DrvOutput {
     pub drv_hash: harmonia_utils_hash::Hash,
     pub output_name: OutputName,
 }
+crate::impl_serde_via_string!(DrvOutput);
 
 #[derive(Debug, PartialEq, Clone, Error)]
 pub enum ParseDrvOutputError {
@@ -191,6 +180,20 @@ mod unittests {
     fn parse_drv_output(#[case] value: &str, #[case] expected: DrvOutput) {
         let actual: DrvOutput = value.parse().unwrap();
         assert_eq!(actual, expected);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_drv_output_display_parse(d in proptest::prelude::any::<DrvOutput>()) {
+            let s = d.to_string();
+            proptest::prop_assert_eq!(s.parse::<DrvOutput>().unwrap(), d);
+        }
+
+        #[test]
+        fn proptest_realisation_json_roundtrip(r in proptest::prelude::any::<Realisation>()) {
+            let json = serde_json::to_string(&r).unwrap();
+            proptest::prop_assert_eq!(serde_json::from_str::<Realisation>(&json).unwrap(), r);
+        }
     }
 
     #[rstest]

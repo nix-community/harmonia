@@ -182,7 +182,7 @@ mod unittests {
 
     use super::*;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn test_write_frames() {
         let mut mock = Builder::new()
             .write(b"\x01\0\0\0\0\0\0\0 \x04\0\0\0\0\0\0\0ABCD")

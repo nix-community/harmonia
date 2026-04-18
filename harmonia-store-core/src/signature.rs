@@ -8,7 +8,6 @@ use std::sync::Arc;
 use data_encoding::BASE64;
 
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 use tracing::error;
 
@@ -36,10 +35,9 @@ pub enum ParseSignatureError {
 
 pub type SignatureSet = BTreeSet<Signature>;
 
-#[derive(
-    Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, DeserializeFromStr, SerializeDisplay,
-)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signature(Arc<String>, [u8; SIGNATURE_BYTES]);
+crate::impl_serde_via_string!(Signature);
 
 impl Signature {
     pub fn name(&self) -> &str {
@@ -215,7 +213,7 @@ impl SecretKey {
     pub fn generate(name: String) -> Result<SecretKey, GenerateKeyError> {
         let name = Arc::new(name);
         let mut seed = [0u8; SEED_BYTES];
-        getrandom::getrandom(&mut seed).map_err(|_| GenerateKeyError)?;
+        getrandom::fill(&mut seed).map_err(|_| GenerateKeyError)?;
         let key = SigningKey::from_bytes(&seed);
         let pk = key.verifying_key();
         let mut key_data = [0u8; SECRET_KEY_BYTES];
@@ -508,5 +506,13 @@ mod unittests {
             fingerprint_path(&store_dir, &store_path, nar_hash, 196040, &references).unwrap();
         let expected = b"1;/nix/store/syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin;sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0;196040;/nix/store/0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0";
         assert_eq!(fingerprint, expected);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_signature_display_parse(sig in proptest::prelude::any::<Signature>()) {
+            let s = sig.to_string();
+            proptest::prop_assert_eq!(s.parse::<Signature>().unwrap(), sig);
+        }
     }
 }

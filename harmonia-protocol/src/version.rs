@@ -6,7 +6,6 @@ use std::{
     str::FromStr,
 };
 
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
@@ -19,21 +18,11 @@ pub const PROTOCOL_VERSION_MIN: ProtocolVersion =
     ProtocolVersion::from_parts(PROTOCOL_VERSION_MAJOR, 37);
 
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    DeserializeFromStr,
-    SerializeDisplay,
-    NixDeserialize,
-    NixSerialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, NixDeserialize, NixSerialize,
 )]
 #[nix(from = "u16", into = "u16")]
 pub struct ProtocolVersion(u8, u8);
+harmonia_store_core::impl_serde_via_string!(ProtocolVersion);
 impl ProtocolVersion {
     pub const fn max() -> Self {
         PROTOCOL_VERSION
@@ -130,13 +119,14 @@ impl FromStr for ProtocolVersion {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, DeserializeFromStr, SerializeDisplay)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ProtocolRange {
     Full,
     To(ProtocolVersion),
     From(ProtocolVersion),
     Between(ProtocolVersion, ProtocolVersion),
 }
+harmonia_store_core::impl_serde_via_string!(ProtocolRange);
 
 impl ProtocolRange {
     pub const fn from_minor(from: u8, to_inclusive: u8) -> ProtocolRange {

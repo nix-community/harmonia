@@ -379,7 +379,7 @@ mod unittests {
     use rstest::rstest;
     use tempfile::Builder;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     #[rstest]
     #[case::text_file(test_data::text_file())]
     #[case::exec_file(test_data::exec_file())]
