@@ -40,7 +40,6 @@ derive_more = { version = "2.1", features = [ "display" ] }
 ed25519-dalek = "2"
 futures = "0.3"
 getrandom = "0.3"
-hex = "0.4"
 md5 = "0.8"
 memchr = "2"
 nix = { version = "0.31", features = [ "signal", "mman" ] }
@@ -76,7 +75,6 @@ syn         = "2.0"
 
 # Test / dev only
 hex-literal     = "1.1"
-paste           = "1.0"
 proptest        = "1.11"
 proptest-derive = "0.8"
 rstest          = "0.26"

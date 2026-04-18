@@ -44,7 +44,6 @@ harmonia-nar        = { version = "3.0.0", features = [ "test" ] }
 harmonia-store-core = { version = "0.0.0-alpha.0", features = [ "test" ] }
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
 hex-literal         = { workspace = true }
-paste               = { workspace = true }
 proptest            = { workspace = true }
 proptest-derive     = { workspace = true }
 rstest              = { workspace = true }

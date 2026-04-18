@@ -190,11 +190,13 @@ Note: When TLS is enabled, harmonia will only accept HTTPS connections on the co
 
 ### Logging Configuration
 
-Logging can be configured with
-[env_logger](https://docs.rs/env_logger/latest/env_logger/). The default value
-is `info,actix_web=debug`. To only log errors use the following
-`RUST_LOG=error` and to only disable access logging, use
-`RUST_LOG=info,actix_web::middleware=error`
+Logging is handled by [tracing](https://docs.rs/tracing) and configured via the
+`RUST_LOG` environment variable using
+[EnvFilter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)
+syntax (compatible with the familiar `env_logger` directives). The default
+filter is `info`. To only log errors use `RUST_LOG=error`, and to keep info
+messages while disabling actix access logging use
+`RUST_LOG=info,actix_web::middleware=error`.
 
 ## Build
 
