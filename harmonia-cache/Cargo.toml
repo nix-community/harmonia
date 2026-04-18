@@ -36,11 +36,11 @@ rustls-pemfile = "2"
 rustls-pki-types = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
-tempfile = "3.27"
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { version = "0.7.18", features = [ "io" ] }
-toml = "1.1"
+tokio-util = { workspace = true, features = [ "io" ] }
+toml = { workspace = true }
 url = "2.5.7"
 # Nix.rs-based crates
 futures               = { workspace = true }

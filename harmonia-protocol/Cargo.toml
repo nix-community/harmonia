@@ -14,8 +14,8 @@ description          = "Nix daemon wire protocol types and serialization"
 readme               = "README.md"
 
 [dependencies]
-async-stream     = "0.3"
-bstr             = "1.11"
+async-stream     = { workspace = true }
+bstr             = { workspace = true }
 bytes            = { workspace = true }
 derive_more      = { workspace = true }
 futures          = { workspace = true }
@@ -44,14 +44,14 @@ harmonia-utils-test      = { version = "0.0.0-alpha.0", optional = true }
 harmonia-nar        = { version = "3.0.0", features = [ "test" ] }
 harmonia-store-core = { version = "0.0.0-alpha.0", features = [ "test" ] }
 harmonia-utils-test = { version = "0.0.0-alpha.0" }
-hex-literal         = "1.1"
-paste               = "1.0"
+hex-literal         = { workspace = true }
+paste               = { workspace = true }
 proptest            = { workspace = true }
 proptest-derive     = { workspace = true }
 rstest              = { workspace = true }
-test-log            = "0.2"
+test-log            = { workspace = true }
 test-strategy       = { workspace = true }
-tokio-test          = "0.4"
+tokio-test          = { workspace = true }
 
 [features]
 test = [

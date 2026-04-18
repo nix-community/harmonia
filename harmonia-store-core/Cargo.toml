@@ -32,10 +32,10 @@ zerocopy                     = { version = "0.8", features = [ "derive" ] }
 
 [dev-dependencies]
 harmonia-store-core = { path = ".", features = [ "test" ] }
-hex-literal         = "1.1"
+hex-literal         = { workspace = true }
 rstest              = { workspace = true }
 tempfile            = { workspace = true }
-test-log            = "0.2"
+test-log            = { workspace = true }
 
 [features]
 test = [ "proptest", "proptest-derive", "harmonia-utils-test", "harmonia-utils-hash/test" ]

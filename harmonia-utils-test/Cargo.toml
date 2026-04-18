@@ -15,7 +15,7 @@ readme               = "README.md"
 
 [dependencies]
 bytes      = { workspace = true }
-paste      = "1.0"
+paste      = { workspace = true }
 proptest   = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }

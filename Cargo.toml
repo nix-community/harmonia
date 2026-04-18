@@ -54,6 +54,8 @@ tokio = { version = "1", features = [
 toml = "1.1"
 
 # Dependencies for Nix.rs import
+async-stream     = "0.3"
+bstr             = "1.11"
 bytes            = "1.11"
 data-encoding    = "2.6"
 derive_more      = { version = "2.1", features = [ "display" ] }
@@ -76,11 +78,15 @@ quote       = "1.0"
 syn         = "2.0"
 
 # Dev dependencies for property-based testing
+hex-literal     = "1.1"
+paste           = "1.0"
 proptest        = "1.11"
 proptest-derive = "0.8"
 rstest          = "0.26"
 tempfile        = "3.27"
+test-log        = "0.2"
 test-strategy   = "0.4"
+tokio-test      = "0.4"
 
 # Database
 rusqlite = { version = "0.39", features = [ "bundled" ] }

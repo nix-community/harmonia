@@ -27,7 +27,7 @@ thiserror                    = { workspace = true }
 tokio                        = { workspace = true, features = [ "io-util" ] }
 
 [dev-dependencies]
-hex-literal     = "1.1"
+hex-literal     = { workspace = true }
 proptest        = { workspace = true }
 proptest-derive = { workspace = true }
 rstest          = { workspace = true }
