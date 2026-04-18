@@ -213,7 +213,7 @@ impl SecretKey {
     pub fn generate(name: String) -> Result<SecretKey, GenerateKeyError> {
         let name = Arc::new(name);
         let mut seed = [0u8; SEED_BYTES];
-        getrandom::getrandom(&mut seed).map_err(|_| GenerateKeyError)?;
+        getrandom::fill(&mut seed).map_err(|_| GenerateKeyError)?;
         let key = SigningKey::from_bytes(&seed);
         let pk = key.verifying_key();
         let mut key_data = [0u8; SECRET_KEY_BYTES];

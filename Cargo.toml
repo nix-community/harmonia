@@ -53,13 +53,13 @@ tokio = { version = "1", features = [
 ] }
 toml = "1.1"
 
-# Dependencies for Nix.rs import (spec 001-nixrs-base)
+# Dependencies for Nix.rs import
 bytes            = "1.11"
 data-encoding    = "2.6"
 derive_more      = { version = "2.1", features = [ "display" ] }
 ed25519-dalek    = "2"
 futures          = "0.3"
-getrandom        = "0.2"
+getrandom        = "0.3"
 md5              = "0.8"
 memchr           = "2"
 num_enum         = "0.7"
