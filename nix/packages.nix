@@ -1,37 +1,43 @@
 {
   pkgs,
   lib,
+  stdenv,
   crane,
   makeWrapper,
   nix,
   curl,
+  jq,
+  cargo-llvm-cov,
+  cargo-nextest,
+  llvmPackages,
   nix-src,
 }:
 let
   craneLib = crane.mkLib pkgs;
 
   # Extract version from Cargo.toml
-  cargoToml = lib.importTOML ./Cargo.toml;
+  cargoToml = lib.importTOML ../Cargo.toml;
   version = cargoToml.workspace.package.version;
 
   # Filter source to include only files that affect the cargo build.
   # Avoid path-substring matching (e.g. "/harmonia-") so docs and other
   # unrelated files do not trigger rebuilds.
   fs = lib.fileset;
+  root = ../.;
   crateDirs = lib.filter (p: lib.hasPrefix "harmonia-" p) (
-    lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir ./.))
+    lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir root))
   );
   src = fs.toSource {
-    root = ./.;
+    inherit root;
     fileset = fs.difference (fs.unions (
       [
-        ./Cargo.toml
-        ./Cargo.lock
+        ../Cargo.toml
+        ../Cargo.lock
         # test fixtures referenced via include_str! from harmonia-cache/tests
-        (fs.fileFilter (f: f.hasExt "pk" || f.hasExt "sk" || f.hasExt "pem") ./tests)
+        (fs.fileFilter (f: f.hasExt "pk" || f.hasExt "sk" || f.hasExt "pem") ../tests)
       ]
-      ++ map (d: ./. + "/${d}") crateDirs
-    )) (fs.fileFilter (f: f.hasExt "md") ./.);
+      ++ map (d: root + "/${d}") crateDirs
+    )) (fs.fileFilter (f: f.hasExt "md") root);
   };
 
   commonArgs = {
@@ -105,9 +111,9 @@ let
       nativeBuildInputs = [
         nix
         curl
-        pkgs.cargo-llvm-cov
-        pkgs.cargo-nextest
-        pkgs.jq
+        cargo-llvm-cov
+        cargo-nextest
+        jq
       ];
 
       # Custom build command following nomad pattern:
@@ -116,9 +122,9 @@ let
       # 3. Generate report separately with --codecov
       buildPhaseCargoCommand = ''
         export NIX_UPSTREAM_SRC=${nix-src}
-        export LLVM_COV=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-cov
-        export LLVM_PROFDATA=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-profdata
-        ${lib.optionalString pkgs.stdenv.isDarwin ''
+        export LLVM_COV=${llvmPackages.bintools-unwrapped}/bin/llvm-cov
+        export LLVM_PROFDATA=${llvmPackages.bintools-unwrapped}/bin/llvm-profdata
+        ${lib.optionalString stdenv.isDarwin ''
           export _NIX_TEST_NO_SANDBOX="1"
         ''}
 
@@ -154,7 +160,7 @@ let
             # Finally keep only harmonia-* paths (our crates)
             | with_entries(select(.key | startswith("harmonia-")))
           )
-        ' coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
+        ' coverage-raw.json > $out/${stdenv.hostPlatform.system}.json
       '';
 
       installPhaseCommand = "";
@@ -172,5 +178,4 @@ let
 in
 {
   inherit harmonia clippy tests;
-  default = harmonia;
 }
