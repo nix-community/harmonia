@@ -21,9 +21,7 @@ actix-web = { version = "4", default-features = false, features = [
 ] }
 askama_escape = "0.15.6"
 async-compression = { version = "0.4.41", features = [ "tokio", "bzip2" ] }
-env_logger = { workspace = true }
 http-range = "0.1"
-log = { workspace = true }
 mime = "0.3"
 percent-encoding = "2.3.2"
 rustls = { version = "0.23", default-features = false, features = [
@@ -41,6 +39,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = [ "io" ] }
 toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 url = "2.5.7"
 # Nix.rs-based crates
 futures               = { workspace = true }
