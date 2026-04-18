@@ -7,9 +7,7 @@ use std::sync::Arc;
 
 use data_encoding::BASE64;
 
-use ring::error::{KeyRejected, Unspecified};
-use ring::rand;
-use ring::signature::{self, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
+use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 use tracing::error;
@@ -132,15 +130,14 @@ pub enum ParseKeyError {
 pub struct PublicKey {
     name: Arc<String>,
     key_data: [u8; PUBLIC_KEY_BYTES],
-    key: UnparsedPublicKey<[u8; PUBLIC_KEY_BYTES]>,
+    key: VerifyingKey,
 }
 
 impl PublicKey {
     pub fn verify<M: AsRef<[u8]>>(&self, data: M, signature: &Signature) -> bool {
         let message = data.as_ref();
-        self.key
-            .verify(message, signature.signature_bytes())
-            .is_ok()
+        let sig = ed25519_dalek::Signature::from_bytes(&signature.1);
+        self.key.verify(message, &sig).is_ok()
     }
 
     pub fn name(&self) -> &str {
@@ -194,7 +191,8 @@ impl FromStr for PublicKey {
         }
         let mut key_data = [0u8; PUBLIC_KEY_BYTES];
         key_data.copy_from_slice(&key_buf[..PUBLIC_KEY_BYTES]);
-        let key = UnparsedPublicKey::new(&signature::ED25519, key_data);
+        let key =
+            VerifyingKey::from_bytes(&key_data).map_err(|_| ParseKeyError::InvalidPublicKey)?;
         Ok(PublicKey {
             name,
             key,
@@ -207,35 +205,22 @@ impl FromStr for PublicKey {
 #[error("error generating key")]
 pub struct GenerateKeyError;
 
-impl From<Unspecified> for GenerateKeyError {
-    fn from(_: Unspecified) -> Self {
-        GenerateKeyError
-    }
-}
-impl From<KeyRejected> for GenerateKeyError {
-    fn from(_: KeyRejected) -> Self {
-        GenerateKeyError
-    }
-}
-
 pub struct SecretKey {
     name: Arc<String>,
     key_data: [u8; SECRET_KEY_BYTES],
-    key: Ed25519KeyPair,
+    key: SigningKey,
 }
 
 impl SecretKey {
-    pub fn generate(
-        name: String,
-        rng: &dyn rand::SecureRandom,
-    ) -> Result<SecretKey, GenerateKeyError> {
+    pub fn generate(name: String) -> Result<SecretKey, GenerateKeyError> {
         let name = Arc::new(name);
-        let seed: [u8; SEED_BYTES] = rand::generate(rng)?.expose();
-        let key = Ed25519KeyPair::from_seed_unchecked(&seed)?;
-        let pk = key.public_key();
+        let mut seed = [0u8; SEED_BYTES];
+        getrandom::getrandom(&mut seed).map_err(|_| GenerateKeyError)?;
+        let key = SigningKey::from_bytes(&seed);
+        let pk = key.verifying_key();
         let mut key_data = [0u8; SECRET_KEY_BYTES];
         key_data[0..SEED_BYTES].copy_from_slice(&seed);
-        key_data[SEED_BYTES..SECRET_KEY_BYTES].copy_from_slice(pk.as_ref());
+        key_data[SEED_BYTES..SECRET_KEY_BYTES].copy_from_slice(pk.as_bytes());
         Ok(SecretKey {
             name,
             key,
@@ -254,19 +239,13 @@ impl SecretKey {
     pub fn sign<M: AsRef<[u8]>>(&self, data: M) -> Signature {
         let msg = data.as_ref();
         let sig = self.key.sign(msg);
-        let mut sig_buf = [0u8; SIGNATURE_BYTES];
-        sig_buf.copy_from_slice(sig.as_ref());
-        Signature(self.name.clone(), sig_buf)
+        Signature(self.name.clone(), sig.to_bytes())
     }
 
     pub fn to_public_key(&self) -> PublicKey {
         let name = self.name.clone();
-        let peer_public_key_bytes = self.key.public_key();
-        let mut key_buf = [0u8; PUBLIC_KEY_BYTES];
-        key_buf.copy_from_slice(peer_public_key_bytes.as_ref());
-        let key = UnparsedPublicKey::new(&signature::ED25519, key_buf);
-        let mut key_data = [0u8; PUBLIC_KEY_BYTES];
-        key_data.copy_from_slice(peer_public_key_bytes.as_ref());
+        let key = self.key.verifying_key();
+        let key_data = key.to_bytes();
         PublicKey {
             name,
             key,
@@ -328,10 +307,13 @@ impl FromStr for SecretKey {
         }
         let mut key_data = [0u8; SECRET_KEY_BYTES];
         key_data.copy_from_slice(&key_b[..SECRET_KEY_BYTES]);
-        let seed = &key_data[0..SEED_BYTES];
+        let mut seed = [0u8; SEED_BYTES];
+        seed.copy_from_slice(&key_data[0..SEED_BYTES]);
         let public_key = &key_data[SEED_BYTES..SECRET_KEY_BYTES];
-        let key = Ed25519KeyPair::from_seed_and_public_key(seed, public_key)
-            .map_err(|_| ParseKeyError::InvalidSecretKey)?;
+        let key = SigningKey::from_bytes(&seed);
+        if key.verifying_key().as_bytes() != public_key {
+            return Err(ParseKeyError::InvalidSecretKey);
+        }
         Ok(SecretKey {
             name,
             key,
@@ -474,8 +456,7 @@ mod unittests {
 
     #[test]
     fn test_generate() {
-        let rng = rand::SystemRandom::new();
-        let sk_gen = SecretKey::generate("cache.example.org-1".into(), &rng).unwrap();
+        let sk_gen = SecretKey::generate("cache.example.org-1".into()).unwrap();
         let sk_s = sk_gen.to_string();
         let sk: SecretKey = sk_s.parse().unwrap();
         assert_eq!(sk_gen, sk);
