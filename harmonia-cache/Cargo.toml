@@ -22,10 +22,7 @@ actix-web = { version = "4", default-features = false, features = [
 ] }
 askama_escape = "0.15.6"
 async-compression = { version = "0.4.41", features = [ "tokio", "bzip2" ] }
-env_logger = { version = "0.11", default-features = false, features = [
-    "auto-color",
-    "humantime",
-] }
+env_logger = { workspace = true }
 http-range = "0.1"
 log = { workspace = true }
 mime = "0.3"
