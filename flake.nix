@@ -53,7 +53,8 @@
       packages = eachSystem (
         { system, ... }:
         {
-          inherit (packageSet.${system}) clippy default harmonia;
+          inherit (packageSet.${system}) harmonia;
+          default = packageSet.${system}.harmonia;
         }
       );
 

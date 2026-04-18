@@ -173,5 +173,4 @@ let
 in
 {
   inherit harmonia clippy tests;
-  default = harmonia;
 }

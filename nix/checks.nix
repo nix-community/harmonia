@@ -14,7 +14,7 @@ let
   devShells = lib.mapAttrs' (n: lib.nameValuePair "devShell-${n}") self.devShells.${system};
 in
 {
-  inherit (packageSet) tests;
+  inherit (packageSet) tests clippy;
   treefmt = treefmt.config.build.check self;
   # Benchmark closure - a decent-sized Python environment for download benchmarks.
   # Built in CI so the bench job can substitute it instead of building locally.

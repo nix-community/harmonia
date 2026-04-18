@@ -113,7 +113,7 @@ This runs treefmt which handles:
 cargo clippy --all-targets --all-features -- -D warnings
 
 # Or via Nix (same as CI)
-nix build .#clippy -L
+nix build .#checks.$(nix config show system).clippy -L
 ```
 
 ### Code Guidelines
