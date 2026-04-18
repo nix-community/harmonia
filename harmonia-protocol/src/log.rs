@@ -6,9 +6,9 @@
 
 use bytes::Bytes;
 use num_enum::{FromPrimitive, IntoPrimitive, TryFromPrimitive};
-use serde::{Deserialize, Serialize};
 #[cfg(any(test, feature = "test"))]
-use test_strategy::Arbitrary;
+use proptest_derive::Arbitrary;
+use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 use crate::ProtocolVersion;
@@ -167,7 +167,7 @@ impl proptest::arbitrary::Arbitrary for LogMessage {
 #[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
 pub struct Message {
     pub level: Verbosity,
-    #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
+    #[cfg_attr(any(test, feature = "test"), proptest(strategy = "arb_byte_string()"))]
     #[serde(rename = "msg", serialize_with = "serialize_byte_string")]
     pub text: ByteString,
 }
@@ -180,7 +180,7 @@ pub struct Activity {
     pub id: u64,
     pub level: Verbosity,
     pub parent: u64,
-    #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
+    #[cfg_attr(any(test, feature = "test"), proptest(strategy = "arb_byte_string()"))]
     #[serde(serialize_with = "serialize_byte_string")]
     pub text: ByteString, // If logger is JSON, invalid UTF-8 is replaced with U+FFFD
     #[serde(rename = "type")]
@@ -218,7 +218,7 @@ pub enum FieldType {
 pub enum Field {
     Int(u64),
     String(
-        #[cfg_attr(any(test, feature = "test"), strategy(arb_byte_string()))]
+        #[cfg_attr(any(test, feature = "test"), proptest(strategy = "arb_byte_string()"))]
         #[serde(serialize_with = "serialize_byte_string")]
         ByteString,
     ),

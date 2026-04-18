@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 #[cfg(test)]
-use test_strategy::Arbitrary;
+use proptest_derive::Arbitrary;
 use tracing::{Span, debug_span};
 
 use crate::de::{Error as _, NixDeserialize as NixDeserializeTrait, NixRead};

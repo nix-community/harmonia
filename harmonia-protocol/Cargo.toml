@@ -26,7 +26,6 @@ proptest         = { workspace = true, optional = true }
 proptest-derive  = { workspace = true, optional = true }
 serde            = { workspace = true }
 serde_json       = { workspace = true }
-test-strategy    = { workspace = true, optional = true }
 thiserror        = { workspace = true }
 tokio            = { workspace = true, features = [ "io-util" ] }
 tokio-util       = { workspace = true, features = [ "io" ] }
@@ -49,17 +48,10 @@ paste               = { workspace = true }
 proptest            = { workspace = true }
 proptest-derive     = { workspace = true }
 rstest              = { workspace = true }
-test-strategy       = { workspace = true }
 tokio-test          = { workspace = true }
 
 [features]
-test = [
-    "proptest",
-    "proptest-derive",
-    "test-strategy",
-    "harmonia-utils-test",
-    "harmonia-utils-hash/test",
-]
+test = [ "proptest", "proptest-derive", "harmonia-utils-test", "harmonia-utils-hash/test" ]
 
 [[test]]
 name = "json_upstream"

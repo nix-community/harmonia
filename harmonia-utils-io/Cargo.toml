@@ -21,11 +21,10 @@ tokio            = { workspace = true, features = [ "io-util", "sync" ] }
 tracing          = { workspace = true }
 
 [dev-dependencies]
-hex-literal   = { workspace = true }
-proptest      = { workspace = true }
-rstest        = { workspace = true }
-test-strategy = { workspace = true }
-tokio-test    = { workspace = true }
+hex-literal = { workspace = true }
+proptest    = { workspace = true }
+rstest      = { workspace = true }
+tokio-test  = { workspace = true }
 
 [lints]
 workspace = true

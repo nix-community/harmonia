@@ -32,7 +32,6 @@ harmonia-utils-test = { version = "0.0.0-alpha.0" }
 proptest            = { workspace = true }
 rstest              = { workspace = true }
 tempfile            = { workspace = true }
-test-strategy       = { workspace = true }
 tokio-test          = { workspace = true }
 
 [features]
