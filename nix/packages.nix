@@ -1,10 +1,15 @@
 {
   pkgs,
   lib,
+  stdenv,
   crane,
   makeWrapper,
   nix,
   curl,
+  jq,
+  cargo-llvm-cov,
+  cargo-nextest,
+  llvmPackages,
   nix-src,
 }:
 let
@@ -106,9 +111,9 @@ let
       nativeBuildInputs = [
         nix
         curl
-        pkgs.cargo-llvm-cov
-        pkgs.cargo-nextest
-        pkgs.jq
+        cargo-llvm-cov
+        cargo-nextest
+        jq
       ];
 
       # Custom build command following nomad pattern:
@@ -117,9 +122,9 @@ let
       # 3. Generate report separately with --codecov
       buildPhaseCargoCommand = ''
         export NIX_UPSTREAM_SRC=${nix-src}
-        export LLVM_COV=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-cov
-        export LLVM_PROFDATA=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-profdata
-        ${lib.optionalString pkgs.stdenv.isDarwin ''
+        export LLVM_COV=${llvmPackages.bintools-unwrapped}/bin/llvm-cov
+        export LLVM_PROFDATA=${llvmPackages.bintools-unwrapped}/bin/llvm-profdata
+        ${lib.optionalString stdenv.isDarwin ''
           export _NIX_TEST_NO_SANDBOX="1"
         ''}
 
@@ -155,7 +160,7 @@ let
             # Finally keep only harmonia-* paths (our crates)
             | with_entries(select(.key | startswith("harmonia-")))
           )
-        ' coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
+        ' coverage-raw.json > $out/${stdenv.hostPlatform.system}.json
       '';
 
       installPhaseCommand = "";
