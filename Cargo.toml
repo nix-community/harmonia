@@ -32,13 +32,28 @@ repository = "https://github.com/nix-community/harmonia.git"
 version = "3.0.0"
 
 [workspace.dependencies]
+async-stream = "0.3"
+bstr = "1.11"
+bytes = "1.11"
+data-encoding = "2.6"
+derive_more = { version = "2.1", features = [ "display" ] }
+ed25519-dalek = "2"
 env_logger = { version = "0.11", default-features = false, features = [ "auto-color" ] }
+futures = "0.3"
+getrandom = "0.3"
 hex = "0.4"
 log = "0.4"
+md5 = "0.8"
+memchr = "2"
 nix = { version = "0.31", features = [ "signal", "mman" ] }
+num_enum = "0.7"
+pin-project-lite = "0.2"
 prometheus = { version = "0.14", default-features = false }
+rusqlite = { version = "0.39", features = [ "bundled" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
+sha1 = "0.10"
+sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = [
     "sync",
@@ -51,33 +66,17 @@ tokio = { version = "1", features = [
     "net",
     "signal",
 ] }
+tokio-util = "0.7"
 toml = "1.1"
+tracing = "0.1"
+tracing-futures = "0.2"
 
-# Dependencies for Nix.rs import
-async-stream     = "0.3"
-bstr             = "1.11"
-bytes            = "1.11"
-data-encoding    = "2.6"
-derive_more      = { version = "2.1", features = [ "display" ] }
-ed25519-dalek    = "2"
-futures          = "0.3"
-getrandom        = "0.3"
-md5              = "0.8"
-memchr           = "2"
-num_enum         = "0.7"
-pin-project-lite = "0.2"
-sha1             = "0.10"
-sha2             = "0.10"
-tokio-util       = "0.7"
-tracing          = "0.1"
-tracing-futures  = "0.2"
-
-# Proc macro dependencies for harmonia-protocol
+# Proc-macro toolkit (harmonia-protocol-derive)
 proc-macro2 = "1.0"
 quote       = "1.0"
 syn         = "2.0"
 
-# Dev dependencies for property-based testing
+# Test / dev only
 hex-literal     = "1.1"
 paste           = "1.0"
 proptest        = "1.11"
@@ -85,9 +84,6 @@ proptest-derive = "0.8"
 rstest          = "0.26"
 tempfile        = "3.27"
 tokio-test      = "0.4"
-
-# Database
-rusqlite = { version = "0.39", features = [ "bundled" ] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
