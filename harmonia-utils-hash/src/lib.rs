@@ -1,10 +1,9 @@
-use std::convert::TryInto;
 use std::fmt as sfmt;
 
 #[cfg(any(test, feature = "test"))]
 use proptest_derive::Arbitrary;
-use ring::digest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sha1::Digest;
 use thiserror::Error;
 
 mod algo;
@@ -68,13 +67,6 @@ impl std::ops::Deref for Hash {
 impl AsRef<[u8]> for Hash {
     fn as_ref(&self) -> &[u8] {
         self.digest_bytes()
-    }
-}
-
-impl TryFrom<digest::Digest> for Hash {
-    type Error = UnknownAlgorithm;
-    fn try_from(digest: digest::Digest) -> Result<Self, Self::Error> {
-        Ok(Hash::new(digest.algorithm().try_into()?, digest.as_ref()))
     }
 }
 
@@ -172,7 +164,9 @@ impl TryFrom<Hash> for Sha256 {
 #[derive(Clone)]
 enum InnerContext {
     MD5(md5::Context),
-    Ring(digest::Context),
+    SHA1(sha1::Sha1),
+    SHA256(sha2::Sha256),
+    SHA512(sha2::Sha512),
 }
 
 /// A context for multi-step (Init-Update-Finish) digest calculation.
@@ -198,13 +192,13 @@ pub struct Context(Algorithm, InnerContext);
 impl Context {
     /// Constructs a new context with `algorithm`.
     pub fn new(algorithm: Algorithm) -> Self {
-        match algorithm {
-            Algorithm::MD5 => Context(algorithm, InnerContext::MD5(md5::Context::new())),
-            _ => Context(
-                algorithm,
-                InnerContext::Ring(digest::Context::new(algorithm.digest_algorithm())),
-            ),
-        }
+        let inner = match algorithm {
+            Algorithm::MD5 => InnerContext::MD5(md5::Context::new()),
+            Algorithm::SHA1 => InnerContext::SHA1(sha1::Sha1::new()),
+            Algorithm::SHA256 => InnerContext::SHA256(sha2::Sha256::new()),
+            Algorithm::SHA512 => InnerContext::SHA512(sha2::Sha512::new()),
+        };
+        Context(algorithm, inner)
     }
 
     /// Update the digest with all the data in `data`.
@@ -213,7 +207,9 @@ impl Context {
         let data = data.as_ref();
         match &mut self.1 {
             InnerContext::MD5(ctx) => ctx.consume(data),
-            InnerContext::Ring(ctx) => ctx.update(data),
+            InnerContext::SHA1(ctx) => ctx.update(data),
+            InnerContext::SHA256(ctx) => ctx.update(data),
+            InnerContext::SHA512(ctx) => ctx.update(data),
         }
     }
 
@@ -224,7 +220,9 @@ impl Context {
     pub fn finish(self) -> Hash {
         match self.1 {
             InnerContext::MD5(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
-            InnerContext::Ring(ctx) => ctx.finish().try_into().unwrap(),
+            InnerContext::SHA1(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
+            InnerContext::SHA256(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
+            InnerContext::SHA512(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
         }
     }
 
@@ -475,14 +473,6 @@ mod unittests {
         assert_eq!(
             Err(UnknownAlgorithm("test".into())),
             "test".parse::<Algorithm>()
-        );
-    }
-
-    #[test]
-    fn unknown_digest() {
-        assert_eq!(
-            Err(UnknownAlgorithm("SHA384".into())),
-            Algorithm::try_from(&digest::SHA384)
         );
     }
 
