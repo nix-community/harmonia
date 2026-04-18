@@ -13,7 +13,6 @@ repository.workspace = true
 readme               = "README.md"
 
 [dependencies]
-bytes.workspace      = true
 harmonia-store-core  = { version = "0.0.0-alpha.0" }
 harmonia-utils-hash  = { version = "0.0.0-alpha.0" }
 memchr.workspace     = true
