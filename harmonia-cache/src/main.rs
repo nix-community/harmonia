@@ -153,7 +153,18 @@ async fn inner_main() -> Result<()> {
     let metrics_data = web::Data::new(metrics.clone());
 
     tracing::info!("listening on {}", c.bind);
-    let mut server = HttpServer::new(move || {
+    let nar_route = format!("/nar/{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar");
+    // narinfos served by nix-serve have the narhash embedded in the nar URL.
+    // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
+    // will stay in client caches for a while - so support them anyway.
+    let nix_serve_nar_route = format!(
+        "/nar/{{outhash:[{a}]{{32}}}}-{{narhash:[{a}]{{52}}}}.nar",
+        a = NIXBASE32_ALPHABET
+    );
+    let mut server = 
+        
+        
+        HttpServer::new(move || {
         App::new()
                 .wrap(middleware::Condition::new(config_data.enable_compression, middleware::Compress::default()))
                 .wrap(prometheus::PrometheusMiddleware::new(metrics.clone()))
@@ -178,6 +189,7 @@ async fn inner_main() -> Result<()> {
                     web::get().to(nar::get),
                 )
                 .route("/serve/{hash}{path:.*}", web::get().to(serve::get))
+                .route("/serve/{hash}{path:.*}", web::head().to(serve::get))
                 .route("/log/{drv}", web::get().to(buildlog::get))
                 .route("/version", web::get().to(version::get))
                 .route("/health", web::get().to(health::get))
@@ -187,7 +199,7 @@ async fn inner_main() -> Result<()> {
         // default is 5 seconds, which is too small when doing mass requests on slow machines
         .client_request_timeout(Duration::from_secs(30))
     .workers(c.workers)
-    .max_connection_rate(c.max_connection_rate);
+        .max_connection_rate(c.max_connection_rate);
 
     let try_url = Url::parse(&c.bind);
     let (bind, uds) = if let Ok(url) = try_url.as_ref() {
