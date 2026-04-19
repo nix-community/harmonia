@@ -55,9 +55,10 @@ impl Conn {
             .and_then(|s| s.parse().ok())
             .expect("bad status line");
 
-        let mut content_length: u64 = 0;
+        let mut content_length: Option<u64> = None;
+        let mut line = String::new();
         loop {
-            let mut line = String::new();
+            line.clear();
             self.reader.read_line(&mut line).await.expect("read header");
             if line == "\r\n" || line == "\n" {
                 break;
@@ -66,10 +67,15 @@ impl Conn {
                 .strip_prefix("Content-Length: ")
                 .or_else(|| line.strip_prefix("content-length: "))
             {
-                content_length = val.trim().parse().expect("bad content-length");
+                content_length = Some(val.trim().parse().expect("bad content-length"));
             }
         }
-        (status, content_length)
+        // The keep-alive connection relies on draining exactly the declared
+        // body length; fail loudly rather than desync on the next request.
+        (
+            status,
+            content_length.expect("response missing Content-Length"),
+        )
     }
 
     /// GET `path` and return the full body (for small responses like narinfo).
