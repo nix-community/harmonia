@@ -149,7 +149,8 @@ pub(crate) async fn get(
                 let offset = ranges[0].start;
 
                 if settings.enable_compression {
-                    // don't allow compression middleware to modify partial content
+                    // The zstd middleware skips responses that already carry a
+                    // Content-Encoding; partial content must stay byte-exact.
                     res.insert_header((
                         http::header::CONTENT_ENCODING,
                         http::header::HeaderValue::from_static("none"),
@@ -194,6 +195,7 @@ pub(crate) async fn get(
         .insert_header((http::header::CONTENT_TYPE, "application/x-nix-archive"))
         .insert_header((http::header::ACCEPT_RANGES, "bytes"))
         .insert_header(cache_control_max_age_1y())
+        // Sized so the zstd middleware can pledge the exact length.
         .body(actix_web::body::SizedStream::new(rlength, stream)))
 }
 
