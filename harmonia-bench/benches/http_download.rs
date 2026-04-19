@@ -6,6 +6,98 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
+/// Scratch buffer for draining response bodies. Large enough to amortise
+/// per-read syscall overhead while staying well inside L2.
+const DRAIN_BUF: usize = 64 * 1024;
+
+/// A persistent HTTP/1.1 keep-alive connection.
+///
+/// Response bodies are drained into a fixed scratch buffer rather than
+/// accumulated, so the client side contributes only socket reads to the
+/// measured wall-clock and the benchmark reflects server throughput.
+struct Conn {
+    reader: BufReader<TcpStream>,
+    host: String,
+    drain: Box<[u8; DRAIN_BUF]>,
+}
+
+impl Conn {
+    async fn connect(addr: &str) -> Self {
+        let stream = TcpStream::connect(addr).await.expect("connect failed");
+        stream.set_nodelay(true).ok();
+        Self {
+            reader: BufReader::new(stream),
+            host: addr.to_string(),
+            drain: Box::new([0u8; DRAIN_BUF]),
+        }
+    }
+
+    /// Issue a GET and parse status + Content-Length, leaving the body unread.
+    async fn get_head(&mut self, path: &str) -> (u16, u64) {
+        let request = format!(
+            "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: keep-alive\r\n\r\n",
+            path, self.host
+        );
+        self.reader
+            .get_mut()
+            .write_all(request.as_bytes())
+            .await
+            .expect("write failed");
+
+        let mut status_line = String::new();
+        self.reader
+            .read_line(&mut status_line)
+            .await
+            .expect("read status");
+        let status: u16 = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .expect("bad status line");
+
+        let mut content_length: u64 = 0;
+        loop {
+            let mut line = String::new();
+            self.reader.read_line(&mut line).await.expect("read header");
+            if line == "\r\n" || line == "\n" {
+                break;
+            }
+            if let Some(val) = line
+                .strip_prefix("Content-Length: ")
+                .or_else(|| line.strip_prefix("content-length: "))
+            {
+                content_length = val.trim().parse().expect("bad content-length");
+            }
+        }
+        (status, content_length)
+    }
+
+    /// GET `path` and return the full body (for small responses like narinfo).
+    async fn get_body(&mut self, path: &str) -> (u16, Vec<u8>) {
+        let (status, len) = self.get_head(path).await;
+        let mut body = vec![0u8; len as usize];
+        self.reader.read_exact(&mut body).await.expect("read body");
+        (status, body)
+    }
+
+    /// GET `path` and discard the body, returning the number of bytes drained.
+    async fn get_drain(&mut self, path: &str) -> (u16, u64) {
+        let (status, len) = self.get_head(path).await;
+        let mut remaining = len;
+        while remaining > 0 {
+            let want = remaining.min(DRAIN_BUF as u64) as usize;
+            let n = self
+                .reader
+                .read(&mut self.drain[..want])
+                .await
+                .expect("read body");
+            assert!(n > 0, "unexpected EOF with {} bytes remaining", remaining);
+            remaining -= n as u64;
+        }
+        (status, len)
+    }
+}
+
 /// Get all store paths in the closure of a path.
 fn get_closure_paths(store_path: &str) -> Vec<String> {
     let output = Command::new("nix")
@@ -43,63 +135,9 @@ struct NarInfo {
     nar_size: u64,
 }
 
-/// Send an HTTP/1.1 GET request and return (status_code, headers, body_bytes).
-async fn http_get(addr: &str, path: &str) -> (u16, Vec<u8>) {
-    let mut stream = TcpStream::connect(addr).await.expect("connect failed");
-    let request = format!(
-        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-        path, addr
-    );
-    stream
-        .write_all(request.as_bytes())
-        .await
-        .expect("write failed");
-
-    let mut reader = BufReader::new(stream);
-
-    // Parse status line
-    let mut status_line = String::new();
-    reader
-        .read_line(&mut status_line)
-        .await
-        .expect("read status");
-    let status_code: u16 = status_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .expect("bad status line");
-
-    // Parse headers
-    let mut content_length: Option<u64> = None;
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line).await.expect("read header");
-        if line == "\r\n" || line == "\n" {
-            break;
-        }
-        if let Some(val) = line
-            .strip_prefix("Content-Length: ")
-            .or_else(|| line.strip_prefix("content-length: "))
-        {
-            content_length = val.trim().parse().ok();
-        }
-    }
-
-    // Read body
-    let mut body = Vec::new();
-    if let Some(len) = content_length {
-        body.resize(len as usize, 0);
-        reader.read_exact(&mut body).await.expect("read body");
-    } else {
-        reader.read_to_end(&mut body).await.expect("read body");
-    }
-
-    (status_code, body)
-}
-
-async fn fetch_narinfo(addr: &str, hash: &str) -> NarInfo {
+async fn fetch_narinfo(conn: &mut Conn, hash: &str) -> NarInfo {
     let path = format!("/{}.narinfo", hash);
-    let (status, body) = http_get(addr, &path).await;
+    let (status, body) = conn.get_body(&path).await;
     assert!(
         (200..300).contains(&status),
         "narinfo {}: status {}",
@@ -125,16 +163,16 @@ async fn fetch_narinfo(addr: &str, hash: &str) -> NarInfo {
     }
 }
 
-async fn download_nar(addr: &str, nar_url: &str) -> u64 {
+async fn download_nar(conn: &mut Conn, nar_url: &str) -> u64 {
     let path = format!("/{}", nar_url);
-    let (status, body) = http_get(addr, &path).await;
+    let (status, len) = conn.get_drain(&path).await;
     assert!(
         (200..300).contains(&status),
         "NAR {}: status {}",
         path,
         status
     );
-    body.len() as u64
+    len
 }
 
 fn benchmark_http_download(c: &mut Criterion) {
@@ -151,10 +189,11 @@ fn benchmark_http_download(c: &mut Criterion) {
 
     // Pre-fetch all narinfos
     let narinfos: Vec<(String, NarInfo)> = rt.block_on(async {
+        let mut conn = Conn::connect(&addr).await;
         let mut results = Vec::new();
         for path in &paths {
             let hash = store_path_hash(path);
-            let narinfo = fetch_narinfo(&addr, &hash).await;
+            let narinfo = fetch_narinfo(&mut conn, &hash).await;
             results.push((path.clone(), narinfo));
         }
         results
@@ -172,13 +211,16 @@ fn benchmark_http_download(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(5));
 
     group.bench_function("sequential", |b| {
+        // One persistent connection reused across all iterations so we measure
+        // server-side NAR throughput, not TCP handshake latency.
+        let mut conn = rt.block_on(Conn::connect(&addr));
         b.iter_custom(|iters| {
             let mut total = Duration::ZERO;
             for _ in 0..iters {
                 let start = Instant::now();
                 rt.block_on(async {
                     for (_, narinfo) in &narinfos {
-                        download_nar(&addr, &narinfo.url).await;
+                        download_nar(&mut conn, &narinfo.url).await;
                     }
                 });
                 total += start.elapsed();
@@ -187,6 +229,9 @@ fn benchmark_http_download(c: &mut Criterion) {
         })
     });
 
+    let nar_urls: std::sync::Arc<Vec<String>> =
+        std::sync::Arc::new(narinfos.iter().map(|(_, ni)| ni.url.clone()).collect());
+
     for concurrency in [4, 16] {
         group.bench_function(format!("concurrent_{}", concurrency), |b| {
             b.iter_custom(|iters| {
@@ -194,17 +239,24 @@ fn benchmark_http_download(c: &mut Criterion) {
                 for _ in 0..iters {
                     let start = Instant::now();
                     rt.block_on(async {
-                        let semaphore =
-                            std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
-                        let mut handles = Vec::new();
-
-                        for (_, narinfo) in &narinfos {
+                        // One persistent connection per worker. NAR sizes are
+                        // heavily skewed, so workers pull from a shared atomic
+                        // cursor to stay busy until the queue drains.
+                        let next = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                        let mut handles = Vec::with_capacity(concurrency);
+                        for _ in 0..concurrency {
                             let addr = addr.clone();
-                            let nar_url = narinfo.url.clone();
-                            let sem = semaphore.clone();
+                            let urls = nar_urls.clone();
+                            let next = next.clone();
                             handles.push(tokio::spawn(async move {
-                                let _permit = sem.acquire().await.unwrap();
-                                download_nar(&addr, &nar_url).await
+                                let mut conn = Conn::connect(&addr).await;
+                                let mut bytes = 0u64;
+                                loop {
+                                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    let Some(url) = urls.get(i) else { break };
+                                    bytes += download_nar(&mut conn, url).await;
+                                }
+                                bytes
                             }));
                         }
                         for handle in handles {
