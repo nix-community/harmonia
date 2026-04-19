@@ -53,21 +53,19 @@ impl DumpOptions {
 
     pub fn dump<P: Into<PathBuf>>(self, path: P) -> NarDumper {
         let root = path.into();
-        let dir = root.clone();
         let mut walker = walkdir::WalkDir::new(&root)
             .follow_links(false)
             .follow_root_links(false);
         walker = if self.use_case_hack {
             walker.sort_by(sort_case_hack)
         } else {
-            walker.sort_by_file_name()
+            walker.sort_by(|a, b| fast_file_name(a.path()).cmp(fast_file_name(b.path())))
         };
         let walker = walker.into_iter();
         NarDumper {
             state: State::Idle(Some((VecDeque::with_capacity(CHUNK_SIZE), walker, true))),
             next: None,
             level: 0,
-            dir,
             use_case_hack: self.use_case_hack,
             semaphore: Arc::new(Semaphore::new(self.max_open_files)),
         }
@@ -84,6 +82,21 @@ pub fn dump<P: Into<PathBuf>>(
     path: P,
 ) -> impl Stream<Item = io::Result<NarEvent<impl AsyncBufRead>>> {
     DumpOptions::new().dump(path)
+}
+
+/// Return the final path segment as raw bytes.
+///
+/// Uses a byte-level search instead of `Path::file_name`, which performs a
+/// full `Components` parse on every call. This is safe because walkdir builds
+/// entry paths as `parent.join(file_name)`, so on Unix the segment after the
+/// last `/` is exactly the file name with no `.`/`..` to normalise.
+#[cfg(unix)]
+fn fast_file_name(p: &Path) -> &[u8] {
+    let b = p.as_os_str().as_bytes();
+    match b.rfind_byte(b'/') {
+        Some(i) => &b[i + 1..],
+        None => b,
+    }
 }
 
 fn sort_case_hack(left: &DirEntry, right: &DirEntry) -> Ordering {
@@ -248,15 +261,18 @@ impl AsyncRead for DumpedFile {
 #[derive(Debug)]
 enum Entry {
     File {
+        depth: usize,
         path: PathBuf,
         size: u64,
         executable: bool,
     },
     Symlink {
+        depth: usize,
         path: PathBuf,
         target: PathBuf,
     },
     Directory {
+        depth: usize,
         path: PathBuf,
     },
 }
@@ -264,13 +280,17 @@ enum Entry {
 impl Entry {
     fn path(&self) -> &Path {
         match self {
-            Entry::File {
-                path,
-                size: _,
-                executable: _,
-            } => path,
-            Entry::Symlink { path, target: _ } => path,
-            Entry::Directory { path } => path,
+            Entry::File { path, .. } => path,
+            Entry::Symlink { path, .. } => path,
+            Entry::Directory { path, .. } => path,
+        }
+    }
+
+    fn depth(&self) -> usize {
+        match self {
+            Entry::File { depth, .. } => *depth,
+            Entry::Symlink { depth, .. } => *depth,
+            Entry::Directory { depth, .. } => *depth,
         }
     }
 }
@@ -311,9 +331,11 @@ impl State {
             match iter.next() {
                 Some(res) => {
                     let res = res.map_err(io::Error::from).and_then(|entry| {
+                        let depth = entry.depth();
                         let m = entry.metadata()?;
                         if m.is_dir() {
                             Ok(Entry::Directory {
+                                depth,
                                 path: entry.into_path(),
                             })
                         } else if m.is_file() {
@@ -328,6 +350,7 @@ impl State {
                                 executable = false;
                             }
                             Ok(Entry::File {
+                                depth,
                                 path: entry.into_path(),
                                 size: m.len(),
                                 executable,
@@ -335,6 +358,7 @@ impl State {
                         } else if m.is_symlink() {
                             let target = read_link(entry.path())?;
                             Ok(Entry::Symlink {
+                                depth,
                                 path: entry.into_path(),
                                 target,
                             })
@@ -358,7 +382,6 @@ pub struct NarDumper {
     state: State,
     next: Option<Entry>,
     level: u32,
-    dir: PathBuf,
     semaphore: Arc<Semaphore>,
     use_case_hack: bool,
 }
@@ -389,20 +412,18 @@ impl Stream for NarDumper {
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         loop {
+            // Close directories until the pending entry is at the current
+            // nesting level. walkdir's `depth()` gives this directly, so no
+            // path comparison is needed.
             if let Some(entry) = self.next.as_ref()
-                && !entry.path().starts_with(&self.dir)
+                && entry.depth() < self.level as usize
             {
-                self.dir.pop();
                 self.level -= 1;
                 return Poll::Ready(Some(Ok(NarEvent::EndDirectory)));
             }
             if let Some(entry) = self.next.take() {
                 let name = if self.level > 0 {
-                    let filename = entry.path().file_name().unwrap();
-                    let n = <[u8]>::from_os_str(filename).ok_or_else(|| {
-                        io::Error::other(format!("filename {filename:?} not valid UTF-8"))
-                    })?;
-                    let mut name = Bytes::copy_from_slice(n);
+                    let mut name = Bytes::copy_from_slice(fast_file_name(entry.path()));
                     if self.use_case_hack {
                         remove_case_hack(&mut name);
                     }
@@ -411,8 +432,7 @@ impl Stream for NarDumper {
                     Bytes::new()
                 };
                 let event = match entry {
-                    Entry::Directory { path } => {
-                        self.dir = path;
+                    Entry::Directory { path: _, .. } => {
                         self.level += 1;
                         NarEvent::StartDirectory { name }
                     }
@@ -420,6 +440,7 @@ impl Stream for NarDumper {
                         path,
                         size,
                         executable,
+                        ..
                     } => {
                         let reader =
                             BufReader::new(DumpedFile::new(path, size, self.semaphore.clone()));
@@ -430,7 +451,7 @@ impl Stream for NarDumper {
                             reader,
                         }
                     }
-                    Entry::Symlink { path: _, target } => {
+                    Entry::Symlink { target, .. } => {
                         let target = Vec::from_os_string(target.into_os_string())
                             .map_err(|target_s| {
                                 io::Error::other(format!("target {target_s:?} not valid UTF-8"))
@@ -449,7 +470,6 @@ impl Stream for NarDumper {
                 Some(Err(err)) => return Poll::Ready(Some(Err(err))),
                 None => {
                     if self.level > 0 {
-                        self.dir.pop();
                         self.level -= 1;
                         return Poll::Ready(Some(Ok(NarEvent::EndDirectory)));
                     }
