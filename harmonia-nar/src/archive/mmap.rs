@@ -80,6 +80,15 @@ impl MappedFile {
     }
 }
 
+// Allow `Bytes::from_owner(MappedFile)` so the mapping can be handed out as a
+// zero-copy `Bytes` whose refcount keeps the mmap alive until the last slice
+// is dropped.
+impl AsRef<[u8]> for MappedFile {
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
 impl Drop for MappedFile {
     fn drop(&mut self) {
         if self.len > 0 {

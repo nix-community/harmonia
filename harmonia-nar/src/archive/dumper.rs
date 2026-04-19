@@ -15,7 +15,7 @@ use bstr::{ByteSlice as _, ByteVec as _};
 use bytes::Bytes;
 use futures_core::Stream;
 use pin_project_lite::pin_project;
-use tokio::io::{AsyncBufRead, AsyncRead, BufReader};
+use tokio::io::AsyncRead;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{JoinHandle, spawn_blocking};
 use tokio_util::sync::PollSemaphore;
@@ -78,9 +78,7 @@ impl Default for DumpOptions {
     }
 }
 
-pub fn dump<P: Into<PathBuf>>(
-    path: P,
-) -> impl Stream<Item = io::Result<NarEvent<impl AsyncBufRead>>> {
+pub fn dump<P: Into<PathBuf>>(path: P) -> NarDumper {
     DumpOptions::new().dump(path)
 }
 
@@ -130,18 +128,14 @@ use super::mmap::MappedFile;
 /// streaming without unbounded memory allocation.
 const SMALL_FILE_THRESHOLD: u64 = 256 * 1024; // 256 KiB
 
-/// Loaded file data — either in-memory for small files or mmap'd for large ones.
-enum FileData {
-    InMemory(Vec<u8>),
-    Mapped(MappedFile),
-}
-
-impl FileData {
-    fn as_slice(&self) -> &[u8] {
-        match self {
-            FileData::InMemory(v) => v,
-            FileData::Mapped(m) => m.as_slice(),
-        }
+/// Load a file as a single `Bytes` value without intermediate copies:
+/// small files become `Bytes::from(Vec)`, large files become a refcounted
+/// view over the mmap via `Bytes::from_owner`.
+fn load_file_bytes(path: &Path, size: u64) -> io::Result<Bytes> {
+    if size <= SMALL_FILE_THRESHOLD {
+        Ok(Bytes::from(std::fs::read(path)?))
+    } else {
+        Ok(Bytes::from_owner(MappedFile::open(path, size)?))
     }
 }
 
@@ -155,10 +149,10 @@ pin_project! {
         },
         OpenFile {
             #[pin]
-            handle: JoinHandle<io::Result<(FileData, OwnedSemaphorePermit)>>,
+            handle: JoinHandle<io::Result<(Bytes, OwnedSemaphorePermit)>>,
         },
         Reading {
-            data: FileData,
+            data: Bytes,
             offset: usize,
             _permit: OwnedSemaphorePermit,
         },
@@ -187,12 +181,10 @@ impl DumpedFile {
     }
 }
 
-impl AsyncRead for DumpedFile {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
+impl DumpedFile {
+    /// Drive the open/mmap state machine until file data is available.
+    /// Shared by both [`AsyncRead`] and [`DumpedFile::poll_bytes`].
+    fn poll_load(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let mut this = self.project();
         loop {
             match this.states.as_mut().project() {
@@ -202,14 +194,8 @@ impl AsyncRead for DumpedFile {
                 } => match ready!(semaphore.poll_acquire(cx)) {
                     Some(permit) => {
                         let (path, size) = file.take().unwrap();
-                        let handle = spawn_blocking(move || {
-                            let data = if size <= SMALL_FILE_THRESHOLD {
-                                FileData::InMemory(std::fs::read(&path)?)
-                            } else {
-                                FileData::Mapped(MappedFile::open(&path, size)?)
-                            };
-                            Ok((data, permit))
-                        });
+                        let handle =
+                            spawn_blocking(move || Ok((load_file_bytes(&path, size)?, permit)));
                         this.states.set(DumpedFileStates::OpenFile { handle });
                     }
                     None => {
@@ -240,18 +226,49 @@ impl AsyncRead for DumpedFile {
                         )));
                     }
                 },
-                DumpedFileStatesProj::Reading { data, offset, .. } => {
-                    let remaining = &data.as_slice()[*offset..];
-                    if remaining.is_empty() {
-                        this.states.set(DumpedFileStates::Eof);
-                    } else {
-                        let to_copy = remaining.len().min(buf.remaining());
-                        buf.put_slice(&remaining[..to_copy]);
-                        *offset += to_copy;
-                    }
-                    break;
+                DumpedFileStatesProj::Reading { .. } | DumpedFileStatesProj::Eof => {
+                    return Poll::Ready(Ok(()));
                 }
-                DumpedFileStatesProj::Eof => break,
+            }
+        }
+    }
+
+    /// Resolve the entire file content as a single zero-copy [`Bytes`].
+    ///
+    /// For small files this is the heap buffer moved into `Bytes`; for large
+    /// files it's a refcounted view over the mmap. The semaphore permit is
+    /// released immediately since neither holds an open file descriptor.
+    pub fn poll_bytes(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<Bytes>> {
+        ready!(self.as_mut().poll_load(cx))?;
+        let mut this = self.project();
+        match this.states.as_mut().project() {
+            DumpedFileStatesProj::Reading { data, .. } => {
+                let out = std::mem::take(data);
+                this.states.set(DumpedFileStates::Eof);
+                Poll::Ready(Ok(out))
+            }
+            DumpedFileStatesProj::Eof => Poll::Ready(Ok(Bytes::new())),
+            _ => unreachable!("poll_load returned Ready without reaching terminal state"),
+        }
+    }
+}
+
+impl AsyncRead for DumpedFile {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        ready!(self.as_mut().poll_load(cx))?;
+        let mut this = self.project();
+        if let DumpedFileStatesProj::Reading { data, offset, .. } = this.states.as_mut().project() {
+            let remaining = &data[*offset..];
+            if remaining.is_empty() {
+                this.states.set(DumpedFileStates::Eof);
+            } else {
+                let to_copy = remaining.len().min(buf.remaining());
+                buf.put_slice(&remaining[..to_copy]);
+                *offset += to_copy;
             }
         }
         Poll::Ready(Ok(()))
@@ -405,7 +422,7 @@ impl NarDumper {
 }
 
 impl Stream for NarDumper {
-    type Item = io::Result<NarEvent<BufReader<DumpedFile>>>;
+    type Item = io::Result<NarEvent<DumpedFile>>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -442,8 +459,7 @@ impl Stream for NarDumper {
                         executable,
                         ..
                     } => {
-                        let reader =
-                            BufReader::new(DumpedFile::new(path, size, self.semaphore.clone()));
+                        let reader = DumpedFile::new(path, size, self.semaphore.clone());
                         NarEvent::File {
                             name,
                             executable,
