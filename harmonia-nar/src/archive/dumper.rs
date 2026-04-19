@@ -154,6 +154,15 @@ fn load_file_bytes(path: &Path, size: u64) -> io::Result<Bytes> {
         let mut f = std::fs::File::open(path)?;
         let mut buf = Vec::with_capacity(size as usize);
         f.read_to_end(&mut buf)?;
+        // The NAR length prefix has already been derived from `size`; if the
+        // file changed under us the archive would silently desync, so surface
+        // it as an explicit error instead.
+        if buf.len() as u64 != size {
+            return Err(io::Error::other(format!(
+                "file {path:?} changed size during dump: stat {size}, read {}",
+                buf.len()
+            )));
+        }
         Ok(Bytes::from(buf))
     } else {
         Ok(Bytes::from_owner(MappedFile::open(path, size)?))
