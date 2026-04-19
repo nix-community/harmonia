@@ -7,18 +7,14 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll, ready};
 use std::{collections::VecDeque, io};
 
 use bstr::{ByteSlice as _, ByteVec as _};
 use bytes::Bytes;
 use futures_core::Stream;
-use pin_project_lite::pin_project;
 use tokio::io::AsyncRead;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{JoinHandle, spawn_blocking};
-use tokio_util::sync::PollSemaphore;
 use tracing::debug;
 use walkdir::{DirEntry, IntoIter};
 
@@ -26,7 +22,6 @@ use super::{CASE_HACK_SUFFIX, NarEvent};
 
 pub struct DumpOptions {
     use_case_hack: bool,
-    max_open_files: usize,
 }
 
 impl DumpOptions {
@@ -35,19 +30,11 @@ impl DumpOptions {
         let use_case_hack = true;
         #[cfg(not(target_os = "macos"))]
         let use_case_hack = false;
-        Self {
-            use_case_hack,
-            max_open_files: OPEN_FILES,
-        }
+        Self { use_case_hack }
     }
 
     pub fn use_case_hack(mut self, use_case_hack: bool) -> Self {
         self.use_case_hack = use_case_hack;
-        self
-    }
-
-    pub fn max_open_files(mut self, max_open_files: usize) -> Self {
-        self.max_open_files = max_open_files;
         self
     }
 
@@ -67,7 +54,6 @@ impl DumpOptions {
             next: None,
             level: 0,
             use_case_hack: self.use_case_hack,
-            semaphore: Arc::new(Semaphore::new(self.max_open_files)),
         }
     }
 }
@@ -123,9 +109,8 @@ fn remove_case_hack(name: &mut Bytes) {
 
 use super::mmap::MappedFile;
 
-/// Files smaller than this are read into memory in one `spawn_blocking` call,
-/// avoiding per-read context switches. Larger files use mmap for zero-copy
-/// streaming without unbounded memory allocation.
+/// Files up to this size are read into a heap buffer; larger files are
+/// memory-mapped so streaming a multi-gigabyte store path stays bounded.
 const SMALL_FILE_THRESHOLD: u64 = 256 * 1024; // 256 KiB
 
 /// Load a file as a single `Bytes` value without intermediate copies:
@@ -139,149 +124,49 @@ fn load_file_bytes(path: &Path, size: u64) -> io::Result<Bytes> {
     }
 }
 
-pin_project! {
-    #[project = DumpedFileStatesProj]
-    enum DumpedFileStates {
-        WaitPermit {
-            #[pin]
-            semaphore: PollSemaphore,
-            file: Option<(PathBuf, u64)>,
-        },
-        OpenFile {
-            #[pin]
-            handle: JoinHandle<io::Result<(Bytes, OwnedSemaphorePermit)>>,
-        },
-        Reading {
-            data: Bytes,
-            offset: usize,
-            _permit: OwnedSemaphorePermit,
-        },
-        Eof,
-    }
-}
-
-pin_project! {
-    pub struct DumpedFile {
-        #[pin]
-        states: DumpedFileStates,
-    }
+/// File contents for a [`NarEvent::File`], already loaded into memory (or
+/// memory-mapped) by the same blocking task that walked the directory.
+///
+/// The data is fetched eagerly so the async consumer never has to round-trip
+/// to the blocking pool per file; neither representation holds an open file
+/// descriptor, so at most [`CHUNK_SIZE`] entries worth of small-file buffers
+/// plus mappings are resident at a time.
+pub struct DumpedFile {
+    data: Bytes,
 }
 
 impl DumpedFile {
-    pub fn new<P>(path: P, size: u64, semaphore: Arc<Semaphore>) -> Self
-    where
-        P: Into<PathBuf>,
-    {
-        Self {
-            states: DumpedFileStates::WaitPermit {
-                semaphore: PollSemaphore::new(semaphore),
-                file: Some((path.into(), size)),
-            },
-        }
-    }
-}
-
-impl DumpedFile {
-    /// Drive the open/mmap state machine until file data is available.
-    /// Shared by both [`AsyncRead`] and [`DumpedFile::poll_bytes`].
-    fn poll_load(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let mut this = self.project();
-        loop {
-            match this.states.as_mut().project() {
-                DumpedFileStatesProj::WaitPermit {
-                    mut semaphore,
-                    file,
-                } => match ready!(semaphore.poll_acquire(cx)) {
-                    Some(permit) => {
-                        let (path, size) = file.take().unwrap();
-                        let handle =
-                            spawn_blocking(move || Ok((load_file_bytes(&path, size)?, permit)));
-                        this.states.set(DumpedFileStates::OpenFile { handle });
-                    }
-                    None => {
-                        this.states.set(DumpedFileStates::Eof);
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::BrokenPipe,
-                            "semaphore closed",
-                        )));
-                    }
-                },
-                DumpedFileStatesProj::OpenFile { handle } => match ready!(handle.poll(cx)) {
-                    Ok(Ok((data, permit))) => {
-                        this.states.set(DumpedFileStates::Reading {
-                            data,
-                            offset: 0,
-                            _permit: permit,
-                        });
-                    }
-                    Ok(Err(err)) => {
-                        this.states.set(DumpedFileStates::Eof);
-                        return Poll::Ready(Err(err));
-                    }
-                    Err(_) => {
-                        this.states.set(DumpedFileStates::Eof);
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::BrokenPipe,
-                            "spawned task failed",
-                        )));
-                    }
-                },
-                DumpedFileStatesProj::Reading { .. } | DumpedFileStatesProj::Eof => {
-                    return Poll::Ready(Ok(()));
-                }
-            }
-        }
+    fn new(data: Bytes) -> Self {
+        Self { data }
     }
 
-    /// Resolve the entire file content as a single zero-copy [`Bytes`].
-    ///
-    /// For small files this is the heap buffer moved into `Bytes`; for large
-    /// files it's a refcounted view over the mmap. The semaphore permit is
-    /// released immediately since neither holds an open file descriptor.
-    pub fn poll_bytes(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<Bytes>> {
-        ready!(self.as_mut().poll_load(cx))?;
-        let mut this = self.project();
-        match this.states.as_mut().project() {
-            DumpedFileStatesProj::Reading { data, .. } => {
-                let out = std::mem::take(data);
-                this.states.set(DumpedFileStates::Eof);
-                Poll::Ready(Ok(out))
-            }
-            DumpedFileStatesProj::Eof => Poll::Ready(Ok(Bytes::new())),
-            _ => unreachable!("poll_load returned Ready without reaching terminal state"),
-        }
+    /// Take the file content as a zero-copy [`Bytes`].
+    pub fn into_bytes(self) -> Bytes {
+        self.data
     }
 }
 
 impl AsyncRead for DumpedFile {
     fn poll_read(
         mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        ready!(self.as_mut().poll_load(cx))?;
-        let mut this = self.project();
-        if let DumpedFileStatesProj::Reading { data, offset, .. } = this.states.as_mut().project() {
-            let remaining = &data[*offset..];
-            if remaining.is_empty() {
-                this.states.set(DumpedFileStates::Eof);
-            } else {
-                let to_copy = remaining.len().min(buf.remaining());
-                buf.put_slice(&remaining[..to_copy]);
-                *offset += to_copy;
-            }
-        }
+        let n = self.data.len().min(buf.remaining());
+        buf.put_slice(&self.data[..n]);
+        // `Bytes::advance` on an owned/mmap-backed buffer just bumps an offset.
+        bytes::Buf::advance(&mut self.data, n);
         Poll::Ready(Ok(()))
     }
 }
 
-#[derive(Debug)]
 enum Entry {
     File {
         depth: usize,
         path: PathBuf,
         size: u64,
         executable: bool,
+        data: Bytes,
     },
     Symlink {
         depth: usize,
@@ -366,11 +251,19 @@ impl State {
                             {
                                 executable = false;
                             }
+                            let size = m.len();
+                            let path = entry.into_path();
+                            // Load the content here, in the same blocking
+                            // task that is already iterating the directory,
+                            // so the async side receives ready-to-stream
+                            // bytes without a second pool round-trip.
+                            let data = load_file_bytes(&path, size)?;
                             Ok(Entry::File {
                                 depth,
-                                path: entry.into_path(),
-                                size: m.len(),
+                                path,
+                                size,
                                 executable,
+                                data,
                             })
                         } else if m.is_symlink() {
                             let target = read_link(entry.path())?;
@@ -399,25 +292,15 @@ pub struct NarDumper {
     state: State,
     next: Option<Entry>,
     level: u32,
-    semaphore: Arc<Semaphore>,
     use_case_hack: bool,
 }
-
-const OPEN_FILES: usize = 100;
 
 impl NarDumper {
     pub fn new<P>(root: P) -> Self
     where
         P: Into<PathBuf>,
     {
-        Self::with_max_open_files(root, OPEN_FILES)
-    }
-
-    pub fn with_max_open_files<P>(root: P, max_open_files: usize) -> Self
-    where
-        P: Into<PathBuf>,
-    {
-        DumpOptions::new().max_open_files(max_open_files).dump(root)
+        DumpOptions::new().dump(root)
     }
 }
 
@@ -454,12 +337,12 @@ impl Stream for NarDumper {
                         NarEvent::StartDirectory { name }
                     }
                     Entry::File {
-                        path,
                         size,
                         executable,
+                        data,
                         ..
                     } => {
-                        let reader = DumpedFile::new(path, size, self.semaphore.clone());
+                        let reader = DumpedFile::new(data);
                         NarEvent::File {
                             name,
                             executable,

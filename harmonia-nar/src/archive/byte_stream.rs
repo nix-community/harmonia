@@ -7,7 +7,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures_core::Stream;
 
 use super::NarEvent;
-use super::dumper::{DumpOptions, DumpedFile, NarDumper};
+use super::dumper::{DumpOptions, NarDumper};
 use super::read_nar::{
     TOK_DIR, TOK_ENTRY, TOK_FILE, TOK_FILE_E, TOK_NODE, TOK_PAR, TOK_ROOT, TOK_SYM,
 };
@@ -29,11 +29,6 @@ const FILE_CHUNK_SIZE: usize = 256 * 1024;
 enum Phase {
     /// Pull the next [`NarEvent`] from the dumper and encode framing.
     Event,
-    /// Waiting for a file's open/read/mmap to complete on the blocking pool.
-    Load {
-        file: DumpedFile,
-        size: u64,
-    },
     /// Yield file content (possibly in multiple slices), then append the
     /// trailing padding/`)` tokens to `frame` and go back to [`Phase::Event`].
     Emit {
@@ -47,10 +42,10 @@ enum Phase {
 ///
 /// Drives a [`NarDumper`] directly and emits the NAR wire format without
 /// intermediate copies: framing tokens are accumulated in a small reusable
-/// buffer, and file payloads are forwarded as the original `Bytes` obtained
-/// from [`DumpedFile::poll_bytes`] (heap buffer for small files, mmap-backed
-/// for large ones). The only per-byte copy on the serving path is the one the
-/// HTTP layer performs into its socket write buffer.
+/// buffer, and file payloads are forwarded as the `Bytes` already loaded by
+/// the dumper (heap buffer for small files, mmap-backed for large ones). The
+/// only per-byte copy on the serving path is the one the HTTP layer performs
+/// into its socket write buffer.
 pub struct NarByteStream {
     dumper: NarDumper,
     /// Scratch buffer for NAR structure tokens between file payloads.
@@ -143,7 +138,10 @@ impl Stream for NarByteStream {
                                         TOK_FILE
                                     });
                                     this.frame.put_u64_le(size);
-                                    this.phase = Phase::Load { file: reader, size };
+                                    this.phase = Phase::Emit {
+                                        data: reader.into_bytes(),
+                                        size,
+                                    };
                                     // Flush framing now so file bytes follow
                                     // immediately without being copied into
                                     // the frame buffer.
@@ -161,11 +159,6 @@ impl Stream for NarByteStream {
                             }
                         }
                     }
-                }
-                Phase::Load { file, size } => {
-                    let data = ready!(Pin::new(file).poll_bytes(cx))?;
-                    let size = *size;
-                    this.phase = Phase::Emit { data, size };
                 }
                 Phase::Emit { data, size } => {
                     if !data.is_empty() {
