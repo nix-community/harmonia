@@ -227,4 +227,28 @@ mod tests {
         let want = write_nar(test_data::text_file().iter());
         assert_eq!(got, want.to_vec());
     }
+
+    /// Exercise the mmap-backed `Bytes::from_owner` path and the
+    /// `FILE_CHUNK_SIZE` slicing of large payloads.
+    #[tokio::test]
+    async fn byte_stream_large_file_matches_nix_store_dump() {
+        // Larger than SMALL_FILE_THRESHOLD and not a multiple of
+        // FILE_CHUNK_SIZE / 8, so padding and the final short slice are both
+        // covered.
+        const LEN: usize = 300 * 1024 + 5;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big");
+        let data: Vec<u8> = (0..LEN).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &data).unwrap();
+
+        let got = collect(path.clone()).await;
+
+        let want = std::process::Command::new("nix-store")
+            .arg("--dump")
+            .arg(&path)
+            .output()
+            .expect("nix-store --dump failed");
+        assert!(want.status.success());
+        assert_eq!(got, want.stdout);
+    }
 }
