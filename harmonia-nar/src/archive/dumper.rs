@@ -4,13 +4,15 @@ use std::fs::read_link;
 use std::future::Future as _;
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 use std::{collections::VecDeque, io};
 
-use bstr::{ByteSlice as _, ByteVec as _};
+use bstr::ByteSlice as _;
 use bytes::Bytes;
 use futures_core::Stream;
 use tokio::io::AsyncRead;
@@ -50,10 +52,14 @@ impl DumpOptions {
         };
         let walker = walker.into_iter();
         NarDumper {
-            state: State::Idle(Some((VecDeque::with_capacity(CHUNK_SIZE), walker, true))),
+            state: State::Idle(Some(Box::new(BatchState {
+                buf: VecDeque::with_capacity(CHUNK_SIZE),
+                walker,
+                remain: true,
+                use_case_hack: self.use_case_hack,
+            }))),
             next: None,
             level: 0,
-            use_case_hack: self.use_case_hack,
         }
     }
 }
@@ -107,6 +113,28 @@ fn remove_case_hack(name: &mut Bytes) {
     }
 }
 
+/// Turn a walkdir entry into the NAR entry name.
+///
+/// The root node carries no name in the NAR format. For deeper entries the
+/// final path segment is copied into a fresh small `Bytes`; the entry's
+/// `PathBuf` is then dropped here on the blocking thread.
+fn entry_name(entry: DirEntry, use_case_hack: bool) -> Bytes {
+    if entry.depth() == 0 {
+        return Bytes::new();
+    }
+    let mut name = Bytes::copy_from_slice(fast_file_name(entry.path()));
+    if use_case_hack {
+        remove_case_hack(&mut name);
+    }
+    name
+}
+
+/// Convert an `OsString` (symlink target) into `Bytes` by moving its buffer.
+#[cfg(unix)]
+fn os_string_into_bytes(s: std::ffi::OsString) -> Bytes {
+    Bytes::from(s.into_vec())
+}
+
 use super::mmap::MappedFile;
 
 /// Files up to this size are read into a heap buffer; larger files are
@@ -116,9 +144,17 @@ const SMALL_FILE_THRESHOLD: u64 = 256 * 1024; // 256 KiB
 /// Load a file as a single `Bytes` value without intermediate copies:
 /// small files become `Bytes::from(Vec)`, large files become a refcounted
 /// view over the mmap via `Bytes::from_owner`.
+///
+/// `size` comes from the directory walk's `lstat`, so the small-file branch
+/// allocates exactly once at the right capacity instead of letting
+/// `std::fs::read` issue its own `fstat` to size the buffer.
 fn load_file_bytes(path: &Path, size: u64) -> io::Result<Bytes> {
     if size <= SMALL_FILE_THRESHOLD {
-        Ok(Bytes::from(std::fs::read(path)?))
+        use std::io::Read as _;
+        let mut f = std::fs::File::open(path)?;
+        let mut buf = Vec::with_capacity(size as usize);
+        f.read_to_end(&mut buf)?;
+        Ok(Bytes::from(buf))
     } else {
         Ok(Bytes::from_owner(MappedFile::open(path, size)?))
     }
@@ -160,34 +196,28 @@ impl AsyncRead for DumpedFile {
     }
 }
 
+/// A fully prepared directory entry: everything the async side needs to emit
+/// the corresponding [`NarEvent`] without touching the filesystem again.
 enum Entry {
     File {
         depth: usize,
-        path: PathBuf,
+        name: Bytes,
         size: u64,
         executable: bool,
         data: Bytes,
     },
     Symlink {
         depth: usize,
-        path: PathBuf,
-        target: PathBuf,
+        name: Bytes,
+        target: Bytes,
     },
     Directory {
         depth: usize,
-        path: PathBuf,
+        name: Bytes,
     },
 }
 
 impl Entry {
-    fn path(&self) -> &Path {
-        match self {
-            Entry::File { path, .. } => path,
-            Entry::Symlink { path, .. } => path,
-            Entry::Directory { path, .. } => path,
-        }
-    }
-
     fn depth(&self) -> usize {
         match self {
             Entry::File { depth, .. } => *depth,
@@ -197,10 +227,17 @@ impl Entry {
     }
 }
 
+struct BatchState {
+    buf: VecDeque<io::Result<Entry>>,
+    walker: IntoIter,
+    remain: bool,
+    use_case_hack: bool,
+}
+
 #[allow(clippy::large_enum_variant)]
 enum State {
-    Idle(Option<(VecDeque<io::Result<Entry>>, IntoIter, bool)>),
-    Pending(JoinHandle<(VecDeque<io::Result<Entry>>, IntoIter, bool)>),
+    Idle(Option<Box<BatchState>>),
+    Pending(JoinHandle<Box<BatchState>>),
 }
 
 const CHUNK_SIZE: usize = 25;
@@ -210,16 +247,17 @@ impl State {
         loop {
             match self {
                 State::Idle(data) => {
-                    let (buf, _, remain) = data.as_mut().unwrap();
-                    if let Some(entry) = buf.pop_front() {
+                    let st = data.as_mut().unwrap();
+                    if let Some(entry) = st.buf.pop_front() {
                         return Poll::Ready(Some(entry));
-                    } else if !*remain {
+                    } else if !st.remain {
                         return Poll::Ready(None);
                     }
-                    let (mut buf, mut walker, _) = data.take().unwrap();
-                    *self = State::Pending(spawn_blocking(|| {
-                        let remain = State::next_chunk(&mut buf, &mut walker);
-                        (buf, walker, remain)
+                    let mut st = data.take().unwrap();
+                    *self = State::Pending(spawn_blocking(move || {
+                        st.remain =
+                            State::next_chunk(&mut st.buf, &mut st.walker, st.use_case_hack);
+                        st
                     }));
                 }
                 State::Pending(handler) => {
@@ -228,56 +266,61 @@ impl State {
             }
         }
     }
-    fn next_chunk(buf: &mut VecDeque<io::Result<Entry>>, iter: &mut IntoIter) -> bool {
+    fn next_chunk(
+        buf: &mut VecDeque<io::Result<Entry>>,
+        iter: &mut IntoIter,
+        use_case_hack: bool,
+    ) -> bool {
         for _ in 0..CHUNK_SIZE {
             match iter.next() {
                 Some(res) => {
                     let res = res.map_err(io::Error::from).and_then(|entry| {
                         let depth = entry.depth();
-                        let m = entry.metadata()?;
-                        if m.is_dir() {
-                            Ok(Entry::Directory {
+                        // `file_type()` is cached from `readdir`'s `d_type`
+                        // and needs no syscall; only regular files require an
+                        // additional `lstat` for size and the exec bit.
+                        let ft = entry.file_type();
+                        let entry = if ft.is_dir() {
+                            Entry::Directory {
                                 depth,
-                                path: entry.into_path(),
-                            })
-                        } else if m.is_file() {
+                                name: entry_name(entry, use_case_hack),
+                            }
+                        } else if ft.is_file() {
+                            let m = entry.metadata()?;
                             let executable;
                             #[cfg(unix)]
                             {
-                                let mode = m.permissions().mode();
-                                executable = mode & 0o100 == 0o100;
+                                executable = m.permissions().mode() & 0o100 == 0o100;
                             }
                             #[cfg(not(unix))]
                             {
                                 executable = false;
                             }
                             let size = m.len();
-                            let path = entry.into_path();
                             // Load the content here, in the same blocking
                             // task that is already iterating the directory,
                             // so the async side receives ready-to-stream
                             // bytes without a second pool round-trip.
-                            let data = load_file_bytes(&path, size)?;
-                            Ok(Entry::File {
+                            let data = load_file_bytes(entry.path(), size)?;
+                            Entry::File {
                                 depth,
-                                path,
+                                name: entry_name(entry, use_case_hack),
                                 size,
                                 executable,
                                 data,
-                            })
-                        } else if m.is_symlink() {
-                            let target = read_link(entry.path())?;
-                            Ok(Entry::Symlink {
+                            }
+                        } else if ft.is_symlink() {
+                            let target =
+                                os_string_into_bytes(read_link(entry.path())?.into_os_string());
+                            Entry::Symlink {
                                 depth,
-                                path: entry.into_path(),
+                                name: entry_name(entry, use_case_hack),
                                 target,
-                            })
+                            }
                         } else {
-                            Err(io::Error::other(format!(
-                                "unsupported file type {:?}",
-                                m.file_type()
-                            )))
-                        }
+                            return Err(io::Error::other(format!("unsupported file type {ft:?}")));
+                        };
+                        Ok(entry)
                     });
                     buf.push_back(res);
                 }
@@ -292,7 +335,6 @@ pub struct NarDumper {
     state: State,
     next: Option<Entry>,
     level: u32,
-    use_case_hack: bool,
 }
 
 impl NarDumper {
@@ -322,43 +364,24 @@ impl Stream for NarDumper {
                 return Poll::Ready(Some(Ok(NarEvent::EndDirectory)));
             }
             if let Some(entry) = self.next.take() {
-                let name = if self.level > 0 {
-                    let mut name = Bytes::copy_from_slice(fast_file_name(entry.path()));
-                    if self.use_case_hack {
-                        remove_case_hack(&mut name);
-                    }
-                    name
-                } else {
-                    Bytes::new()
-                };
                 let event = match entry {
-                    Entry::Directory { path: _, .. } => {
+                    Entry::Directory { name, .. } => {
                         self.level += 1;
                         NarEvent::StartDirectory { name }
                     }
                     Entry::File {
+                        name,
                         size,
                         executable,
                         data,
                         ..
-                    } => {
-                        let reader = DumpedFile::new(data);
-                        NarEvent::File {
-                            name,
-                            executable,
-                            size,
-                            reader,
-                        }
-                    }
-                    Entry::Symlink { target, .. } => {
-                        let target = Vec::from_os_string(target.into_os_string())
-                            .map_err(|target_s| {
-                                io::Error::other(format!("target {target_s:?} not valid UTF-8"))
-                            })?
-                            .into();
-
-                        NarEvent::Symlink { name, target }
-                    }
+                    } => NarEvent::File {
+                        name,
+                        executable,
+                        size,
+                        reader: DumpedFile::new(data),
+                    },
+                    Entry::Symlink { name, target, .. } => NarEvent::Symlink { name, target },
                 };
                 return Poll::Ready(Some(Ok(event)));
             }
