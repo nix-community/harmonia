@@ -1,0 +1,3 @@
+# Keep frame pointers so `perf record --call-graph fp` works without slow DWARF unwinding.
+[target.'cfg(not(target_arch = "x86"))']
+rustflags = [ "-Cforce-frame-pointers=yes" ]
