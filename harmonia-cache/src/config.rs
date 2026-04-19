@@ -27,6 +27,43 @@ fn default_enable_compression() -> bool {
     false
 }
 
+/// zstd parameters applied to on-the-fly NAR encoding when the client sends
+/// `Accept-Encoding: zstd`. Defaults are tuned for a substitution cache:
+/// level 1 with long-distance matching beats the libzstd default (level 3)
+/// on both ratio and throughput for typical NARs, and the window cap keeps
+/// per-stream decoder memory bounded under parallel `nix copy`.
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub(crate) struct ZstdConfig {
+    #[serde(default = "ZstdConfig::default_level")]
+    pub(crate) level: i32,
+    #[serde(default = "ZstdConfig::default_long_distance")]
+    pub(crate) long_distance_matching: bool,
+    /// log2 of the match window. 0 = auto: with LDM, cap at 25 (32 MiB) so
+    /// decoder memory stays bounded; without LDM, use the level default so
+    /// the encoder doesn't allocate a large window it can't fill.
+    #[serde(default)]
+    pub(crate) window_log: u32,
+}
+
+impl ZstdConfig {
+    fn default_level() -> i32 {
+        1
+    }
+    fn default_long_distance() -> bool {
+        true
+    }
+}
+
+impl Default for ZstdConfig {
+    fn default() -> Self {
+        Self {
+            level: Self::default_level(),
+            long_distance_matching: Self::default_long_distance(),
+            window_log: 0,
+        }
+    }
+}
+
 fn default_virtual_store() -> PathBuf {
     PathBuf::from("/nix/store")
 }
@@ -56,6 +93,9 @@ pub(crate) struct Config {
 
     #[serde(default = "default_enable_compression")]
     pub(crate) enable_compression: bool,
+
+    #[serde(default)]
+    pub(crate) zstd: ZstdConfig,
 
     #[serde(default)]
     pub(crate) sign_key_path: Option<String>,

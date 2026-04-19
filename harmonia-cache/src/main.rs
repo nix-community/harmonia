@@ -43,6 +43,7 @@ mod store;
 mod template;
 mod tls;
 mod version;
+mod zstd_body;
 
 async fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
     // Parse the hash bytes into a StorePathHash
@@ -166,7 +167,7 @@ async fn inner_main() -> Result<()> {
         App::new()
             .wrap(middleware::Condition::new(
                 config_data.enable_compression,
-                middleware::Compress::default(),
+                zstd_body::ZstdMiddleware::new(config_data.zstd),
             ))
             .wrap(prometheus::PrometheusMiddleware::new(metrics.clone()))
             .app_data(config_data.clone())

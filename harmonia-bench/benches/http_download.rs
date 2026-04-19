@@ -10,6 +10,11 @@ use tokio::net::TcpStream;
 /// per-read syscall overhead while staying well inside L2.
 const DRAIN_BUF: usize = 64 * 1024;
 
+enum BodyFraming {
+    Length(u64),
+    Chunked,
+}
+
 /// A persistent HTTP/1.1 keep-alive connection.
 ///
 /// Response bodies are drained into a fixed scratch buffer rather than
@@ -19,24 +24,30 @@ struct Conn {
     reader: BufReader<TcpStream>,
     host: String,
     drain: Box<[u8; DRAIN_BUF]>,
+    accept_encoding: &'static str,
 }
 
 impl Conn {
     async fn connect(addr: &str) -> Self {
+        Self::connect_with_encoding(addr, "identity").await
+    }
+
+    async fn connect_with_encoding(addr: &str, accept_encoding: &'static str) -> Self {
         let stream = TcpStream::connect(addr).await.expect("connect failed");
         stream.set_nodelay(true).ok();
         Self {
             reader: BufReader::new(stream),
             host: addr.to_string(),
             drain: Box::new([0u8; DRAIN_BUF]),
+            accept_encoding,
         }
     }
 
-    /// Issue a GET and parse status + Content-Length, leaving the body unread.
-    async fn get_head(&mut self, path: &str) -> (u16, u64) {
+    /// Issue a GET and parse status + framing, leaving the body unread.
+    async fn get_head(&mut self, path: &str) -> (u16, BodyFraming) {
         let request = format!(
-            "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: keep-alive\r\n\r\n",
-            path, self.host
+            "GET {} HTTP/1.1\r\nHost: {}\r\nAccept-Encoding: {}\r\nConnection: keep-alive\r\n\r\n",
+            path, self.host, self.accept_encoding
         );
         self.reader
             .get_mut()
@@ -56,6 +67,7 @@ impl Conn {
             .expect("bad status line");
 
         let mut content_length: Option<u64> = None;
+        let mut chunked = false;
         let mut line = String::new();
         loop {
             line.clear();
@@ -63,33 +75,27 @@ impl Conn {
             if line == "\r\n" || line == "\n" {
                 break;
             }
-            if let Some(val) = line
-                .strip_prefix("Content-Length: ")
-                .or_else(|| line.strip_prefix("content-length: "))
-            {
+            let lower = line.to_ascii_lowercase();
+            if let Some(val) = lower.strip_prefix("content-length: ") {
                 content_length = Some(val.trim().parse().expect("bad content-length"));
+            } else if lower
+                .strip_prefix("transfer-encoding: ")
+                .is_some_and(|v| v.trim() == "chunked")
+            {
+                chunked = true;
             }
         }
         // The keep-alive connection relies on draining exactly the declared
-        // body length; fail loudly rather than desync on the next request.
-        (
-            status,
-            content_length.expect("response missing Content-Length"),
-        )
+        // framing; fail loudly rather than desync on the next request.
+        let framing = if chunked {
+            BodyFraming::Chunked
+        } else {
+            BodyFraming::Length(content_length.expect("response missing Content-Length"))
+        };
+        (status, framing)
     }
 
-    /// GET `path` and return the full body (for small responses like narinfo).
-    async fn get_body(&mut self, path: &str) -> (u16, Vec<u8>) {
-        let (status, len) = self.get_head(path).await;
-        let mut body = vec![0u8; len as usize];
-        self.reader.read_exact(&mut body).await.expect("read body");
-        (status, body)
-    }
-
-    /// GET `path` and discard the body, returning the number of bytes drained.
-    async fn get_drain(&mut self, path: &str) -> (u16, u64) {
-        let (status, len) = self.get_head(path).await;
-        let mut remaining = len;
+    async fn drain_exact(&mut self, mut remaining: u64) {
         while remaining > 0 {
             let want = remaining.min(DRAIN_BUF as u64) as usize;
             let n = self
@@ -100,6 +106,69 @@ impl Conn {
             assert!(n > 0, "unexpected EOF with {} bytes remaining", remaining);
             remaining -= n as u64;
         }
+    }
+
+    /// Drain a chunked-encoded body and return total payload bytes.
+    async fn drain_chunked(&mut self) -> u64 {
+        let mut total = 0u64;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            self.reader
+                .read_line(&mut line)
+                .await
+                .expect("read chunk size");
+            let size_str = line.trim_end();
+            // Ignore chunk extensions after ';'
+            let size_hex = size_str.split(';').next().unwrap();
+            let size = u64::from_str_radix(size_hex, 16)
+                .unwrap_or_else(|_| panic!("bad chunk size: {line:?}"));
+            if size == 0 {
+                // trailer + final CRLF
+                loop {
+                    line.clear();
+                    self.reader
+                        .read_line(&mut line)
+                        .await
+                        .expect("read trailer");
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                }
+                return total;
+            }
+            self.drain_exact(size).await;
+            total += size;
+            // CRLF after chunk data
+            line.clear();
+            self.reader
+                .read_line(&mut line)
+                .await
+                .expect("read chunk CRLF");
+        }
+    }
+
+    /// GET `path` and return the full body (for small responses like narinfo).
+    async fn get_body(&mut self, path: &str) -> (u16, Vec<u8>) {
+        let (status, framing) = self.get_head(path).await;
+        let BodyFraming::Length(len) = framing else {
+            panic!("get_body requires Content-Length")
+        };
+        let mut body = vec![0u8; len as usize];
+        self.reader.read_exact(&mut body).await.expect("read body");
+        (status, body)
+    }
+
+    /// GET `path` and discard the body, returning the number of bytes drained.
+    async fn get_drain(&mut self, path: &str) -> (u16, u64) {
+        let (status, framing) = self.get_head(path).await;
+        let len = match framing {
+            BodyFraming::Length(len) => {
+                self.drain_exact(len).await;
+                len
+            }
+            BodyFraming::Chunked => self.drain_chunked().await,
+        };
         (status, len)
     }
 }
@@ -212,34 +281,51 @@ fn benchmark_http_download(c: &mut Criterion) {
         narinfos.len()
     );
 
+    // One-off wire-size probe per encoding, printed alongside the timing runs.
+    rt.block_on(async {
+        for encoding in ["identity", "zstd"] {
+            let mut conn = Conn::connect_with_encoding(&addr, encoding).await;
+            let mut wire = 0u64;
+            for (_, ni) in &narinfos {
+                wire += download_nar(&mut conn, &ni.url).await;
+            }
+            eprintln!(
+                "encoding={:<8} wire={:>9.2} MiB  ratio={:.3}",
+                encoding,
+                wire as f64 / 1024.0 / 1024.0,
+                wire as f64 / total_nar_bytes as f64,
+            );
+        }
+    });
+
     let mut group = c.benchmark_group("http");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(5));
 
-    group.bench_function("sequential", |b| {
-        // One persistent connection reused across all iterations so we measure
-        // server-side NAR throughput, not TCP handshake latency.
-        let mut conn = rt.block_on(Conn::connect(&addr));
-        b.iter_custom(|iters| {
-            let mut total = Duration::ZERO;
-            for _ in 0..iters {
-                let start = Instant::now();
-                rt.block_on(async {
-                    for (_, narinfo) in &narinfos {
-                        download_nar(&mut conn, &narinfo.url).await;
-                    }
-                });
-                total += start.elapsed();
-            }
-            total
-        })
-    });
+    for encoding in ["identity", "zstd"] {
+        group.bench_function(format!("sequential_{encoding}"), |b| {
+            let mut conn = rt.block_on(Conn::connect_with_encoding(&addr, encoding));
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let start = Instant::now();
+                    rt.block_on(async {
+                        for (_, narinfo) in &narinfos {
+                            download_nar(&mut conn, &narinfo.url).await;
+                        }
+                    });
+                    total += start.elapsed();
+                }
+                total
+            })
+        });
+    }
 
     let nar_urls: std::sync::Arc<Vec<String>> =
         std::sync::Arc::new(narinfos.iter().map(|(_, ni)| ni.url.clone()).collect());
 
-    for concurrency in [4, 16] {
-        group.bench_function(format!("concurrent_{}", concurrency), |b| {
+    for (concurrency, encoding) in [(4, "identity"), (16, "identity"), (4, "zstd"), (16, "zstd")] {
+        group.bench_function(format!("concurrent_{concurrency}_{encoding}"), |b| {
             b.iter_custom(|iters| {
                 let mut total = Duration::ZERO;
                 for _ in 0..iters {
@@ -255,7 +341,7 @@ fn benchmark_http_download(c: &mut Criterion) {
                             let urls = nar_urls.clone();
                             let next = next.clone();
                             handles.push(tokio::spawn(async move {
-                                let mut conn = Conn::connect(&addr).await;
+                                let mut conn = Conn::connect_with_encoding(&addr, encoding).await;
                                 let mut bytes = 0u64;
                                 loop {
                                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

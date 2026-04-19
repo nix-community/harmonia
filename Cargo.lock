@@ -73,7 +73,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "zstd",
 ]
 
 [[package]]
@@ -937,6 +936,7 @@ dependencies = [
  "actix-web",
  "askama_escape",
  "async-compression",
+ "bytes",
  "futures-core",
  "futures-util",
  "harmonia-nar",
@@ -962,6 +962,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "zstd",
+ "zstd-safe",
 ]
 
 [[package]]

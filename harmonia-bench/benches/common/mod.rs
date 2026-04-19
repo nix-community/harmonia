@@ -49,6 +49,7 @@ pub async fn start_harmonia(bin_path: &str) -> (u16, HarmoniaGuard) {
         r#"
 bind = "127.0.0.1:{}"
 priority = 30
+enable_compression = true
 "#,
         port
     );
@@ -57,11 +58,22 @@ priority = 30
     write!(config_file, "{}", config).expect("failed to write config");
     config_file.flush().expect("failed to flush config");
 
-    let child = Command::new(bin_path)
-        .env("CONFIG_FILE", config_file.path())
-        .env("RUST_LOG", "warn")
-        .spawn()
-        .expect("failed to start harmonia");
+    // Optionally wrap the server in `perf record` so profiles cover only the
+    // server process, not the bench client / build children.
+    let child = if let Ok(perf_out) = std::env::var("HARMONIA_PERF_RECORD") {
+        Command::new("perf")
+            .args(["record", "-F", "497", "-g", "-o", &perf_out, "--", bin_path])
+            .env("CONFIG_FILE", config_file.path())
+            .env("RUST_LOG", "warn")
+            .spawn()
+            .expect("failed to start perf record harmonia")
+    } else {
+        Command::new(bin_path)
+            .env("CONFIG_FILE", config_file.path())
+            .env("RUST_LOG", "warn")
+            .spawn()
+            .expect("failed to start harmonia")
+    };
 
     let pid = child.id();
 
