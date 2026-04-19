@@ -192,6 +192,10 @@ async fn inner_main() -> Result<()> {
     })
     // default is 5 seconds, which is too small when doing mass requests on slow machines
     .client_request_timeout(Duration::from_secs(30))
+    // Disable Nagle so the short trailing chunk at the end of each response is
+    // sent immediately instead of waiting for a delayed ACK; on keep-alive
+    // connections that wait would otherwise serialize onto every request.
+    .tcp_nodelay(true)
     .workers(c.workers)
     .max_connection_rate(c.max_connection_rate);
 
