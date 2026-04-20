@@ -5,7 +5,6 @@ use actix_web::http::header::HeaderValue;
 use actix_web::{HttpRequest, HttpResponse, http, web};
 use async_compression::tokio::bufread::BzDecoder;
 use harmonia_store_core::store_path::StorePath;
-use harmonia_store_remote::DaemonStore;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -16,8 +15,8 @@ use tokio_util::io::ReaderStream;
 use crate::config::Config;
 use crate::{cache_control_max_age_1y, cache_control_no_store, nixhash, some_or_404};
 
-async fn query_drv_path(settings: &web::Data<Config>, drv: &[u8]) -> Result<Option<StorePath>> {
-    nixhash(settings, if drv.len() > 32 { &drv[0..32] } else { drv }).await
+fn query_drv_path(settings: &web::Data<Config>, drv: &[u8]) -> Result<Option<StorePath>> {
+    nixhash(settings, if drv.len() > 32 { &drv[0..32] } else { drv })
 }
 
 pub fn get_build_log(store: &Path, drv_path: &StorePath) -> Option<PathBuf> {
@@ -49,27 +48,15 @@ pub(crate) async fn get(
     req: HttpRequest,
     settings: web::Data<Config>,
 ) -> crate::ServerResult {
-    let drv_path = some_or_404!(
-        query_drv_path(&settings, drv.as_bytes())
-            .await
-            .map_err(|e| CacheError::from(BuildLogError::QueryFailed {
-                reason: format!("Could not query nar hash in database for {drv}: {e}"),
-            }))?
-    );
-    let mut guard = settings.store.acquire().await?;
-
-    match guard.client().is_valid_path(&drv_path).await {
-        Ok(true) => (),
-        Ok(false) => {
-            return Ok(HttpResponse::NotFound()
-                .insert_header(cache_control_no_store())
-                .finish());
-        }
-        Err(e) => {
-            return Ok(HttpResponse::InternalServerError()
-                .insert_header(cache_control_no_store())
-                .body(format!("Failed to query path info: {e}")));
-        }
+    let drv_path = some_or_404!(query_drv_path(&settings, drv.as_bytes()).map_err(|e| {
+        CacheError::from(BuildLogError::QueryFailed {
+            reason: format!("Could not query nar hash in database for {drv}: {e}"),
+        })
+    })?);
+    if !settings.store.is_valid_path(&drv_path)? {
+        return Ok(HttpResponse::NotFound()
+            .insert_header(cache_control_no_store())
+            .finish());
     }
     let build_log = some_or_404!(get_build_log(settings.store.real_store(), &drv_path));
     let ext = match build_log.extension() {

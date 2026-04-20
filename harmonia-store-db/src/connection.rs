@@ -57,6 +57,34 @@ impl StoreDb {
         Ok(Self { conn })
     }
 
+    /// Open a database read-only *without* the immutable flag.
+    ///
+    /// Unlike [`open_system_at`], this sees concurrent writes from another
+    /// process (e.g. the nix-daemon) because the WAL is consulted. Use this
+    /// for long-running readers that must observe newly registered paths.
+    pub fn open_readonly<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Err(Error::DatabaseNotFound(path.to_owned()));
+        }
+
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| Error::DatabaseOpen {
+            path: path.to_owned(),
+            source: e,
+        })?;
+
+        // Match the busy/locking behaviour libnixstore uses so a writer
+        // checkpointing the WAL does not make us fail with SQLITE_BUSY.
+        conn.busy_timeout(std::time::Duration::from_secs(60 * 60))?;
+
+        debug!("Opened database read-only at {}", path.display());
+        Ok(Self { conn })
+    }
+
     /// Open or create a database at a custom path.
     pub fn open<P: AsRef<Path>>(path: P, mode: OpenMode) -> Result<Self> {
         let path = path.as_ref();

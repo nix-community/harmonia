@@ -1,36 +1,39 @@
-use crate::error::{Result, StoreError};
-use harmonia_store_core::store_path::{StoreDir, StorePath};
-use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
+use crate::error::{CacheError, Result, StoreError};
+use harmonia_store_core::store_path::{FromStoreDirStr, StoreDir, StorePath};
+use harmonia_store_db::{Realisation, StoreDb, ValidPathInfo};
+use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+// rusqlite::Connection is !Sync, so each actix worker thread keeps its own
+// handle to the nix database. Opened lazily on first use.
+thread_local! {
+    static LOCAL_DB: RefCell<Option<StoreDb>> = const { RefCell::new(None) };
+}
 
 #[derive(Clone)]
 pub struct Store {
     virtual_store: Vec<u8>,
     real_store: Option<Vec<u8>>,
-    pool: ConnectionPool,
+    store_dir: StoreDir,
+    db_path: Arc<PathBuf>,
 }
 
 impl Store {
-    pub fn new(
-        virtual_store: Vec<u8>,
-        daemon_store: Vec<u8>,
-        real_store: Option<Vec<u8>>,
-        daemon_socket: PathBuf,
-        pool_config: PoolConfig,
-    ) -> Self {
-        // Use daemon_store for the pool - this is the store the daemon actually uses
-        let store_dir_str = std::str::from_utf8(&daemon_store).unwrap_or("/nix/store");
+    pub fn new(virtual_store: Vec<u8>, real_store: Option<Vec<u8>>, db_path: PathBuf) -> Self {
+        // The database stores paths under the virtual store prefix even in
+        // chroot setups, so that is what we parse against.
+        let store_dir_str = std::str::from_utf8(&virtual_store).unwrap_or("/nix/store");
         let store_dir = StoreDir::new(store_dir_str).unwrap_or_default();
-
-        let pool = ConnectionPool::with_store_dir(&daemon_socket, store_dir, pool_config);
 
         Self {
             virtual_store,
             real_store,
-            pool,
+            store_dir,
+            db_path: Arc::new(db_path),
         }
     }
 
@@ -56,17 +59,83 @@ impl Store {
         &self.virtual_store
     }
 
-    pub fn to_virtual_path(&self, store_path: &StorePath) -> StorePath {
-        // StorePath is now just "hash-name", which is store-agnostic
-        // No translation needed - just return the same StorePath
-        store_path.clone()
+    pub fn store_dir(&self) -> &StoreDir {
+        &self.store_dir
     }
 
-    pub async fn acquire(&self) -> Result<PooledConnectionGuard> {
-        self.pool
-            .acquire()
-            .await
-            .map_err(|e| StoreError::Remote(e).into())
+    /// Run `f` against this thread's SQLite handle to the nix database.
+    fn with_db<R>(&self, f: impl FnOnce(&StoreDb) -> Result<R>) -> Result<R> {
+        LOCAL_DB.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot.is_none() {
+                let db =
+                    StoreDb::open_readonly(self.db_path.as_path()).map_err(|e| StoreError::Db {
+                        path: self.db_path.display().to_string(),
+                        reason: e.to_string(),
+                    })?;
+                *slot = Some(db);
+            }
+            f(slot.as_ref().expect("db just opened"))
+        })
+    }
+
+    fn db_err(&self, e: harmonia_store_db::Error) -> CacheError {
+        StoreError::Db {
+            path: self.db_path.display().to_string(),
+            reason: e.to_string(),
+        }
+        .into()
+    }
+
+    fn parse_path(&self, full: &str) -> Result<StorePath> {
+        StorePath::from_store_dir_str(&self.store_dir, full).map_err(|e| {
+            StoreError::Db {
+                path: self.db_path.display().to_string(),
+                reason: format!("invalid store path '{full}': {e}"),
+            }
+            .into()
+        })
+    }
+
+    /// Resolve a 32-char store-path hash to its full `StorePath`.
+    pub fn query_path_from_hash_part(&self, hash: &str) -> Result<Option<StorePath>> {
+        let store_dir = self.store_dir.to_str().to_owned();
+        let full = self.with_db(|db| {
+            db.query_path_from_hash_part(&store_dir, hash)
+                .map_err(|e| self.db_err(e))
+        })?;
+        full.map(|p| self.parse_path(&p)).transpose()
+    }
+
+    /// Resolve a 32-char store-path hash directly to its `ValidPathInfo`.
+    pub fn query_path_info_by_hash_part(&self, hash: &str) -> Result<Option<ValidPathInfo>> {
+        let store_dir = self.store_dir.to_str().to_owned();
+        self.with_db(|db| {
+            db.query_path_info_by_hash_part(&store_dir, hash)
+                .map_err(|e| self.db_err(e))
+        })
+    }
+
+    pub fn is_valid_path(&self, path: &StorePath) -> Result<bool> {
+        let full = format!("{}", self.store_dir.display(path));
+        self.with_db(|db| db.is_valid_path(&full).map_err(|e| self.db_err(e)))
+    }
+
+    /// Look up a CA-derivation realisation. Returns `None` both when the row
+    /// is absent and when the database has no `BuildTraceV3` table (i.e. CA
+    /// derivations were never enabled on this store).
+    pub fn query_realisation(
+        &self,
+        drv_base_name: &str,
+        output_name: &str,
+    ) -> Result<Option<Realisation>> {
+        self.with_db(|db| {
+            if !db.has_ca_schema().map_err(|e| self.db_err(e))? {
+                return Ok(None);
+            }
+            db.query_realisation(drv_base_name, output_name)
+                .map_err(|e| self.db_err(e))
+        })
     }
 }
 
@@ -74,13 +143,8 @@ impl Default for Store {
     fn default() -> Self {
         Self::new(
             b"/nix/store".to_vec(),
-            b"/nix/store".to_vec(),
             None,
-            PathBuf::from("/nix/var/nix/daemon-socket/socket"),
-            PoolConfig {
-                max_size: 2, // Small pool for tests
-                ..Default::default()
-            },
+            PathBuf::from("/nix/var/nix/db/db.sqlite"),
         )
     }
 }

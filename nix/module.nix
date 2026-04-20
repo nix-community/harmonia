@@ -113,27 +113,22 @@ in
         else
           [ ];
 
-      services.harmonia-dev.cache.settings = builtins.mapAttrs (_: v: lib.mkDefault v) (
-        {
-          bind = "[::]:5000";
-          workers = 4;
-          max_connection_rate = 256;
-          priority = 50;
-        }
-        // lib.optionalAttrs daemonCfg.enable {
-          daemon_socket = daemonCfg.socketPath;
-        }
-      );
+      services.harmonia-dev.cache.settings = builtins.mapAttrs (_: v: lib.mkDefault v) {
+        bind = "[::]:5000";
+        workers = 4;
+        max_connection_rate = 256;
+        priority = 50;
+      };
 
       systemd.services.harmonia-dev = {
         description = "harmonia binary cache service";
 
-        requires = if daemonCfg.enable then [ "harmonia-daemon.service" ] else [ "nix-daemon.socket" ];
-        after = [ "network.target" ] ++ lib.optional daemonCfg.enable "harmonia-daemon.service";
+        # The cache reads /nix/store and /nix/var/nix/db/db.sqlite directly;
+        # it does not talk to any nix daemon.
+        after = [ "network.target" ];
         wantedBy = [ "multi-user.target" ];
 
         environment = {
-          NIX_REMOTE = "daemon";
           LIBEV_FLAGS = "4"; # go ahead and mandate epoll(2)
           CONFIG_FILE = lib.mkIf (configFile != null) configFile;
           SIGN_KEY_PATHS = lib.strings.concatMapStringsSep " " (

@@ -5,8 +5,8 @@ use actix_web::web::Bytes;
 use actix_web::{HttpRequest, HttpResponse, http, web};
 use harmonia_nar::NarByteStream;
 use harmonia_store_core::store_path::StorePathHash;
-use harmonia_store_remote::DaemonStore;
-use harmonia_utils_hash::fmt::CommonHash;
+use harmonia_utils_hash::Hash;
+use harmonia_utils_hash::fmt::{Any, CommonHash};
 use serde::Deserialize;
 
 /// Represents the query string of a NAR URL.
@@ -71,72 +71,66 @@ pub(crate) async fn get(
     } else {
         path.outhash.as_deref()
     };
-    let store_path = match outhash {
-        Some(outhash) => {
-            // Parse outhash to StorePathHash
-            let store_path_hash =
-                StorePathHash::decode_digest(outhash.as_bytes()).map_err(|e| {
-                    CacheError::from(StoreError::PathQuery {
-                        hash: outhash.to_string(),
-                        reason: format!("Invalid hash format: {e}"),
-                    })
-                })?;
-
-            let mut guard = settings.store.acquire().await?;
-            guard
-                .client()
-                .query_path_from_hash_part(&store_path_hash)
-                .await
-                .map_err(|e| {
-                    CacheError::from(StoreError::PathQuery {
-                        hash: outhash.to_string(),
-                        reason: e.to_string(),
-                    })
-                })?
-        }
+    let outhash = match outhash {
+        Some(outhash) => outhash,
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(crate::cache_control_no_store())
                 .body("missing outhash"));
         }
     };
-    let store_path = match store_path {
-        Some(store_path) => store_path,
+    // Validate hash shape so garbage input becomes a 4xx, not a db scan.
+    let store_path_hash = StorePathHash::decode_digest(outhash.as_bytes()).map_err(|e| {
+        CacheError::from(StoreError::PathQuery {
+            hash: outhash.to_string(),
+            reason: format!("Invalid hash format: {e}"),
+        })
+    })?;
+
+    // Single SQLite lookup yields both the store path and its nar hash/size.
+    let info = match settings
+        .store
+        .query_path_info_by_hash_part(&store_path_hash.to_string())?
+    {
+        Some(info) => info,
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(crate::cache_control_no_store())
                 .body("store path not found"));
         }
     };
+    let store_path = settings.store.store_dir().parse(&info.path).map_err(|e| {
+        CacheError::from(StoreError::PathQuery {
+            hash: outhash.to_string(),
+            reason: format!("invalid store path in db: {e}"),
+        })
+    })?;
 
-    // lookup the path info.
-    let info = {
-        let mut guard = settings.store.acquire().await?;
-
-        match guard
-            .client()
-            .query_path_info(&store_path)
-            .await
-            .map_err(|e| CacheError::from(StoreError::Remote(e)))?
-        {
-            Some(info) => info,
-            None => {
-                return Ok(HttpResponse::NotFound()
-                    .insert_header(crate::cache_control_no_store())
-                    .body("path info not found"));
-            }
-        }
-    }; // guard is dropped here
-
-    // URL narhash is bare (no sha256: prefix), so use as_bare() for comparison
-    let expected_hash = info.nar_hash.as_base32().as_bare().to_string();
+    // db stores `sha256:<base16>`; URL narhash is bare base32.
+    let nar_hash: Hash = info
+        .hash
+        .parse::<Any<Hash>>()
+        .map_err(|e| {
+            CacheError::from(StoreError::PathQuery {
+                hash: outhash.to_string(),
+                reason: format!("invalid nar hash in db: {e}"),
+            })
+        })?
+        .into_hash();
+    let nar_size = info.nar_size.ok_or_else(|| {
+        CacheError::from(StoreError::PathQuery {
+            hash: outhash.to_string(),
+            reason: format!("missing narSize for {}", info.path),
+        })
+    })?;
+    let expected_hash = nar_hash.as_base32().as_bare().to_string();
     if narhash != expected_hash {
         return Ok(HttpResponse::NotFound()
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));
     }
 
-    let rlength = info.nar_size;
+    let rlength = nar_size;
     let mut res = HttpResponse::Ok();
 
     let real_path = settings.store.get_real_path(&store_path);
@@ -163,7 +157,7 @@ pub(crate) async fn get(
                         "bytes {}-{}/{}",
                         offset,
                         offset + range_length - 1,
-                        info.nar_size
+                        nar_size
                     ),
                 ));
 

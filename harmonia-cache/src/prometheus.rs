@@ -4,7 +4,6 @@ use actix_web::{
     dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready},
     web,
 };
-use harmonia_store_remote::PoolMetrics;
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
 };
@@ -155,21 +154,11 @@ pub async fn metrics_handler(
         .body(body))
 }
 
-pub fn initialize_metrics()
--> Result<(Arc<PrometheusMetrics>, Arc<PoolMetrics>), crate::error::CacheError> {
+pub fn initialize_metrics() -> Result<Arc<PrometheusMetrics>, crate::error::CacheError> {
     let metrics = Arc::new(
         PrometheusMetrics::new().map_err(|e| error::ServerError::Startup {
             reason: format!("Failed to create prometheus metrics: {e}"),
         })?,
     );
-
-    let pool_metrics = Arc::new(
-        PoolMetrics::new("harmonia", &metrics.registry).map_err(|e| {
-            error::ServerError::Startup {
-                reason: format!("Failed to create pool metrics: {e}"),
-            }
-        })?,
-    );
-
-    Ok((metrics, pool_metrics))
+    Ok(metrics)
 }

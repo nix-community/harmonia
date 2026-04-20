@@ -67,20 +67,14 @@ pub enum StoreError {
     #[error("failed to query store path '{hash}': {reason}")]
     PathQuery { hash: String, reason: String },
 
-    #[error("Daemon communication error: {0}")]
-    Remote(#[from] harmonia_store_remote::DaemonError),
+    #[error("nix database error ({path}): {reason}")]
+    Db { path: String, reason: String },
 }
 
 #[derive(Error, Debug)]
 pub enum NarInfoError {
     #[error("Failed to query path info: {reason}")]
     QueryFailed { reason: String },
-
-    #[error("Invalid UTF-8 in store directory: {0}")]
-    InvalidUtf8(#[from] std::str::Utf8Error),
-
-    #[error("Invalid store directory: {0}")]
-    InvalidStoreDir(String),
 }
 
 #[derive(Error, Debug)]

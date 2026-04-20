@@ -1,11 +1,11 @@
 use crate::error::{CacheError, ConfigError, Result};
 use crate::store::Store;
 use harmonia_store_core::signature::SecretKey;
-use harmonia_store_remote::{PoolMetrics, pool::PoolConfig};
 use serde::Deserialize;
+use std::ffi::OsStr;
 use std::fs::read_to_string;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 fn default_bind() -> String {
     "[::]:5000".into()
@@ -68,8 +68,14 @@ fn default_virtual_store() -> PathBuf {
     PathBuf::from("/nix/store")
 }
 
-fn default_daemon_socket() -> PathBuf {
-    PathBuf::from("/nix/var/nix/daemon-socket/socket")
+/// Derive the location of `db.sqlite` from the on-disk store directory.
+///
+/// Nix lays out a store root as `<root>/store` and `<root>/var/nix/db/db.sqlite`,
+/// so for both the default `/nix/store` and chroot stores we can find the
+/// database by replacing the trailing `store` component.
+fn derive_db_path(real_store: &Path) -> Option<PathBuf> {
+    let root = real_store.parent()?;
+    Some(root.join("var/nix/db/db.sqlite"))
 }
 
 // TODO(conni2461): users to restrict access
@@ -106,8 +112,9 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) tls_key_path: Option<String>,
 
-    #[serde(default = "default_daemon_socket")]
-    pub(crate) daemon_socket: PathBuf,
+    /// Path to the nix SQLite database. Derived from the store layout when unset.
+    #[serde(default)]
+    pub(crate) nix_db_path: Option<PathBuf>,
 
     #[serde(skip, default)]
     pub(crate) secret_keys: Vec<SecretKey>,
@@ -125,13 +132,13 @@ impl Config {
     }
 }
 
-pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
+pub(crate) fn load() -> Result<Config> {
     let mut settings = match std::env::var("CONFIG_FILE") {
         Err(_) => {
             if Path::new("settings.toml").exists() {
                 Config::load(Path::new("settings.toml"))?
             } else {
-                return Ok(Config::default());
+                Config::default()
             }
         }
         Ok(settings_file) => Config::load(Path::new(&settings_file))?,
@@ -192,24 +199,36 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
                 .as_encoded_bytes()
                 .to_vec()
         });
-    // For daemon communication, always use the virtual store path.
-    // The daemon's database stores paths with the virtual prefix (e.g., /nix/store),
-    // even when files are physically located elsewhere (chroot mode).
-    // The real_nix_store is only used for mapping file access to actual locations.
-    let daemon_store_dir = virtual_store_dir.clone();
+    let real_store_path = settings
+        .real_nix_store
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(OsStr::from_bytes(&virtual_store_dir)));
+    let db_path = settings
+        .nix_db_path
+        .clone()
+        .or_else(|| derive_db_path(&real_store_path))
+        .ok_or_else(|| ConfigError::Invalid {
+            reason: format!(
+                "could not derive nix_db_path from store dir {}; set nix_db_path explicitly",
+                real_store_path.display()
+            ),
+        })?;
+    if !db_path.exists() {
+        return Err(ConfigError::Invalid {
+            reason: format!(
+                "nix database {} not found; set nix_db_path to the store's db.sqlite",
+                db_path.display()
+            ),
+        }
+        .into());
+    }
     settings.store = Store::new(
         virtual_store_dir,
-        daemon_store_dir,
         settings
             .real_nix_store
             .clone()
             .map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
-        settings.daemon_socket.clone(),
-        PoolConfig {
-            max_size: settings.workers + 1,
-            metrics: pool_metrics,
-            ..Default::default()
-        },
+        db_path,
     );
     Ok(settings)
 }

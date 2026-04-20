@@ -11,7 +11,6 @@ use url::Url;
 
 use actix_web::{App, HttpResponse, HttpServer, http, web};
 use harmonia_store_core::store_path::{StorePath, StorePathHash};
-use harmonia_store_remote::DaemonStore;
 
 /// Macro for building byte vectors efficiently from parts
 #[macro_export]
@@ -45,26 +44,18 @@ mod tls;
 mod version;
 mod zstd_body;
 
-async fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
-    // Parse the hash bytes into a StorePathHash
+/// Resolve a 32-char base32 store-path hash to its `StorePath`.
+fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath>> {
+    // Validate the hash shape so garbage input becomes a 4xx, not a db scan.
     let store_path_hash =
         StorePathHash::decode_digest(hash).map_err(|e| StoreError::PathQuery {
             hash: String::from_utf8_lossy(hash).to_string(),
             reason: format!("Invalid hash format: {e}"),
         })?;
 
-    let mut guard = settings.store.acquire().await?;
-
-    guard
-        .client()
-        .query_path_from_hash_part(&store_path_hash)
-        .await
-        .map_err(|e| {
-            CacheError::from(StoreError::PathQuery {
-                hash: String::from_utf8_lossy(hash).to_string(),
-                reason: e.to_string(),
-            })
-        })
+    settings
+        .store
+        .query_path_from_hash_part(&store_path_hash.to_string())
 }
 
 const TAILWIND_CSS: &str = include_str!("styles/output.css");
@@ -147,8 +138,8 @@ async fn inner_main() -> Result<()> {
         )
         .init();
 
-    let (metrics, pool_metrics) = prometheus::initialize_metrics()?;
-    let config = config::load(Some(pool_metrics))?;
+    let metrics = prometheus::initialize_metrics()?;
+    let config = config::load()?;
 
     let c = web::Data::new(config);
     let config_data = c.clone();

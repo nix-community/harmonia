@@ -138,7 +138,6 @@ let
         cargo build --workspace
 
         # Point integration tests to instrumented binaries for coverage
-        export HARMONIA_DAEMON_BIN="$PWD/target/debug/harmonia-daemon"
         export HARMONIA_CACHE_BIN="$PWD/target/debug/harmonia-cache"
 
         # Run tests with nextest (they will use the instrumented binaries and write profraw data)

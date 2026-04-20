@@ -1,8 +1,7 @@
-mod daemon;
+mod common;
 
-use daemon::{
-    CanonicalTempDir, Daemon, DaemonConfig, NixDaemon, Result, TestCache, build_hello_derivation,
-    setup_nix_env,
+use common::{
+    CanonicalTempDir, LocalStore, Result, TestCache, build_hello_derivation, setup_nix_env,
 };
 
 #[tokio::test]
@@ -35,16 +34,8 @@ async fn test_build_log_endpoint() -> Result<()> {
     };
     println!("Log found at: {}", actual_log_path.display());
 
-    // Now start a daemon and cache to test the HTTP endpoint
-    let socket_path = root.join("daemon.sock");
-    let daemon = NixDaemon::start(DaemonConfig {
-        socket_path: socket_path.clone(),
-        store_dir: root.join("store"),
-        state_dir: root.join("var/nix"),
-    })
-    .await?;
-
-    let cache = TestCache::builder().daemon(daemon).build().await?;
+    let store = LocalStore::init_at(root.join("store"), root.join("var/nix"))?;
+    let cache = TestCache::builder().store(store).build().await?;
 
     // Fetch the build log via HTTP - use just the hash part (first 32 chars)
     let drv_hash_query = &drv_name[0..32];
