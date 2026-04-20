@@ -1,7 +1,7 @@
 // Rust doesn't see that this is used in test binaries, so we need to allow dead code
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
 use tempfile::NamedTempFile;
@@ -11,158 +11,60 @@ pub use harmonia_utils_test::CanonicalTempDir;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-/// Configuration for a daemon instance
-pub struct DaemonConfig {
-    pub socket_path: PathBuf,
+/// An initialised local Nix store on disk (store dir + state dir with db.sqlite).
+pub struct LocalStore {
     pub store_dir: PathBuf,
     pub state_dir: PathBuf,
 }
 
-/// A running daemon instance
-pub struct DaemonInstance {
-    pub socket_path: PathBuf,
-    pub store_dir: PathBuf,
-    pub state_dir: PathBuf,
-    _guard: Box<dyn Send>,
-}
-
-/// Trait for different daemon implementations
-#[allow(async_fn_in_trait)]
-pub trait Daemon: Send {
-    /// Start the daemon with the given configuration
-    async fn start(config: DaemonConfig) -> Result<DaemonInstance>;
-}
-
-/// Nix daemon implementation
-pub struct NixDaemon;
-
-impl Daemon for NixDaemon {
-    async fn start(config: DaemonConfig) -> Result<DaemonInstance> {
-        // Initialize the store
-        let output = Command::new("nix-store")
-            .args([
-                "--init",
-                "--store",
-                &format!(
-                    "local?store={}&state={}",
-                    config.store_dir.display(),
-                    config.state_dir.display()
-                ),
-            ])
-            .output()?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Failed to init store: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        // Start nix-daemon
-        let mut cmd = Command::new("nix-daemon");
-        cmd.env("NIX_STORE_DIR", &config.store_dir)
-            .env("NIX_STATE_DIR", &config.state_dir)
-            .env("NIX_LOG_DIR", config.state_dir.join("log"))
-            .env("NIX_CONF_DIR", config.state_dir.join("etc"))
-            .env("NIX_DAEMON_SOCKET_PATH", &config.socket_path)
-            .env_remove("NIX_REMOTE")
-            .env("NIX_CONFIG", "trusted-public-keys = cache.example.com-1:it/0WfLNR/PeSfxpCjB/tz8l5CmNr3F8hYBS0WWPVYHA== cache2.example.com-1:d/q03/F+ihXa1IGKwQ6hzUc3YQ3cSEyb5GO1N1NDFQ0=");
-
-        println!(
-            "Starting nix-daemon with socket: {}",
-            config.socket_path.display()
-        );
-        let child = cmd.spawn()?;
-        let guard = Box::new(ProcessGuard::new(child));
-
-        Ok(DaemonInstance {
-            socket_path: config.socket_path,
-            store_dir: config.store_dir,
-            state_dir: config.state_dir,
-            _guard: guard,
+impl LocalStore {
+    /// Initialise an empty store under `root` (`<root>/store`, `<root>/var/nix`).
+    pub fn init(root: &Path) -> Result<Self> {
+        let store_dir = root.join("store");
+        let state_dir = root.join("var/nix");
+        init_local_store(&store_dir, &state_dir)?;
+        Ok(Self {
+            store_dir,
+            state_dir,
         })
+    }
+
+    /// Initialise a store at explicit locations (for chroot-style layouts).
+    pub fn init_at(store_dir: PathBuf, state_dir: PathBuf) -> Result<Self> {
+        init_local_store(&store_dir, &state_dir)?;
+        Ok(Self {
+            store_dir,
+            state_dir,
+        })
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.state_dir.join("db/db.sqlite")
     }
 }
 
-/// Harmonia daemon implementation
-pub struct HarmoniaDaemon;
+/// Create an empty local store + db.sqlite via `nix-store --init`.
+pub fn init_local_store(store_dir: &Path, state_dir: &Path) -> Result<()> {
+    let output = Command::new("nix-store")
+        .args([
+            "--init",
+            "--store",
+            &format!(
+                "local?store={}&state={}",
+                store_dir.display(),
+                state_dir.display()
+            ),
+        ])
+        .output()?;
 
-impl Daemon for HarmoniaDaemon {
-    async fn start(config: DaemonConfig) -> Result<DaemonInstance> {
-        // Initialize the store
-        let output = Command::new("nix-store")
-            .args([
-                "--init",
-                "--store",
-                &format!(
-                    "local?store={}&state={}",
-                    config.store_dir.display(),
-                    config.state_dir.display()
-                ),
-            ])
-            .output()?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Failed to init store: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        // Create harmonia-daemon config
-        let daemon_config = format!(
-            r#"
-socket_path = "{}"
-store_dir = "{}"
-db_path = "{}"
-log_level = "debug"
-"#,
-            config.socket_path.display(),
-            config.store_dir.display(),
-            config.state_dir.join("db/db.sqlite").display(),
-        );
-
-        let config_file = write_toml_config(&daemon_config)?;
-        let config_path = config_file.path().to_path_buf();
-
-        // Start harmonia-daemon
-        // Use HARMONIA_DAEMON_BIN env var if set (for coverage), otherwise cargo run
-        let child = if let Ok(bin_path) = std::env::var("HARMONIA_DAEMON_BIN") {
-            Command::new(bin_path)
-                .env("HARMONIA_DAEMON_CONFIG", &config_path)
-                .spawn()?
-        } else {
-            // Fall back to cargo run for normal development
-            Command::new("cargo")
-                .args(["run", "-p", "harmonia-daemon", "--"])
-                .env("HARMONIA_DAEMON_CONFIG", &config_path)
-                .spawn()?
-        };
-
-        let pid = child.id();
-        println!(
-            "Starting harmonia-daemon with socket: {} (PID: {pid})",
-            config.socket_path.display()
-        );
-
-        // Create a guard that owns the config file
-        let guard = Box::new(ProcessAndFileGuard {
-            _process: ProcessGuard::new(child),
-            _config_file: config_file,
-        });
-
-        // Wait for socket to be created
-        wait_for_socket(&config.socket_path, pid, Duration::from_secs(120)).await?;
-
-        Ok(DaemonInstance {
-            socket_path: config.socket_path,
-            store_dir: config.store_dir,
-            state_dir: config.state_dir,
-            _guard: guard,
-        })
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to init store: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
     }
+    Ok(())
 }
 
 /// Pick an unused port on localhost
@@ -268,61 +170,6 @@ async fn wait_for_service(
     })?
 }
 
-async fn wait_for_socket(
-    socket_path: &std::path::Path,
-    pid: u32,
-    timeout_duration: Duration,
-) -> Result<()> {
-    println!(
-        "Waiting for socket (PID {pid}) at {}",
-        socket_path.display()
-    );
-    let start = std::time::Instant::now();
-
-    timeout(timeout_duration, async {
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
-
-            // First check if the process is still running
-            use nix::sys::signal::{Signal, kill};
-            use nix::unistd::Pid;
-
-            if kill(Pid::from_raw(pid as i32), Signal::SIGCONT).is_err() {
-                return Err(
-                    format!("Process {pid} died while waiting for socket to be created").into(),
-                );
-            }
-
-            if socket_path.exists() {
-                println!(
-                    "Socket is ready at {} after {} attempts ({:.2}s)",
-                    socket_path.display(),
-                    attempt,
-                    start.elapsed().as_secs_f32()
-                );
-                return Ok(());
-            }
-
-            if attempt % 10 == 0 {
-                println!(
-                    "Still waiting for socket {} (attempt {attempt})",
-                    socket_path.display()
-                );
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .map_err(|_| -> Box<dyn std::error::Error> {
-        format!(
-            "Timeout waiting for socket (PID {pid}) at {} after {timeout_duration:?}",
-            socket_path.display()
-        )
-        .into()
-    })?
-}
-
 fn write_toml_config(content: &str) -> Result<NamedTempFile> {
     use std::io::Write;
     let mut file = NamedTempFile::new()?;
@@ -388,7 +235,7 @@ pub struct TestCacheBuilder {
     signing_keys: Vec<String>,
     tls_cert: Option<String>,
     tls_key: Option<String>,
-    daemon: Option<DaemonInstance>,
+    store: Option<LocalStore>,
 }
 
 impl TestCacheBuilder {
@@ -412,8 +259,8 @@ impl TestCacheBuilder {
         self
     }
 
-    pub fn daemon(mut self, daemon: DaemonInstance) -> Self {
-        self.daemon = Some(daemon);
+    pub fn store(mut self, store: LocalStore) -> Self {
+        self.store = Some(store);
         self
     }
 
@@ -421,11 +268,12 @@ impl TestCacheBuilder {
         let temp_dir = CanonicalTempDir::new()?;
         let port = pick_unused_port().ok_or("No available ports")?;
 
-        let (store_dir, daemon_socket) = if let Some(ref daemon) = self.daemon {
-            (daemon.store_dir.clone(), Some(daemon.socket_path.clone()))
-        } else {
-            (temp_dir.path().join("store"), None)
+        let store = match self.store {
+            Some(s) => s,
+            None => LocalStore::init(temp_dir.path())?,
         };
+        let store_dir = store.store_dir.clone();
+        let db_path = store.db_path();
 
         // Write signing keys to temp files
         let mut key_files = Vec::new();
@@ -457,9 +305,7 @@ impl TestCacheBuilder {
             store = store_dir.display(),
         );
 
-        if let Some(socket) = &daemon_socket {
-            config.push_str(&format!("daemon_socket = \"{}\"\n", socket.display()));
-        }
+        config.push_str(&format!("nix_db_path = \"{}\"\n", db_path.display()));
 
         if let Some(p) = self.priority {
             config.push_str(&format!("priority = {p}\n"));
@@ -490,7 +336,7 @@ impl TestCacheBuilder {
             _temp_dir: temp_dir,
             _guard: guard,
             _key_files: key_files,
-            _daemon: self.daemon,
+            _store: store,
         })
     }
 }
@@ -503,7 +349,7 @@ pub struct TestCache {
     _temp_dir: CanonicalTempDir,
     _guard: Box<dyn Send>,
     _key_files: Vec<NamedTempFile>,
-    _daemon: Option<DaemonInstance>,
+    _store: LocalStore,
 }
 
 impl TestCache {
@@ -511,7 +357,7 @@ impl TestCache {
         TestCacheBuilder::new()
     }
 
-    /// Start a minimal cache (no daemon, no keys)
+    /// Start a minimal cache (empty store, no keys).
     pub async fn start() -> Result<Self> {
         Self::builder().build().await
     }

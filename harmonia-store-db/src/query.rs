@@ -85,6 +85,47 @@ impl StoreDb {
         }
     }
 
+    /// Look up full path info by the store path's 32-char hash part.
+    pub fn query_path_info_by_hash_part(
+        &self,
+        store_dir: &str,
+        hash_part: &str,
+    ) -> Result<Option<ValidPathInfo>> {
+        let prefix = format!("{store_dir}/{hash_part}");
+
+        let mut stmt = self.conn.prepare_cached(
+            r#"
+            SELECT id, path, hash, registrationTime, deriver, narSize, ultimate, sigs, ca
+            FROM ValidPaths
+            WHERE path >= ?1 LIMIT 1
+            "#,
+        )?;
+
+        let info = stmt.query_row(params![&prefix], |row| {
+            Ok(ValidPathInfo {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                hash: row.get(2)?,
+                registration_time: unix_to_system_time(row.get(3)?),
+                deriver: row.get(4)?,
+                nar_size: row.get::<_, Option<i64>>(5)?.map(|n| n as u64),
+                ultimate: row.get::<_, Option<i32>>(6)?.unwrap_or(0) != 0,
+                sigs: row.get(7)?,
+                ca: row.get(8)?,
+                references: BTreeSet::new(),
+            })
+        });
+
+        match info {
+            Ok(mut info) if info.path.starts_with(&prefix) => {
+                info.references = self.query_references_by_id(info.id)?;
+                Ok(Some(info))
+            }
+            Ok(_) | Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Look up a store path by its hash part (the 32-character prefix).
     ///
     /// The `store_dir` should be the store directory (e.g., "/nix/store").

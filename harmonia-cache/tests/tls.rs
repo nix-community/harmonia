@@ -1,23 +1,13 @@
-mod daemon;
+mod common;
 
-use daemon::{CanonicalTempDir, Daemon, DaemonConfig, HarmoniaDaemon, Result, TestCache};
+use common::{Result, TestCache};
 
 const TLS_CERT: &str = include_str!("../../tests/tls-cert.pem");
 const TLS_KEY: &str = include_str!("../../tests/tls-key.pem");
 
 #[tokio::test]
 async fn test_tls() -> Result<()> {
-    let temp_dir = CanonicalTempDir::new()?;
-
-    let daemon = HarmoniaDaemon::start(DaemonConfig {
-        socket_path: temp_dir.path().join("harmonia-daemon.sock"),
-        store_dir: temp_dir.path().join("store"),
-        state_dir: temp_dir.path().join("var"),
-    })
-    .await?;
-
     let cache = TestCache::builder()
-        .daemon(daemon)
         .priority(30)
         .tls(TLS_CERT, TLS_KEY)
         .build()

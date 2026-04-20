@@ -941,7 +941,7 @@ dependencies = [
  "futures-util",
  "harmonia-nar",
  "harmonia-store-core",
- "harmonia-store-remote",
+ "harmonia-store-db",
  "harmonia-utils-hash",
  "harmonia-utils-test",
  "http-range",

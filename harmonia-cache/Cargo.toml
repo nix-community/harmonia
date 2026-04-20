@@ -41,13 +41,13 @@ zstd = "0.13"
 zstd-safe = "7"
 # Nix.rs-based crates
 bytes                 = { workspace = true }
-futures-core          = { workspace = true }
-futures-util          = { workspace = true }
-harmonia-nar          = { version = "3.0.0" }
-harmonia-store-core   = { version = "0.0.0-alpha.0" }
-harmonia-store-remote = { version = "3.0.0" }
-harmonia-utils-hash   = { version = "0.0.0-alpha.0" }
-prometheus            = { workspace = true }
+futures-core        = { workspace = true }
+futures-util        = { workspace = true }
+harmonia-nar        = { version = "3.0.0" }
+harmonia-store-core = { version = "0.0.0-alpha.0" }
+harmonia-store-db   = { version = "3.0.0" }
+harmonia-utils-hash = { version = "0.0.0-alpha.0" }
+prometheus          = { workspace = true }
 
 [dev-dependencies]
 harmonia-utils-test = { version = "0.0.0-alpha.0" }

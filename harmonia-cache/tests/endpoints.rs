@@ -1,6 +1,6 @@
-mod daemon;
+mod common;
 
-use daemon::{Result, TestCache};
+use common::{Result, TestCache};
 
 #[tokio::test]
 async fn test_health_endpoint() -> Result<()> {

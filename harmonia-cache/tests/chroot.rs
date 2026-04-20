@@ -1,11 +1,9 @@
 use std::fs;
 use std::process::Command;
 
-mod daemon;
+mod common;
 
-use daemon::{
-    CanonicalTempDir, Daemon, DaemonConfig, NixDaemon, pick_unused_port, start_harmonia_cache,
-};
+use common::{CanonicalTempDir, LocalStore, pick_unused_port, start_harmonia_cache};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -83,19 +81,7 @@ async fn test_chroot() -> Result<()> {
     let dir_path = String::from_utf8(dir_output.stdout)?.trim().to_string();
     println!("Added directory to store: {dir_path}");
 
-    // Start the Nix daemon with the guest store
-    let daemon_config = DaemonConfig {
-        socket_path: temp_dir.path().join("nix-daemon.sock"),
-        store_dir: guest_store.clone(),
-        state_dir: guest_state.clone(),
-    };
-
-    let daemon = NixDaemon::start(daemon_config).await?;
-
-    println!(
-        "Starting chroot test with daemon at {}...",
-        daemon.socket_path.display()
-    );
+    let store = LocalStore::init_at(guest_store.clone(), guest_state.clone())?;
 
     // To test the chroot mapping logic, we use a different path for the real store.
     // In this test, we'll make real_nix_store a symlink to the actual guest_store.
@@ -116,18 +102,18 @@ async fn test_chroot() -> Result<()> {
     let port = pick_unused_port().ok_or("No available ports")?;
 
     // Start harmonia-cache with chroot configuration.
-    // virtual_nix_store must match what the daemon uses for protocol communication.
+    // virtual_nix_store is the prefix paths are stored under in the database.
     // real_nix_store is where Harmonia looks for files on the filesystem.
     let cache_config = format!(
         r#"
 bind = "127.0.0.1:{}"
-daemon_socket = "{}"
+nix_db_path = "{}"
 priority = 30
 virtual_nix_store = "{}"
 real_nix_store = "{}"
 "#,
         port,
-        daemon.socket_path.display(),
+        store.db_path().display(),
         guest_store.display(),
         real_store.display(),
     );

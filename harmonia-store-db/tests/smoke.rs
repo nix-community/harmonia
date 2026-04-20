@@ -48,6 +48,45 @@ fn test_path_roundtrip() {
     assert!(info.is_signed());
 }
 
+/// `query_path_info_by_hash_part` must not return the lexicographic neighbour
+/// when the requested hash is absent, and must include references on a hit.
+#[test]
+fn test_query_path_info_by_hash_part() {
+    let mut db = StoreDb::open_memory().unwrap();
+
+    let dep = RegisterPathParams {
+        path: make_path("cccccccccccccccccccccccccccccccc", "dep"),
+        hash: "sha256:".to_string() + &"c".repeat(64),
+        nar_size: Some(1),
+        ..Default::default()
+    };
+    db.register_valid_path(&dep).unwrap();
+
+    let pkg = RegisterPathParams {
+        path: make_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "hello"),
+        hash: "sha256:".to_string() + &"b".repeat(64),
+        nar_size: Some(42),
+        references: BTreeSet::from([dep.path.clone()]),
+        ..Default::default()
+    };
+    db.register_valid_path(&pkg).unwrap();
+
+    // Hit: exact hash part returns the row plus its references.
+    let info = db
+        .query_path_info_by_hash_part("/nix/store", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        .unwrap()
+        .unwrap();
+    assert_eq!(info.path, pkg.path);
+    assert_eq!(info.nar_size, Some(42));
+    assert!(info.references.contains(&dep.path));
+
+    // Miss: a hash part that sorts before an existing entry must not leak it.
+    let miss = db
+        .query_path_info_by_hash_part("/nix/store", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        .unwrap();
+    assert!(miss.is_none());
+}
+
 /// Verify reference graph operations.
 #[test]
 fn test_reference_graph() {

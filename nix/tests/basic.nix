@@ -14,7 +14,7 @@ let
   hashPart = pkg: builtins.substring (builtins.stringLength builtins.storeDir + 1) 32 pkg.outPath;
 in
 pkgs.testers.nixosTest {
-  name = "nix-daemon";
+  name = "basic";
 
   nodes = {
     harmonia =

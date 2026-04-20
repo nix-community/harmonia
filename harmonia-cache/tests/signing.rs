@@ -3,12 +3,9 @@ use std::io::Write;
 use std::process::Command;
 use tempfile::NamedTempFile;
 
-mod daemon;
+mod common;
 
-use daemon::{
-    CanonicalTempDir, Daemon, DaemonConfig, DaemonInstance, HarmoniaDaemon, NixDaemon,
-    pick_unused_port, start_harmonia_cache,
-};
+use common::{CanonicalTempDir, LocalStore, pick_unused_port, start_harmonia_cache};
 
 // Compile in the test keys from the repo
 const SIGNING_KEY_1: &str = include_str!("../../tests/cache.sk");
@@ -26,18 +23,11 @@ fn write_temp_file(content: &str) -> Result<NamedTempFile> {
     Ok(file)
 }
 
-// Helper function to test signing with a specific daemon
-async fn test_signing_with_daemon(daemon: &DaemonInstance) -> Result<()> {
-    println!(
-        "Starting signing test with daemon at {}...",
-        daemon.socket_path.display()
-    );
-
-    // Create temporary directory for harmonia's working files
+#[tokio::test]
+async fn test_signing() -> Result<()> {
     let temp_dir = CanonicalTempDir::new()?;
-
-    // Create log directory
-    fs::create_dir_all(daemon.state_dir.join("log"))?;
+    let store = LocalStore::init(temp_dir.path())?;
+    fs::create_dir_all(store.state_dir.join("log"))?;
 
     // Write signing keys to temp files
     let key_file1 = write_temp_file(SIGNING_KEY_1.trim())?;
@@ -46,22 +36,21 @@ async fn test_signing_with_daemon(daemon: &DaemonInstance) -> Result<()> {
     // Find an available port
     let port = pick_unused_port().ok_or("No available ports")?;
 
-    // Start harmonia-cache with the daemon socket
     let cache_config = format!(
         r#"
 bind = "127.0.0.1:{}"
-daemon_socket = "{}"
+nix_db_path = "{}"
 sign_key_paths = ["{}", "{}"]
 priority = 30
 virtual_nix_store = "{}"
 real_nix_store = "{}"
 "#,
         port,
-        daemon.socket_path.display(),
+        store.db_path().display(),
         key_file1.path().display(),
         key_file2.path().display(),
-        daemon.store_dir.display(),
-        daemon.store_dir.display(),
+        store.store_dir.display(),
+        store.store_dir.display(),
     );
 
     let _cache_guard = start_harmonia_cache(&cache_config, port).await?;
@@ -95,8 +84,8 @@ real_nix_store = "{}"
             "--store",
             &format!(
                 "local?store={}&state={}",
-                daemon.store_dir.display(),
-                daemon.state_dir.display()
+                store.store_dir.display(),
+                store.state_dir.display()
             ),
             "--extra-experimental-features",
             "nix-command",
@@ -114,8 +103,8 @@ real_nix_store = "{}"
             expr_file.path().to_str().unwrap(),
         ])
         .env_remove("NIX_REMOTE") // Disable remote store
-        .env("NIX_LOG_DIR", daemon.state_dir.join("log"))
-        .env("NIX_STATE_DIR", &daemon.state_dir)
+        .env("NIX_LOG_DIR", store.state_dir.join("log"))
+        .env("NIX_STATE_DIR", &store.state_dir)
         .output()?;
 
     if !output.status.success() {
@@ -156,7 +145,7 @@ real_nix_store = "{}"
             "nix-command flakes",
             &hello_path,
         ])
-        .env("NIX_STORE_DIR", &daemon.store_dir)
+        .env("NIX_STORE_DIR", &store.store_dir)
         .env("NIX_CACHE_HOME", temp_dir.path().join("cache1"))
         .env("NIX_CONFIG", "")
         .env("NIX_CONF_DIR", &empty_conf_dir)
@@ -184,7 +173,7 @@ real_nix_store = "{}"
             "nix-command flakes",
             &hello_path,
         ])
-        .env("NIX_STORE_DIR", &daemon.store_dir)
+        .env("NIX_STORE_DIR", &store.store_dir)
         .env("NIX_CACHE_HOME", temp_dir.path().join("cache2"))
         .env("NIX_CONFIG", "")
         .env("NIX_CONF_DIR", &empty_conf_dir)
@@ -196,43 +185,4 @@ real_nix_store = "{}"
     assert!(output2.success(), "Second copy failed");
 
     Ok(())
-}
-
-#[tokio::test]
-async fn test_signing_with_nix_daemon() -> Result<()> {
-    // Skip if we don't have nix-daemon available
-    if Command::new("nix-daemon")
-        .arg("--version")
-        .output()
-        .map(|o| !o.status.success())
-        .unwrap_or(true)
-    {
-        println!("Skipping nix-daemon test: nix-daemon not found in PATH");
-        return Ok(());
-    }
-
-    let temp_dir = CanonicalTempDir::new()?;
-
-    let daemon_config = DaemonConfig {
-        socket_path: temp_dir.path().join("nix-daemon.sock"),
-        store_dir: temp_dir.path().join("store"),
-        state_dir: temp_dir.path().join("var"),
-    };
-
-    let daemon = NixDaemon::start(daemon_config).await?;
-    test_signing_with_daemon(&daemon).await
-}
-
-#[tokio::test]
-async fn test_signing_with_harmonia_daemon() -> Result<()> {
-    let temp_dir = CanonicalTempDir::new()?;
-
-    let daemon_config = DaemonConfig {
-        socket_path: temp_dir.path().join("harmonia-daemon.sock"),
-        store_dir: temp_dir.path().join("store"),
-        state_dir: temp_dir.path().join("var"),
-    };
-
-    let daemon = HarmoniaDaemon::start(daemon_config).await?;
-    test_signing_with_daemon(&daemon).await
 }
