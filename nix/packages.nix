@@ -13,7 +13,13 @@
   nix-src,
 }:
 let
-  craneLib = crane.mkLib pkgs;
+  craneLib = (crane.mkLib pkgs).overrideScope (
+    _: _prev: {
+      # Use mold linker for faster builds on ELF platforms
+      stdenvSelector =
+        p: if p.stdenv.hostPlatform.isElf then p.stdenvAdapters.useMoldLinker p.stdenv else p.stdenv;
+    }
+  );
 
   # Extract version from Cargo.toml
   cargoToml = lib.importTOML ../Cargo.toml;
@@ -44,10 +50,6 @@ let
     inherit src version;
     pname = "harmonia";
     strictDeps = true;
-
-    # Use mold linker for faster builds on ELF platforms
-    stdenv =
-      p: if p.stdenv.hostPlatform.isElf then p.stdenvAdapters.useMoldLinker p.stdenv else p.stdenv;
   };
 
   # Build *just* the cargo dependencies
