@@ -1,6 +1,6 @@
 mod common;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -297,6 +297,33 @@ fn benchmark_http_download(c: &mut Criterion) {
             );
         }
     });
+
+    // narinfo latency: sequential GET of every <hash>.narinfo over a single
+    // keep-alive connection. The pre-fetch loop above doubles as warm-up.
+    {
+        let hashes: Vec<String> = paths.iter().map(|p| store_path_hash(p)).collect();
+        let mut group = c.benchmark_group("narinfo");
+        group.sample_size(10);
+        group.throughput(Throughput::Elements(hashes.len() as u64));
+        group.bench_function("all", |b| {
+            let mut conn = rt.block_on(Conn::connect(&addr));
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let start = Instant::now();
+                    rt.block_on(async {
+                        for hash in &hashes {
+                            let (status, _) = conn.get_body(&format!("/{hash}.narinfo")).await;
+                            assert_eq!(status, 200);
+                        }
+                    });
+                    total += start.elapsed();
+                }
+                total
+            })
+        });
+        group.finish();
+    }
 
     let mut group = c.benchmark_group("http");
     group.sample_size(10);

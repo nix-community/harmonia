@@ -40,7 +40,7 @@ url = "2.5.7"
 zstd = "0.13"
 zstd-safe = "7"
 # Nix.rs-based crates
-bytes                 = { workspace = true }
+bytes               = { workspace = true }
 futures-core        = { workspace = true }
 futures-util        = { workspace = true }
 harmonia-nar        = { version = "3.0.0" }
