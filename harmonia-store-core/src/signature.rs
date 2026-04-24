@@ -11,15 +11,13 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use tracing::error;
 
 use crate::store_path::{StoreDir, StorePath};
 use harmonia_utils_base_encoding::base64_len;
+use thiserror::Error;
 
 pub const SIGNATURE_BYTES: usize = 64;
 const SIGNATURE_BASE64_LEN: usize = base64_len(SIGNATURE_BYTES);
-const SIGNATURE_BASE64_DECODED_LEN: usize = 66;
 pub const SEED_BYTES: usize = 32;
 pub const PUBLIC_KEY_BYTES: usize = 32;
 const PUBLIC_KEY_BASE64_LEN: usize = base64_len(PUBLIC_KEY_BYTES);
@@ -38,53 +36,80 @@ pub enum ParseSignatureError {
 
 pub type SignatureSet = BTreeSet<Signature>;
 
+/// Raw Ed25519 signature bytes with base64 Display/FromStr/serde.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Signature(Arc<String>, [u8; SIGNATURE_BYTES]);
+pub struct RawSignature(pub [u8; SIGNATURE_BYTES]);
 
-impl Signature {
-    pub fn name(&self) -> &str {
-        &self.0
-    }
-
-    pub fn signature_bytes(&self) -> &[u8] {
-        &self.1[..]
-    }
-
-    pub fn signature(&self) -> impl fmt::Display + '_ {
-        Base64Display::<SIGNATURE_BASE64_LEN>(self.signature_bytes())
-    }
-
-    pub fn from_parts(name: &str, signature: &[u8]) -> Result<Signature, ParseSignatureError> {
-        if signature.len() != SIGNATURE_BYTES {
-            error!(
-                "Signature wrong length {}!={}",
-                signature.len(),
-                SIGNATURE_BYTES
-            );
-            return Err(ParseSignatureError::InvalidSignature);
-        }
-        let mut data = [0u8; SIGNATURE_BYTES];
-        data.copy_from_slice(signature);
-
-        Ok(Self(Arc::new(name.to_string()), data))
+impl fmt::Display for RawSignature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut buf = [0u8; SIGNATURE_BASE64_LEN];
+        BASE64.encode_mut(&self.0, &mut buf);
+        // SAFETY: Base64 is a subset of ASCII, which guarantees valid UTF-8.
+        let s = unsafe { std::str::from_utf8_unchecked(&buf) };
+        f.write_str(s)
     }
 }
 
-struct Base64Display<'d, const N: usize>(&'d [u8]);
-impl<const N: usize> fmt::Display for Base64Display<'_, N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut buf = [0u8; N];
-        BASE64.encode_mut(self.0, &mut buf);
+impl FromStr for RawSignature {
+    type Err = ParseSignatureError;
 
-        // SAFETY: Base64 is a subset of ASCII, which guarantees valid UTF-8.
-        let s = unsafe { std::str::from_utf8_unchecked(&buf) };
-        write!(f, "{s}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = BASE64
+            .decode(s.as_bytes())
+            .map_err(|_| ParseSignatureError::InvalidSignature)?;
+        let buf: [u8; SIGNATURE_BYTES] = bytes
+            .try_into()
+            .map_err(|_| ParseSignatureError::InvalidSignature)?;
+        Ok(RawSignature(buf))
+    }
+}
+
+impl Serialize for RawSignature {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for RawSignature {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Signature {
+    pub key_name: String,
+    pub sig: RawSignature,
+}
+
+impl Signature {
+    pub fn name(&self) -> &str {
+        &self.key_name
+    }
+
+    pub fn signature(&self) -> &RawSignature {
+        &self.sig
+    }
+
+    pub fn signature_bytes(&self) -> &[u8] {
+        &self.sig.0
+    }
+
+    pub fn from_parts(name: &str, bytes: &[u8]) -> Result<Self, ParseSignatureError> {
+        let buf: [u8; SIGNATURE_BYTES] = bytes
+            .try_into()
+            .map_err(|_| ParseSignatureError::InvalidSignature)?;
+        Ok(Signature {
+            key_name: name.to_string(),
+            sig: RawSignature(buf),
+        })
     }
 }
 
 impl fmt::Display for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.name(), self.signature())
+        write!(f, "{}:{}", self.key_name, self.sig)
     }
 }
 
@@ -146,27 +171,13 @@ impl FromStr for Signature {
     type Err = ParseSignatureError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut sp = s.splitn(2, ':');
-        let name = Arc::new(
-            sp.next()
-                .ok_or(ParseSignatureError::CorruptSignature)?
-                .to_string(),
-        );
-        let sig_s = sp.next().ok_or(ParseSignatureError::CorruptSignature)?;
-        if sig_s.len() != SIGNATURE_BASE64_LEN {
-            return Err(ParseSignatureError::InvalidSignature);
-        }
-        let mut sig_b = [0u8; SIGNATURE_BASE64_DECODED_LEN];
-        let len = BASE64
-            .decode_mut(sig_s.as_bytes(), &mut sig_b)
-            .map_err(|_| ParseSignatureError::InvalidSignature)?;
-        if len != SIGNATURE_BYTES {
-            error!("Signature wrong length {}!={}", len, SIGNATURE_BYTES);
-            return Err(ParseSignatureError::InvalidSignature);
-        }
-        let mut sig_buf = [0u8; SIGNATURE_BYTES];
-        sig_buf.copy_from_slice(&sig_b[..SIGNATURE_BYTES]);
-        Ok(Signature(name, sig_buf))
+        let (name, sig_s) = s
+            .split_once(':')
+            .ok_or(ParseSignatureError::CorruptSignature)?;
+        Ok(Signature {
+            key_name: name.to_string(),
+            sig: sig_s.parse()?,
+        })
     }
 }
 
@@ -190,7 +201,7 @@ pub struct PublicKey {
 impl PublicKey {
     pub fn verify<M: AsRef<[u8]>>(&self, data: M, signature: &Signature) -> bool {
         let message = data.as_ref();
-        let sig = ed25519_dalek::Signature::from_bytes(&signature.1);
+        let sig = ed25519_dalek::Signature::from_bytes(&signature.sig.0);
         self.key.verify(message, &sig).is_ok()
     }
 
@@ -198,8 +209,8 @@ impl PublicKey {
         &self.name
     }
 
-    pub fn key(&self) -> impl fmt::Display + '_ {
-        Base64Display::<PUBLIC_KEY_BASE64_LEN>(&self.key_data)
+    pub fn key(&self) -> String {
+        BASE64.encode(&self.key_data)
     }
 }
 
@@ -286,14 +297,17 @@ impl SecretKey {
         &self.name
     }
 
-    pub fn key(&self) -> impl fmt::Display + '_ {
-        Base64Display::<SECRET_KEY_BASE64_LEN>(&self.key_data)
+    pub fn key(&self) -> String {
+        BASE64.encode(&self.key_data)
     }
 
     pub fn sign<M: AsRef<[u8]>>(&self, data: M) -> Signature {
         let msg = data.as_ref();
         let sig = self.key.sign(msg);
-        Signature(self.name.clone(), sig.to_bytes())
+        Signature {
+            key_name: self.name.to_string(),
+            sig: RawSignature(sig.to_bytes()),
+        }
     }
 
     pub fn to_public_key(&self) -> PublicKey {
@@ -474,8 +488,10 @@ pub mod proptests {
     }
 
     pub fn arb_signature(max: u8) -> impl Strategy<Value = Signature> {
-        (arb_key_name(max), any::<[u8; SIGNATURE_BYTES]>())
-            .prop_map(|(name, signature)| Signature(Arc::new(name), signature))
+        (arb_key_name(max), any::<[u8; SIGNATURE_BYTES]>()).prop_map(|(name, sig)| Signature {
+            key_name: name,
+            sig: RawSignature(sig),
+        })
     }
 
     pub fn arb_signatures() -> impl Strategy<Value = BTreeSet<Signature>> {

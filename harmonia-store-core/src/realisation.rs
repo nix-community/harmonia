@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
+use std::fmt;
 use std::str::FromStr;
 
-use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -15,12 +15,17 @@ use crate::store_path::{ParseStorePathError, StorePath, StorePathNameError};
 /// `<drv-basename>` is the store-path base name (without store dir).
 ///
 /// JSON form: `{"drvPath": "<basename>", "outputName": "<name>"}`.
-#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Display, Serialize, Deserialize)]
-#[display("{drv_path}^{output_name}")]
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DrvOutput {
     pub drv_path: StorePath,
     pub output_name: OutputName,
+}
+
+impl fmt::Display for DrvOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}^{}", self.drv_path, self.output_name)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Error)]
@@ -60,8 +65,12 @@ impl FromStr for DrvOutput {
 
 /// A realisation without its `DrvOutput` key.
 ///
-/// This is what binary caches store at
-/// `build-trace-v2/<drv-basename>/<output-name>.doi`.
+/// Used in contexts where the key (drv_path + output_name) is provided
+/// externally, such as `BuildResult.built_outputs`.
+///
+/// Likewise, this is what binary caches store at
+/// `build-trace-v2/<drv-basename>/<output-name>.doi`, since the key is
+/// gotten from the path.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnkeyedRealisation {
@@ -75,37 +84,40 @@ pub struct UnkeyedRealisation {
 /// JSON form: `{"key": <DrvOutput>, "value": <UnkeyedRealisation>}`.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Deserialize, Serialize)]
 pub struct Realisation {
-    #[serde(rename = "key")]
-    pub id: DrvOutput,
-    #[serde(rename = "value")]
+    pub key: DrvOutput,
     pub value: UnkeyedRealisation,
 }
 
-impl Realisation {
-    /// Compute the fingerprint used for signing realisations.
+impl UnkeyedRealisation {
+    /// Compute the fingerprint used for signing.
     ///
-    /// Matches `UnkeyedRealisation::fingerprint` in upstream Nix: the full
-    /// `{key,value}` JSON with `value.signatures` removed, serialized with
-    /// sorted keys.
+    /// Constructs a full `Realisation` JSON (with the given key), then strips
+    /// the `signatures` field from the `value` object — matching upstream Nix.
     #[must_use]
-    pub fn fingerprint(&self) -> String {
-        let mut json = serde_json::to_value(self).expect("Realisation serialization cannot fail");
-        json.as_object_mut()
-            .expect("Realisation must serialize as object")
-            .get_mut("value")
-            .expect("Realisation must have 'value'")
-            .as_object_mut()
-            .expect("'value' must be an object")
+    pub fn fingerprint(&self, key: &DrvOutput) -> String {
+        let r = Realisation {
+            key: key.clone(),
+            value: self.clone(),
+        };
+        let mut json = serde_json::to_value(&r).expect("Realisation serialization cannot fail");
+        json.get_mut("value")
+            .and_then(|v| v.as_object_mut())
+            .expect("Realisation must have value object")
             .remove("signatures");
         json.to_string()
     }
 
+    /// Sign this realisation, returning the signature without modifying `self`.
+    #[must_use]
+    pub fn sign(&self, key: &DrvOutput, signer: &crate::signature::SecretKey) -> Signature {
+        signer.sign(self.fingerprint(key).as_bytes())
+    }
+
     /// Sign this realisation with the given secret keys, adding the resulting
-    /// signatures to `value.signatures`.
-    pub fn sign(&mut self, keys: &[crate::signature::SecretKey]) {
-        let fp = self.fingerprint();
-        for key in keys {
-            self.value.signatures.insert(key.sign(fp.as_bytes()));
+    /// signatures to the `signatures` set.
+    pub fn sign_mut(&mut self, key: &DrvOutput, keys: &[crate::signature::SecretKey]) {
+        for k in keys {
+            self.signatures.insert(self.sign(key, k));
         }
     }
 }
@@ -169,11 +181,11 @@ pub mod arbitrary {
     prop_compose! {
         fn arb_realisation()
         (
-            id in any::<DrvOutput>(),
+            key in any::<DrvOutput>(),
             value in any::<UnkeyedRealisation>(),
         ) -> Realisation
         {
-            Realisation { id, value }
+            Realisation { key, value }
         }
     }
 }
@@ -219,10 +231,95 @@ mod unittests {
         panic!("{actual}");
     }
 
+    macro_rules! set {
+        () => { std::collections::BTreeSet::new() };
+        ($($x:expr),+ $(,)?) => {{
+            let mut ret = std::collections::BTreeSet::new();
+            $(
+                ret.insert($x.parse().unwrap());
+            )+
+            ret
+        }};
+    }
+
+    #[rstest]
+    #[case(DrvOutput {
+        drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+        output_name: OutputName::default(),
+    }, "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv^out")]
+    fn display_drv_output(#[case] value: DrvOutput, #[case] expected: &str) {
+        assert_eq!(value.to_string(), expected);
+    }
+
+    #[rstest]
+    #[case(
+        Realisation {
+            key: DrvOutput {
+                drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+                output_name: OutputName::default(),
+            },
+            value: UnkeyedRealisation {
+                out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
+                signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
+            },
+        },
+    )]
+    fn parse_realisation(#[case] expected: Realisation) {
+        // Round-trip: serialize then deserialize & verify equality
+        let json = serde_json::to_string(&expected).unwrap();
+        let parsed: Realisation = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, expected);
+    }
+
+    #[rstest]
+    #[case(
+        Realisation {
+            key: DrvOutput {
+                drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+                output_name: OutputName::default(),
+            },
+            value: UnkeyedRealisation {
+                out_path: "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3".parse().unwrap(),
+                signatures: set!["cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA=="],
+            },
+        },
+    )]
+    fn write_realisation(#[case] value: Realisation) {
+        // Round-trip: serialize then deserialize & verify equality
+        let json = serde_json::to_string(&value).unwrap();
+        let parsed: Realisation = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, value);
+    }
+
+    #[test]
+    fn fingerprint_strips_signatures() {
+        let r = Realisation {
+            key: DrvOutput {
+                drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
+                output_name: "baz".parse().unwrap(),
+            },
+            value: UnkeyedRealisation {
+                out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
+                signatures: set![
+                    "asdf:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+                    "qwer:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+                ],
+            },
+        };
+
+        let fp = r.value.fingerprint(&r.key);
+        let parsed: serde_json::Value = serde_json::from_str(&fp).unwrap();
+        let value = parsed.get("value").expect("fingerprint must have value");
+        assert!(
+            value.get("signatures").is_none(),
+            "signatures must be stripped from value"
+        );
+    }
+
     #[test]
     fn sign_produces_verifiable_signature() {
         let mut r = Realisation {
-            id: DrvOutput {
+            key: DrvOutput {
                 drv_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv".parse().unwrap(),
                 output_name: "foo".parse().unwrap(),
             },
@@ -233,9 +330,11 @@ mod unittests {
         };
         let sk = crate::signature::SecretKey::generate("test-key".to_string()).unwrap();
         let pk = sk.to_public_key();
-        r.sign(&[sk]);
+        let key = r.key.clone();
+        r.value.sign_mut(&key, &[sk]);
+        assert_eq!(r.value.signatures.len(), 1);
         let sig = r.value.signatures.iter().next().unwrap();
         assert_eq!(sig.name(), "test-key");
-        assert!(pk.verify(r.fingerprint(), sig));
+        assert!(pk.verify(r.value.fingerprint(&r.key), sig));
     }
 }
