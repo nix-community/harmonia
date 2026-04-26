@@ -217,6 +217,9 @@ async fn inner_main() -> Result<()> {
     .tcp_nodelay(true)
     .workers(c.workers)
     .max_connection_rate(c.max_connection_rate);
+    if c.max_connections > 0 {
+        server = server.max_connections(c.max_connections);
+    }
 
     let try_url = Url::parse(&c.bind);
     let (bind, uds) = if let Ok(url) = try_url.as_ref() {

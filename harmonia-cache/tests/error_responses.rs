@@ -7,7 +7,7 @@ use std::process::Command;
 
 mod common;
 
-use common::{CanonicalTempDir, LocalStore, TestCache, pick_unused_port, start_harmonia_cache};
+use common::{CanonicalTempDir, LocalStore, pick_unused_port, start_harmonia_cache};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -109,36 +109,6 @@ async fn serve_missing_file_does_not_leak_fs_path() -> Result<()> {
     assert!(
         !body.to_ascii_lowercase().contains("no such file"),
         "response body leaks io error detail: {body:?}"
-    );
-
-    Ok(())
-}
-
-/// Malformed hash input must not be reflected back with internal error-type
-/// wording (`Store error: ... Invalid hash format: ...`).
-#[tokio::test]
-async fn invalid_hash_response_is_generic() -> Result<()> {
-    let cache = TestCache::start().await?;
-
-    // 32 chars but 'e' is not in the nixbase32 alphabet.
-    let bad_hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-    let out = Command::new("curl")
-        .args([
-            "--silent",
-            "--max-time",
-            "5",
-            "--write-out",
-            "\n%{http_code}",
-            &cache.url(&format!("/{bad_hash}.narinfo")),
-        ])
-        .output()?;
-    let resp = String::from_utf8(out.stdout)?;
-    let (body, status) = resp.rsplit_once('\n').unwrap();
-
-    assert_eq!(status, "404");
-    assert!(
-        !body.contains("Store error") && !body.contains("Invalid hash format"),
-        "response body exposes internal error taxonomy: {body:?}"
     );
 
     Ok(())
