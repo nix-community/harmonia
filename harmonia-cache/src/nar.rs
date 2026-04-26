@@ -138,16 +138,18 @@ pub(crate) async fn get(
     // Credit actix_web actix-files: https://github.com/actix/actix-web/blob/master/actix-files/src/named.rs#L525
     if let Some(ranges) = req.headers().get(http::header::RANGE) {
         if let Ok(ranges_header) = ranges.to_str() {
-            if let Ok(ranges) = HttpRange::parse(ranges_header, rlength) {
-                let range_length = ranges[0].length;
-                let offset = ranges[0].start;
+            if let Ok(ranges) = HttpRange::parse(ranges_header, rlength)
+                && let Some(first) = ranges.first()
+            {
+                let range_length = first.length;
+                let offset = first.start;
 
                 if settings.enable_compression {
                     // The zstd middleware skips responses that already carry a
                     // Content-Encoding; partial content must stay byte-exact.
                     res.insert_header((
                         http::header::CONTENT_ENCODING,
-                        http::header::HeaderValue::from_static("none"),
+                        http::header::HeaderValue::from_static("identity"),
                     ));
                 }
 

@@ -332,7 +332,7 @@ where
             let res = fut.await?;
             Ok(res.map_body(|head, body| {
                 // A handler-set Content-Encoding also covers range responses,
-                // which set `none` to keep partial content byte-exact.
+                // which set `identity` to keep partial content byte-exact.
                 if !wants_zstd
                     || head.headers().contains_key(CONTENT_ENCODING)
                     || head.status.is_redirection()
