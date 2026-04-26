@@ -414,6 +414,30 @@ impl TestCache {
         Ok(String::from_utf8(output.stdout)?)
     }
 
+    /// Return the HTTP status code for `path` without failing on non-2xx.
+    /// Uses `--path-as-is` so traversal-shaped inputs reach the server unchanged.
+    pub fn curl_status(&self, path: &str) -> Result<u16> {
+        let url = self.url(path);
+        let mut args = vec![
+            "--max-time",
+            "5",
+            "--silent",
+            "--output",
+            "/dev/null",
+            "--write-out",
+            "%{http_code}",
+            "--path-as-is",
+        ];
+        if self.tls {
+            args.push("--insecure");
+        }
+        let output = Command::new("curl").args(args).arg(&url).output()?;
+        if !output.status.success() {
+            return Err(format!("curl invocation failed for {url}").into());
+        }
+        Ok(std::str::from_utf8(&output.stdout)?.trim().parse()?)
+    }
+
     /// Get the TLS certificate path (for curl --cacert)
     pub fn tls_cert_path(&self) -> Option<&PathBuf> {
         self.tls_cert_path.as_ref()
