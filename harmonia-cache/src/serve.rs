@@ -120,10 +120,21 @@ pub(crate) async fn get(
     } else {
         store_path.join(dir)
     };
-    let full_path = full_path.canonicalize().io_context(format!(
-        "cannot resolve nix store path: {}",
-        full_path.display()
-    ))?;
+    let full_path = match full_path.canonicalize() {
+        Ok(p) => p,
+        // A missing sub-path under a valid store path is a client lookup miss,
+        // not a server fault; short-circuit before the generic Io mapping so
+        // the response carries the same no-store 404 as `some_or_404!`.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(HttpResponse::NotFound()
+                .insert_header(crate::cache_control_no_store())
+                .body("missed hash"));
+        }
+        Err(e) => Err(e).io_context(format!(
+            "cannot resolve nix store path: {}",
+            full_path.display()
+        ))?,
+    };
 
     let real_store = settings
         .store
