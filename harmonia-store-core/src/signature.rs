@@ -11,6 +11,7 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::error;
 use zeroize::{Zeroize, Zeroizing};
@@ -333,7 +334,8 @@ impl fmt::Display for SecretKey {
 
 impl PartialEq for SecretKey {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.key_data == other.key_data
+        // Constant-time on the secret bytes to avoid a timing oracle.
+        self.name == other.name && bool::from(self.key_data.ct_eq(&other.key_data))
     }
 }
 

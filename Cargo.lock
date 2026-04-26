@@ -1137,6 +1137,7 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
+ "subtle",
  "tempfile",
  "thiserror",
  "tracing",
