@@ -1171,7 +1171,6 @@ dependencies = [
  "rstest",
  "tokio",
  "tokio-test",
- "tracing",
 ]
 
 [[package]]
