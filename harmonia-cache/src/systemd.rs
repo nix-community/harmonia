@@ -1,5 +1,5 @@
-//! Minimal systemd socket activation (`sd_listen_fds`): inherit pre-bound
-//! listeners from fds `3..3+$LISTEN_FDS`.
+//! Minimal systemd integration: socket activation (`sd_listen_fds`) and
+//! readiness notification (`sd_notify`).
 
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
@@ -79,4 +79,57 @@ pub fn classify(fd: RawFd) -> Result<Listener> {
         }
     };
     Ok(listener)
+}
+
+fn notify_send(path: &str, state: &[u8]) -> std::io::Result<()> {
+    let sock = std::os::unix::net::UnixDatagram::unbound()?;
+    #[cfg(target_os = "linux")]
+    if let Some(abs) = path.strip_prefix('@') {
+        use nix::sys::socket::{MsgFlags, UnixAddr, sendto};
+        let addr = UnixAddr::new_abstract(abs.as_bytes())?;
+        sendto(sock.as_raw_fd(), state, &addr, MsgFlags::empty())?;
+        return Ok(());
+    }
+    sock.send_to(state, path)?;
+    Ok(())
+}
+
+/// Best-effort `sd_notify`; never fatal so standalone use is unaffected.
+fn notify(state: &[u8]) {
+    let Ok(path) = std::env::var("NOTIFY_SOCKET") else {
+        return;
+    };
+    if let Err(e) = notify_send(&path, state) {
+        tracing::warn!("sd_notify to {path} failed: {e}");
+    }
+}
+
+pub fn notify_ready() {
+    notify(b"READY=1");
+}
+
+/// Ping at half the systemd watchdog deadline. Only proves the async runtime
+/// still schedules work; will not detect a single wedged worker.
+pub fn spawn_watchdog() {
+    if !pid_var_matches("WATCHDOG_PID") {
+        return;
+    }
+    let Some(usec) = std::env::var("WATCHDOG_USEC")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&v| v > 0)
+    else {
+        return;
+    };
+    let interval =
+        std::time::Duration::from_micros(usec / 2).max(std::time::Duration::from_secs(1));
+    tracing::info!("systemd watchdog enabled, pinging every {interval:?}");
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            notify(b"WATCHDOG=1");
+        }
+    });
 }

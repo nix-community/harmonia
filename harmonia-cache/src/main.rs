@@ -313,7 +313,10 @@ async fn inner_main() -> Result<()> {
         }
     }
 
-    server.run().await.io_context("Failed to start server")
+    let server = server.run();
+    systemd::notify_ready();
+    systemd::spawn_watchdog();
+    server.await.io_context("Failed to start server")
 }
 
 #[actix_web::main]

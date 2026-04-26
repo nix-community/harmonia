@@ -2,6 +2,7 @@
 
 use std::net::TcpListener;
 use std::os::fd::{AsRawFd, BorrowedFd, OwnedFd};
+use std::os::unix::net::UnixDatagram;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::time::Duration;
@@ -13,9 +14,10 @@ mod common;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-/// Emulate systemd: pass a pre-bound listener as fd 3 with `LISTEN_FDS=1`.
-/// Config `bind` is unroutable so the test fails unless the inherited socket
-/// is used. `LISTEN_PID` stays unset because `Command` fixes envp before fork.
+/// Emulate systemd: pass a pre-bound listener as fd 3 plus NOTIFY_SOCKET and
+/// WATCHDOG_USEC. Config `bind` is unroutable so the test fails unless the
+/// inherited socket is used. `LISTEN_PID` stays unset because `Command` fixes
+/// envp before fork.
 #[tokio::test]
 async fn test_socket_activation_tcp() -> Result<()> {
     let temp_dir = CanonicalTempDir::new()?;
@@ -28,6 +30,10 @@ async fn test_socket_activation_tcp() -> Result<()> {
     fcntl(&listener, FcntlArg::F_SETFD(FdFlag::empty()))?;
     let raw = listener.as_raw_fd();
 
+    let notify_path = temp_dir.path().join("notify.sock");
+    let notify = UnixDatagram::bind(&notify_path)?;
+    notify.set_read_timeout(Some(Duration::from_secs(30)))?;
+
     let config_file = common::write_toml_config(&format!(
         "bind = \"255.255.255.255:1\"\nnix_db_path = \"{}\"\npriority = 30\n",
         store.db_path().display(),
@@ -38,7 +44,9 @@ async fn test_socket_activation_tcp() -> Result<()> {
     let mut cmd = Command::new(&bin_path);
     cmd.env("CONFIG_FILE", config_file.path())
         .env("RUST_LOG", "debug")
-        .env("LISTEN_FDS", "1");
+        .env("LISTEN_FDS", "1")
+        .env("NOTIFY_SOCKET", &notify_path)
+        .env("WATCHDOG_USEC", "2000000");
     // SAFETY: only async-signal-safe syscalls (dup2/close) between fork and exec.
     unsafe {
         cmd.pre_exec(move || {
@@ -53,20 +61,25 @@ async fn test_socket_activation_tcp() -> Result<()> {
     let _guard = common::ProcessGuard::new(cmd.spawn()?);
     drop(listener);
 
-    let url = format!("http://127.0.0.1:{port}/nix-cache-info");
-    let start = std::time::Instant::now();
-    let body = loop {
-        let output = Command::new("curl")
-            .args(["--fail", "--silent", "--max-time", "2", &url])
-            .output()?;
-        if output.status.success() {
-            break String::from_utf8(output.stdout)?;
-        }
-        if start.elapsed() > Duration::from_secs(30) {
-            return Err(format!("timeout waiting for {url}").into());
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    let recv = || -> Result<Vec<u8>> {
+        let mut buf = [0u8; 64];
+        let n = notify.recv(&mut buf)?;
+        Ok(buf[..n].to_vec())
     };
+    assert_eq!(recv()?, b"READY=1");
+    assert_eq!(recv()?, b"WATCHDOG=1");
+
+    let output = Command::new("curl")
+        .args([
+            "--fail",
+            "--silent",
+            "--max-time",
+            "5",
+            &format!("http://127.0.0.1:{port}/nix-cache-info"),
+        ])
+        .output()?;
+    assert!(output.status.success(), "curl failed: {output:?}");
+    let body = String::from_utf8(output.stdout)?;
     assert!(body.contains("StoreDir:"), "got: {body}");
 
     Ok(())

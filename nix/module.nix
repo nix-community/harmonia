@@ -149,6 +149,9 @@ in
         };
 
         serviceConfig = {
+          Type = "notify";
+          WatchdogSec = 15;
+          Restart = "on-failure";
           ExecStart = "${cfg.package}/bin/harmonia-cache";
 
           User = "harmonia";
