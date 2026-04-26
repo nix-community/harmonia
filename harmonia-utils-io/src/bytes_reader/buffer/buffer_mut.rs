@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::{cmp, slice};
 
 use bytes::{Buf, BufMut};
-use tracing::warn;
 
 pub struct Filled {
     ptr: NonNull<u8>,
@@ -279,8 +278,9 @@ impl BufferMut {
         if !allocate {
             return false;
         }
-        warn!(additional, "buffer is still shared");
-
+        // Arc is still shared (a `Filled`/`Bytes` handle outlives this reserve),
+        // so we cannot grow in place and must reallocate + copy. This is normal
+        // during streaming.
         new_cap = cmp::max(new_cap, self.data.capacity());
 
         // Create a new vector to store the data
