@@ -1141,6 +1141,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "zerocopy",
+ "zeroize",
 ]
 
 [[package]]

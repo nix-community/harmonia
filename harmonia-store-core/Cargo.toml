@@ -29,6 +29,7 @@ serde_json                   = { workspace = true }
 thiserror                    = { workspace = true }
 tracing                      = { workspace = true }
 zerocopy                     = { version = "0.8", features = [ "derive" ] }
+zeroize                      = { version = "1" }
 
 [dev-dependencies]
 harmonia-store-core = { path = ".", features = [ "test" ] }
