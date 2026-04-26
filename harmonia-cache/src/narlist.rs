@@ -1,5 +1,5 @@
 use crate::ServerResult;
-use crate::error::{CacheError, IoErrorContext, NarInfoError, Result, ServeError};
+use crate::error::{CacheError, IoErrorContext, Result, ServeError};
 use actix_web::{HttpResponse, http, web};
 use serde::{Deserialize, Serialize};
 use std::fs::Metadata;
@@ -164,11 +164,7 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
 }
 
 pub(crate) async fn get(hash: web::Path<String>, settings: web::Data<Config>) -> ServerResult {
-    let store_path = some_or_404!(nixhash(&settings, hash.as_bytes()).map_err(|e| {
-        CacheError::from(NarInfoError::QueryFailed {
-            reason: format!("Could not query nar hash in database: {e}"),
-        })
-    })?);
+    let store_path = some_or_404!(nixhash(&settings, hash.as_bytes())?);
 
     let nar_list = get_nar_list(settings.store.get_real_path(&store_path)).await?;
     Ok(HttpResponse::Ok()

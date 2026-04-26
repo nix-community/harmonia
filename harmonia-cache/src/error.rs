@@ -27,9 +27,6 @@ pub enum CacheError {
     #[error("NARInfo error: {0}")]
     NarInfo(#[from] NarInfoError),
 
-    #[error("Build log error: {0}")]
-    BuildLog(#[from] BuildLogError),
-
     #[error("File serving error: {0}")]
     Serve(#[from] ServeError),
 }
@@ -74,12 +71,6 @@ pub enum StoreError {
 #[derive(Error, Debug)]
 pub enum NarInfoError {
     #[error("Failed to query path info: {reason}")]
-    QueryFailed { reason: String },
-}
-
-#[derive(Error, Debug)]
-pub enum BuildLogError {
-    #[error("Failed to query derivation path: {reason}")]
     QueryFailed { reason: String },
 }
 
