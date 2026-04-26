@@ -109,15 +109,43 @@ impl Display for ServerError {
 impl actix_web::error::ResponseError for ServerError {
     fn status_code(&self) -> actix_web::http::StatusCode {
         use actix_web::http::StatusCode;
+        // Exhaustive on `CacheError` so adding a variant forces an explicit
+        // status decision rather than silently inheriting 500.
         match &self.err {
-            CacheError::Config(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CacheError::Store(StoreError::PathQuery { .. }) => StatusCode::NOT_FOUND,
-            CacheError::Signing(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            CacheError::Serve(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            CacheError::BuildLog(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            CacheError::NarInfo(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
+            // Handlers wrap fs lookups in `io_context`; a missing file under a
+            // resolved store path (GC race, stale client URL) is a lookup miss.
+            CacheError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+                StatusCode::NOT_FOUND
+            }
+            CacheError::Io { .. }
+            | CacheError::Store(StoreError::Db { .. })
+            | CacheError::Config(_)
+            | CacheError::Server(_)
+            | CacheError::Signing(_)
+            | CacheError::Fingerprint(_)
+            | CacheError::NarInfo(_)
+            | CacheError::BuildLog(_)
+            // `ServeError::AccessDenied` is a server-side store anomaly (path
+            // without a file name), not client authz, hence 500 not 403.
+            | CacheError::Serve(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+
+    // The default impl writes `Display` into the body, which would leak
+    // filesystem paths and OS error strings embedded in `CacheError`. Log the
+    // detail server-side and hand the client only the status phrase.
+    fn error_response(&self) -> HttpResponse {
+        let status = self.status_code();
+        if status.is_server_error() {
+            tracing::error!("request failed: {}", self.err);
+        } else {
+            tracing::debug!("request rejected: {}", self.err);
+        }
+        HttpResponse::build(status)
+            .insert_header(cache_control_no_store())
+            .content_type("text/plain; charset=utf-8")
+            .body(status.canonical_reason().unwrap_or("error"))
     }
 }
 
