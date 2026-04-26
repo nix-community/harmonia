@@ -39,6 +39,7 @@ mod realisations;
 mod root;
 mod serve;
 mod store;
+mod systemd;
 mod template;
 mod tls;
 mod version;
@@ -172,7 +173,6 @@ async fn inner_main() -> Result<()> {
     let config_data = c.clone();
     let metrics_data = web::Data::new(metrics.clone());
 
-    tracing::info!("listening on {}", c.bind);
     let nar_route = format!("/nar/{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar");
     // narinfos served by nix-serve have the narhash embedded in the nar URL.
     // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
@@ -221,28 +221,8 @@ async fn inner_main() -> Result<()> {
         server = server.max_connections(c.max_connections);
     }
 
-    let try_url = Url::parse(&c.bind);
-    let (bind, uds) = if let Ok(url) = try_url.as_ref() {
-        if url.scheme() != "unix" {
-            (c.bind.as_str(), false)
-        } else if url.host().is_none() {
-            (url.path(), true)
-        } else {
-            return Err(error::ServerError::Startup {
-                reason: "Can only bind to file URLs without host portion.".to_string(),
-            }
-            .into());
-        }
-    } else {
-        (c.bind.as_str(), false)
-    };
-
-    if c.tls_cert_path.is_some() || c.tls_key_path.is_some() {
-        if uds {
-            tracing::error!("TLS is not supported with Unix domain sockets.");
-            std::process::exit(1);
-        }
-        let config = tls::load_tls_config(
+    let tls_config = if c.tls_cert_path.is_some() || c.tls_key_path.is_some() {
+        Some(tls::load_tls_config(
             Path::new(
                 &c.tls_cert_path
                     .clone()
@@ -253,27 +233,84 @@ async fn inner_main() -> Result<()> {
                     .clone()
                     .expect("tls key path must be set when tls is enabled"),
             ),
-        )?;
-
-        server = server
-            .bind_rustls_0_23(c.bind.clone(), config)
-            .io_context("Failed to bind with TLS")?;
-    } else if uds {
-        if !cfg!(unix) {
-            tracing::error!("Binding to Unix domain sockets is only supported on Unix.");
-            std::process::exit(1);
-        } else {
-            let socket_path = Path::new(bind);
-            server = server
-                .bind_uds(socket_path)
-                .io_context("Failed to bind to Unix domain socket")?;
-            fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))
-                .io_context("Failed to set socket permissions")?;
-        }
+        )?)
     } else {
-        server = server
-            .bind(c.bind.clone())
-            .io_context("Failed to bind server")?;
+        None
+    };
+
+    // systemd socket activation takes precedence over `bind`.
+    let mut activated = false;
+    for fd in systemd::inherited_fds() {
+        match systemd::classify(fd)? {
+            systemd::Listener::Tcp(tcp) => {
+                tracing::info!("listening on inherited fd {} ({:?})", fd, tcp.local_addr());
+                server = match tls_config.clone() {
+                    Some(cfg) => server
+                        .listen_rustls_0_23(tcp, cfg)
+                        .io_context("Failed to listen on inherited TCP listener with TLS")?,
+                    None => server
+                        .listen(tcp)
+                        .io_context("Failed to listen on inherited TCP listener")?,
+                };
+            }
+            systemd::Listener::Unix(uds) => {
+                if tls_config.is_some() {
+                    tracing::warn!(
+                        "TLS configured but inherited socket is a Unix domain socket; serving plaintext on it"
+                    );
+                }
+                tracing::info!("listening on inherited fd {} ({:?})", fd, uds.local_addr());
+                server = server
+                    .listen_uds(uds)
+                    .io_context("Failed to listen on inherited Unix listener")?;
+            }
+        }
+        activated = true;
+    }
+
+    if !activated {
+        tracing::info!("listening on {}", c.bind);
+        let try_url = Url::parse(&c.bind);
+        let (bind, uds) = if let Ok(url) = try_url.as_ref() {
+            if url.scheme() != "unix" {
+                (c.bind.as_str(), false)
+            } else if url.host().is_none() {
+                (url.path(), true)
+            } else {
+                return Err(error::ServerError::Startup {
+                    reason: "Can only bind to file URLs without host portion.".to_string(),
+                }
+                .into());
+            }
+        } else {
+            (c.bind.as_str(), false)
+        };
+
+        if let Some(cfg) = tls_config {
+            if uds {
+                tracing::error!("TLS is not supported with Unix domain sockets.");
+                std::process::exit(1);
+            }
+            server = server
+                .bind_rustls_0_23(c.bind.clone(), cfg)
+                .io_context("Failed to bind with TLS")?;
+        } else if uds {
+            if !cfg!(unix) {
+                tracing::error!("Binding to Unix domain sockets is only supported on Unix.");
+                std::process::exit(1);
+            } else {
+                let socket_path = Path::new(bind);
+                server = server
+                    .bind_uds(socket_path)
+                    .io_context("Failed to bind to Unix domain socket")?;
+                fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))
+                    .io_context("Failed to set socket permissions")?;
+            }
+        } else {
+            server = server
+                .bind(c.bind.clone())
+                .io_context("Failed to bind server")?;
+        }
     }
 
     server.run().await.io_context("Failed to start server")
