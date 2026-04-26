@@ -1,4 +1,4 @@
-use crate::error::{BuildLogError, CacheError, IoErrorContext, Result};
+use crate::error::{IoErrorContext, Result};
 use actix_files::NamedFile;
 use actix_web::Responder;
 use actix_web::http::header::HeaderValue;
@@ -48,11 +48,7 @@ pub(crate) async fn get(
     req: HttpRequest,
     settings: web::Data<Config>,
 ) -> crate::ServerResult {
-    let drv_path = some_or_404!(query_drv_path(&settings, drv.as_bytes()).map_err(|e| {
-        CacheError::from(BuildLogError::QueryFailed {
-            reason: format!("Could not query nar hash in database for {drv}: {e}"),
-        })
-    })?);
+    let drv_path = some_or_404!(query_drv_path(&settings, drv.as_bytes())?);
     if !settings.store.is_valid_path(&drv_path)? {
         return Ok(HttpResponse::NotFound()
             .insert_header(cache_control_no_store())
