@@ -26,8 +26,7 @@ rustls = { version = "0.23", default-features = false, features = [
     "tls12",
     "logging",
 ] }
-rustls-pemfile = "2"
-rustls-pki-types = "1"
+rustls-pki-types = { version = "1", features = [ "std" ] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
