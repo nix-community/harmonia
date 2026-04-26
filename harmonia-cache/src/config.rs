@@ -169,6 +169,7 @@ pub(crate) fn load() -> Result<Config> {
         }
     }
     for sign_key_path in &settings.sign_key_paths {
+        crate::tls::warn_insecure_permissions(sign_key_path);
         let key_content =
             read_to_string(sign_key_path).map_err(|e| ConfigError::InvalidSigningKey {
                 reason: format!(

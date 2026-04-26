@@ -98,13 +98,9 @@ fn build_narinfo(
         res.sigs
             .push(sk.sign(&fingerprint).to_string().into_bytes());
     }
-    if res.sigs.is_empty() {
-        res.sigs = info
-            .signatures()
-            .iter()
-            .map(|s| s.as_bytes().to_vec())
-            .collect();
-    }
+    // Keep db sigs (e.g. cache.nixos.org) so upstream-only clients still verify.
+    res.sigs
+        .extend(info.signatures().iter().map(|s| s.as_bytes().to_vec()));
 
     Ok(res)
 }

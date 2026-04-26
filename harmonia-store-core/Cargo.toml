@@ -26,9 +26,11 @@ proptest                     = { workspace = true, optional = true }
 proptest-derive              = { workspace = true, optional = true }
 serde                        = { workspace = true }
 serde_json                   = { workspace = true }
+subtle                       = { version = "2", default-features = false }
 thiserror                    = { workspace = true }
 tracing                      = { workspace = true }
 zerocopy                     = { version = "0.8", features = [ "derive" ] }
+zeroize                      = { version = "1" }
 
 [dev-dependencies]
 harmonia-store-core = { path = ".", features = [ "test" ] }
