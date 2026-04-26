@@ -170,7 +170,7 @@ async fn wait_for_service(
     })?
 }
 
-fn write_toml_config(content: &str) -> Result<NamedTempFile> {
+pub fn write_toml_config(content: &str) -> Result<NamedTempFile> {
     use std::io::Write;
     let mut file = NamedTempFile::new()?;
     write!(file, "{content}")?;
@@ -180,12 +180,12 @@ fn write_toml_config(content: &str) -> Result<NamedTempFile> {
 
 // Process guard implementations
 
-struct ProcessGuard {
+pub struct ProcessGuard {
     child: Option<Child>,
 }
 
 impl ProcessGuard {
-    fn new(child: Child) -> Self {
+    pub fn new(child: Child) -> Self {
         Self { child: Some(child) }
     }
 }

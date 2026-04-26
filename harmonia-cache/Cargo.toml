@@ -46,6 +46,7 @@ harmonia-nar        = { version = "3.0.0" }
 harmonia-store-core = { version = "0.0.0-alpha.0" }
 harmonia-store-db   = { version = "3.0.0" }
 harmonia-utils-hash = { version = "0.0.0-alpha.0" }
+nix                 = { workspace = true, features = [ "socket", "fs" ] }
 prometheus          = { workspace = true }
 
 [dev-dependencies]
