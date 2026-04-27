@@ -42,8 +42,6 @@ pub struct ValidPathInfo {
     pub info: UnkeyedValidPathInfo,
 }
 
-// JSON format version 2, matching upstream Nix
-
 fn is_false(b: &bool) -> bool {
     !b
 }
@@ -55,35 +53,6 @@ fn is_none_store_path(opt: &Option<Cow<'_, StorePath>>) -> bool {
 #[expect(clippy::ptr_arg, reason = "needed for serde skip_serializing_if")]
 fn is_empty_signatures(set: &Cow<'_, BTreeSet<Signature>>) -> bool {
     set.is_empty()
-}
-
-/// path-info JSON v2 keeps signatures as `name:base64` strings; the default
-/// `Signature` serde impl now emits the structured `{keyName, sig}` form, so
-/// we override it here.
-mod sig_strings {
-    use super::*;
-    use serde::ser::SerializeSeq;
-
-    #[expect(clippy::ptr_arg, reason = "needed for serde with")]
-    pub fn serialize<S>(set: &Cow<'_, BTreeSet<Signature>>, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut seq = s.serialize_seq(Some(set.len()))?;
-        for sig in set.iter() {
-            seq.serialize_element(&sig.to_string())?;
-        }
-        seq.end()
-    }
-
-    pub fn deserialize<'de, D>(d: D) -> Result<Cow<'static, BTreeSet<Signature>>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // `Signature`'s Deserialize already accepts both string and object form.
-        let set = BTreeSet::<Signature>::deserialize(d)?;
-        Ok(Cow::Owned(set))
-    }
 }
 
 /// Pure format: omits default impure fields during serialization
@@ -98,7 +67,7 @@ struct RawUnkeyedValidPathInfoPure<'a> {
     references: Cow<'a, BTreeSet<StorePath>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     registration_time: Option<DaemonTime>,
-    #[serde(skip_serializing_if = "is_empty_signatures", with = "sig_strings")]
+    #[serde(skip_serializing_if = "is_empty_signatures")]
     signatures: Cow<'a, BTreeSet<Signature>>,
     store_dir: Cow<'a, StoreDir>,
     #[serde(skip_serializing_if = "is_false")]
@@ -127,7 +96,7 @@ struct RawUnkeyedValidPathInfo<'a> {
     references: Cow<'a, BTreeSet<StorePath>>,
     #[serde(default)]
     registration_time: Option<DaemonTime>,
-    #[serde(default = "default_cow_set", with = "sig_strings")]
+    #[serde(default = "default_cow_set")]
     signatures: Cow<'a, BTreeSet<Signature>>,
     #[serde(default = "default_cow_store_dir")]
     store_dir: Cow<'a, StoreDir>,
@@ -150,7 +119,7 @@ where
         signatures: Cow::Borrowed(&info.signatures),
         store_dir: Cow::Borrowed(&info.store_dir),
         ultimate: info.ultimate,
-        version: 2,
+        version: 3,
     };
     raw.serialize(serializer)
 }
@@ -160,9 +129,9 @@ where
     D: serde::Deserializer<'de>,
 {
     let raw = RawUnkeyedValidPathInfo::deserialize(deserializer)?;
-    if raw.version != 2 {
+    if raw.version != 3 {
         return Err(serde::de::Error::custom(format!(
-            "unsupported path-info version: {}, expected 2",
+            "unsupported path-info version: {}, expected 3",
             raw.version
         )));
     }
@@ -213,7 +182,7 @@ impl Serialize for Pure<UnkeyedValidPathInfo> {
             signatures: Cow::Borrowed(&self.0.signatures),
             store_dir: Cow::Borrowed(&self.0.store_dir),
             ultimate: self.0.ultimate,
-            version: 2,
+            version: 3,
         };
         raw.serialize(serializer)
     }
