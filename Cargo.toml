@@ -29,7 +29,7 @@ edition = "2024"
 homepage = "https://github.com/nix-community/harmonia"
 license = "MIT"
 repository = "https://github.com/nix-community/harmonia.git"
-version = "3.0.0"
+version = "3.1.0"
 
 [workspace.dependencies]
 async-stream = "0.3"
@@ -51,8 +51,8 @@ prometheus = { version = "0.14", default-features = false }
 rusqlite = { version = "0.39", features = [ "bundled" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
-sha1 = "0.10"
-sha2 = "0.10"
+sha1 = "0.11"
+sha2 = "0.11"
 thiserror = "2"
 tokio = { version = "1", features = [
     "sync",

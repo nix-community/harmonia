@@ -19,6 +19,10 @@ fn default_connection_rate() -> usize {
     256
 }
 
+fn default_max_connections() -> usize {
+    2048
+}
+
 fn default_priority() -> usize {
     30
 }
@@ -43,6 +47,11 @@ pub(crate) struct ZstdConfig {
     /// the encoder doesn't allocate a large window it can't fill.
     #[serde(default)]
     pub(crate) window_log: u32,
+    /// Per-worker cap on concurrent LDM encoders for large bodies (>= 4 MiB).
+    /// An LDM encoder grows to ~35 MiB; overflow falls back to no-LDM
+    /// (~0.75 MiB, lower ratio). 0 = unbounded. Ignored if LDM is disabled.
+    #[serde(default = "ZstdConfig::default_max_ldm_encoders_per_worker")]
+    pub(crate) max_ldm_encoders_per_worker: usize,
 }
 
 impl ZstdConfig {
@@ -52,6 +61,9 @@ impl ZstdConfig {
     fn default_long_distance() -> bool {
         true
     }
+    fn default_max_ldm_encoders_per_worker() -> usize {
+        16
+    }
 }
 
 impl Default for ZstdConfig {
@@ -60,6 +72,7 @@ impl Default for ZstdConfig {
             level: Self::default_level(),
             long_distance_matching: Self::default_long_distance(),
             window_log: 0,
+            max_ldm_encoders_per_worker: Self::default_max_ldm_encoders_per_worker(),
         }
     }
 }
@@ -88,6 +101,10 @@ pub(crate) struct Config {
     pub(crate) workers: usize,
     #[serde(default = "default_connection_rate")]
     pub(crate) max_connection_rate: usize,
+    /// Per-worker cap on concurrent connections. Together with the LDM
+    /// semaphore this bounds compression memory. 0 keeps the actix default.
+    #[serde(default = "default_max_connections")]
+    pub(crate) max_connections: usize,
     #[serde(default = "default_priority")]
     pub(crate) priority: usize,
 
@@ -169,6 +186,7 @@ pub(crate) fn load() -> Result<Config> {
         }
     }
     for sign_key_path in &settings.sign_key_paths {
+        crate::tls::warn_insecure_permissions(sign_key_path);
         let key_content =
             read_to_string(sign_key_path).map_err(|e| ConfigError::InvalidSigningKey {
                 reason: format!(

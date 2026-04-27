@@ -170,7 +170,7 @@ async fn wait_for_service(
     })?
 }
 
-fn write_toml_config(content: &str) -> Result<NamedTempFile> {
+pub fn write_toml_config(content: &str) -> Result<NamedTempFile> {
     use std::io::Write;
     let mut file = NamedTempFile::new()?;
     write!(file, "{content}")?;
@@ -180,12 +180,12 @@ fn write_toml_config(content: &str) -> Result<NamedTempFile> {
 
 // Process guard implementations
 
-struct ProcessGuard {
+pub struct ProcessGuard {
     child: Option<Child>,
 }
 
 impl ProcessGuard {
-    fn new(child: Child) -> Self {
+    pub fn new(child: Child) -> Self {
         Self { child: Some(child) }
     }
 }
@@ -412,6 +412,30 @@ impl TestCache {
         }
 
         Ok(String::from_utf8(output.stdout)?)
+    }
+
+    /// Return the HTTP status code for `path` without failing on non-2xx.
+    /// Uses `--path-as-is` so traversal-shaped inputs reach the server unchanged.
+    pub fn curl_status(&self, path: &str) -> Result<u16> {
+        let url = self.url(path);
+        let mut args = vec![
+            "--max-time",
+            "5",
+            "--silent",
+            "--output",
+            "/dev/null",
+            "--write-out",
+            "%{http_code}",
+            "--path-as-is",
+        ];
+        if self.tls {
+            args.push("--insecure");
+        }
+        let output = Command::new("curl").args(args).arg(&url).output()?;
+        if !output.status.success() {
+            return Err(format!("curl invocation failed for {url}").into());
+        }
+        Ok(std::str::from_utf8(&output.stdout)?.trim().parse()?)
     }
 
     /// Get the TLS certificate path (for curl --cacert)

@@ -11,10 +11,12 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
+use thiserror::Error;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::store_path::{StoreDir, StorePath};
 use harmonia_utils_base_encoding::base64_len;
-use thiserror::Error;
 
 pub const SIGNATURE_BYTES: usize = 64;
 const SIGNATURE_BASE64_LEN: usize = base64_len(SIGNATURE_BYTES);
@@ -279,12 +281,12 @@ pub struct SecretKey {
 impl SecretKey {
     pub fn generate(name: String) -> Result<SecretKey, GenerateKeyError> {
         let name = Arc::new(name);
-        let mut seed = [0u8; SEED_BYTES];
-        getrandom::fill(&mut seed).map_err(|_| GenerateKeyError)?;
+        let mut seed = Zeroizing::new([0u8; SEED_BYTES]);
+        getrandom::fill(&mut *seed).map_err(|_| GenerateKeyError)?;
         let key = SigningKey::from_bytes(&seed);
         let pk = key.verifying_key();
         let mut key_data = [0u8; SECRET_KEY_BYTES];
-        key_data[0..SEED_BYTES].copy_from_slice(&seed);
+        key_data[0..SEED_BYTES].copy_from_slice(&*seed);
         key_data[SEED_BYTES..SECRET_KEY_BYTES].copy_from_slice(pk.as_bytes());
         Ok(SecretKey {
             name,
@@ -322,11 +324,19 @@ impl SecretKey {
     }
 }
 
+impl Drop for SecretKey {
+    fn drop(&mut self) {
+        // Wipe our copy of seed||pubkey; SigningKey zeroizes itself.
+        self.key_data.zeroize();
+    }
+}
+
 impl fmt::Debug for SecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Redacted: Debug output reaches logs/panics.
         f.debug_struct("SecretKey")
             .field("name", &self.name)
-            .field("key", &format_args!("{}", self.key()))
+            .field("key", &"<redacted>")
             .finish()
     }
 }
@@ -338,17 +348,12 @@ impl fmt::Display for SecretKey {
 
 impl PartialEq for SecretKey {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.key_data == other.key_data
+        // Constant-time on the secret bytes to avoid a timing oracle.
+        self.name == other.name && bool::from(self.key_data.ct_eq(&other.key_data))
     }
 }
 
 impl Eq for SecretKey {}
-
-impl From<SecretKey> for PublicKey {
-    fn from(v: SecretKey) -> Self {
-        v.to_public_key()
-    }
-}
 
 impl<'a> From<&'a SecretKey> for PublicKey {
     fn from(v: &'a SecretKey) -> Self {
@@ -366,16 +371,16 @@ impl FromStr for SecretKey {
         if key_s.len() != SECRET_KEY_BASE64_LEN {
             return Err(ParseKeyError::InvalidSecretKey);
         }
-        let mut key_b = [0u8; SECRET_KEY_BASE64_DECODED_LEN];
+        let mut key_b = Zeroizing::new([0u8; SECRET_KEY_BASE64_DECODED_LEN]);
         let len = BASE64
-            .decode_mut(key_s.as_bytes(), &mut key_b)
+            .decode_mut(key_s.as_bytes(), &mut *key_b)
             .map_err(|_| ParseKeyError::InvalidSecretKey)?;
         if len != SECRET_KEY_BYTES {
             return Err(ParseKeyError::InvalidSecretKey);
         }
         let mut key_data = [0u8; SECRET_KEY_BYTES];
         key_data.copy_from_slice(&key_b[..SECRET_KEY_BYTES]);
-        let mut seed = [0u8; SEED_BYTES];
+        let mut seed = Zeroizing::new([0u8; SEED_BYTES]);
         seed.copy_from_slice(&key_data[0..SEED_BYTES]);
         let public_key = &key_data[SEED_BYTES..SECRET_KEY_BYTES];
         let key = SigningKey::from_bytes(&seed);
@@ -522,6 +527,14 @@ mod unittests {
         assert_eq!(sk.to_public_key(), pk);
         assert_eq!(sk.to_string(), sk_s);
         assert_eq!(pk.to_string(), pk_s);
+    }
+
+    /// `Debug` must redact key material so it can't leak via logs/panics.
+    #[test]
+    fn test_secret_key_debug_redacts_key() {
+        let sk = SecretKey::generate("k".into()).unwrap();
+        let dbg = format!("{sk:?}");
+        assert!(!dbg.contains(&sk.key().to_string()), "leaked: {dbg}");
     }
 
     #[test]

@@ -56,7 +56,7 @@ pkgs.testers.nixosTest {
     import json
 
     start_all()
-    harmonia.wait_for_unit("harmonia-dev.service")
+    harmonia.wait_for_unit("harmonia-dev.socket")
     harmonia.wait_for_open_port(5000)
     client01.wait_until_succeeds("timeout 1 curl -f http://harmonia:5000/nix-cache-info")
 

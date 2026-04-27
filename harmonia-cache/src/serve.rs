@@ -4,36 +4,30 @@ use crate::error::IoErrorContext;
 use actix_files::NamedFile;
 use actix_web::Responder;
 use actix_web::{HttpRequest, HttpResponse, web};
-use askama_escape::{Html, escape as escape_html_entity};
-use percent_encoding::{CONTROLS, utf8_percent_encode};
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 
-use crate::template::{DIRECTORY_ROW_TEMPLATE, DIRECTORY_TEMPLATE, render, render_page};
+use crate::template::{
+    DIRECTORY_ROW_TEMPLATE, DIRECTORY_TEMPLATE, html_escape, render, render_page,
+};
 use crate::{
     CARGO_NAME, CARGO_VERSION, ServerResult, TAILWIND_CSS, config::Config, nixhash, some_or_404,
 };
 
-/// Returns percent encoded file URL path.
-macro_rules! encode_file_url {
-    ($path:ident) => {
-        utf8_percent_encode(&$path, CONTROLS)
-    };
-}
-
-/// Returns HTML entity encoded formatter.
-///
-/// ```plain
-/// " => &quot;
-/// & => &amp;
-/// ' => &#x27;
-/// < => &lt;
-/// > => &gt;
-/// / => &#x2f;
-/// ```
-macro_rules! encode_file_name {
-    ($entry:ident) => {
-        escape_html_entity(&$entry.file_name().to_string_lossy(), Html)
-    };
-}
+/// Percent-encode set for path segments placed inside `href="..."`: CONTROLS
+/// plus the bytes that would break out of the attribute, alter the URL, or
+/// collide with the `[[ ]]` template syntax.
+const HREF_PATH_SET: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'\'')
+    .add(b'<')
+    .add(b'>')
+    .add(b'`')
+    .add(b'&')
+    .add(b'[')
+    .add(b']')
+    .add(b'?')
+    .add(b'#');
 
 // human readable file size
 fn file_size(bytes: u64) -> String {
@@ -56,7 +50,7 @@ pub(crate) fn directory_listing(
     let path_without_store = fs_path.strip_prefix(real_store).unwrap_or(fs_path);
     let index_of = format!(
         "Index of {}",
-        escape_html_entity(&path_without_store.to_string_lossy(), Html)
+        html_escape(&path_without_store.to_string_lossy())
     );
     let mut rows = String::new();
 
@@ -76,13 +70,16 @@ pub(crate) fn directory_listing(
         // if file is a directory, add '/' to the end of the name
         if let Ok(metadata) = entry.metadata() {
             let mut row_vars = std::collections::HashMap::new();
-            row_vars.insert("url", encode_file_url!(p).to_string());
+            // Percent-encode for the URL, then HTML-escape for the attribute.
+            let url = utf8_percent_encode(&p, HREF_PATH_SET).to_string();
+            row_vars.insert("url", html_escape(&url));
 
+            let name = html_escape(&entry.file_name().to_string_lossy());
             if metadata.is_dir() {
-                row_vars.insert("name", format!("{}/", encode_file_name!(entry)));
+                row_vars.insert("name", format!("{name}/"));
                 row_vars.insert("size", "-".to_string());
             } else {
-                row_vars.insert("name", encode_file_name!(entry).to_string());
+                row_vars.insert("name", name);
                 row_vars.insert("size", file_size(metadata.len()));
             }
 
@@ -123,10 +120,21 @@ pub(crate) async fn get(
     } else {
         store_path.join(dir)
     };
-    let full_path = full_path.canonicalize().io_context(format!(
-        "cannot resolve nix store path: {}",
-        full_path.display()
-    ))?;
+    let full_path = match full_path.canonicalize() {
+        Ok(p) => p,
+        // A missing sub-path under a valid store path is a client lookup miss,
+        // not a server fault; short-circuit before the generic Io mapping so
+        // the response carries the same no-store 404 as `some_or_404!`.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(HttpResponse::NotFound()
+                .insert_header(crate::cache_control_no_store())
+                .body("missed hash"));
+        }
+        Err(e) => Err(e).io_context(format!(
+            "cannot resolve nix store path: {}",
+            full_path.display()
+        ))?,
+    };
 
     let real_store = settings
         .store

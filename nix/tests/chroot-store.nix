@@ -54,7 +54,7 @@ pkgs.testers.nixosTest {
     harmonia.succeed(f"cp -a {d} /guest{d}")
 
     # Wait for harmonia
-    harmonia.wait_for_unit("harmonia-dev.service")
+    harmonia.wait_for_unit("harmonia-dev.socket")
     harmonia.wait_for_open_port(5000)
 
     # Client checks

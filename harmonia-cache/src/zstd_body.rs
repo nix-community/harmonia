@@ -15,6 +15,7 @@ use std::future::{Ready, ready as fut_ready};
 use std::io::{self, Write};
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::task::{Context, Poll, ready};
 
 use actix_web::Error;
@@ -25,6 +26,7 @@ use actix_web::rt::task::{JoinHandle, spawn_blocking};
 use actix_web::web::Bytes;
 use bytes::BytesMut;
 use futures_core::{Stream, future::LocalBoxFuture};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::config::ZstdConfig;
 
@@ -39,6 +41,10 @@ const MIN_COMPRESS_SIZE: u64 = 256;
 /// Body chunks below this size are encoded on the reactor thread; the
 /// `spawn_blocking` round-trip would dominate the actual compression work.
 const INLINE_THRESHOLD: usize = 1024;
+
+/// Bodies this large (or unsized) compete for an LDM slot; below it the
+/// pledged size already keeps the encoder window under ~5 MiB.
+const LARGE_BODY_THRESHOLD: u64 = 4 * 1024 * 1024;
 
 type ZstdEncoder = zstd::stream::write::Encoder<'static, Writer>;
 
@@ -93,6 +99,16 @@ fn accepts_zstd(headers: &HeaderMap) -> bool {
                 .find_map(|q| q.trim().parse::<f32>().ok())
                 .is_none_or(|q| q > 0.0)
         })
+}
+
+/// Outcome of LDM-slot acquisition for one response.
+enum LdmSlot {
+    /// Small body or LDM disabled: use the configured encoder as-is.
+    NotNeeded,
+    /// Large body holding a per-worker LDM permit.
+    Held(OwnedSemaphorePermit),
+    /// Slots exhausted: compress without LDM (~0.75 MiB vs ~35 MiB).
+    Fallback,
 }
 
 fn build_encoder(cfg: &ZstdConfig, pledged_size: Option<u64>) -> io::Result<ZstdEncoder> {
@@ -150,13 +166,16 @@ enum State {
 pub(crate) struct ZstdBody<S> {
     inner: S,
     state: State,
+    /// Returns the LDM slot on drop (body finished or connection closed).
+    _permit: Option<OwnedSemaphorePermit>,
 }
 
 impl<S> ZstdBody<S> {
-    fn new(inner: S, enc: Box<ZstdEncoder>) -> Self {
+    fn new(inner: S, enc: Box<ZstdEncoder>, permit: Option<OwnedSemaphorePermit>) -> Self {
         Self {
             inner,
             state: State::Idle(enc),
+            _permit: permit,
         }
     }
 }
@@ -276,11 +295,28 @@ where
 /// configuration governs every route.
 pub(crate) struct ZstdMiddleware {
     cfg: Rc<ZstdConfig>,
+    /// Per-worker cap on concurrently active large LDM encoders. `None` when
+    /// LDM is disabled or `max_ldm_encoders_per_worker == 0` (unbounded).
+    large_slots: Option<Arc<Semaphore>>,
 }
 
 impl ZstdMiddleware {
     pub(crate) fn new(cfg: ZstdConfig) -> Self {
-        Self { cfg: Rc::new(cfg) }
+        // With LDM off the encoder never grows large, so the semaphore would
+        // be pure overhead.
+        let large_slots = match (cfg.long_distance_matching, cfg.max_ldm_encoders_per_worker) {
+            (false, _) | (_, 0) => None,
+            (true, n) => Some(Arc::new(Semaphore::new(n))),
+        };
+        Self {
+            cfg: Rc::new(cfg),
+            large_slots,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn large_slots(&self) -> Option<Arc<Semaphore>> {
+        self.large_slots.clone()
     }
 }
 
@@ -300,6 +336,7 @@ where
         fut_ready(Ok(ZstdMiddlewareService {
             service,
             cfg: self.cfg.clone(),
+            large_slots: self.large_slots.clone(),
         }))
     }
 }
@@ -307,6 +344,7 @@ where
 pub(crate) struct ZstdMiddlewareService<S> {
     service: S,
     cfg: Rc<ZstdConfig>,
+    large_slots: Option<Arc<Semaphore>>,
 }
 
 impl<S, B> Service<ServiceRequest> for ZstdMiddlewareService<S>
@@ -327,12 +365,13 @@ where
         let wants_zstd =
             req.method() != actix_web::http::Method::HEAD && accepts_zstd(req.headers());
         let cfg = self.cfg.clone();
+        let large_slots = self.large_slots.clone();
         let fut = self.service.call(req);
         Box::pin(async move {
             let res = fut.await?;
             Ok(res.map_body(|head, body| {
                 // A handler-set Content-Encoding also covers range responses,
-                // which set `none` to keep partial content byte-exact.
+                // which set `identity` to keep partial content byte-exact.
                 if !wants_zstd
                     || head.headers().contains_key(CONTENT_ENCODING)
                     || head.status.is_redirection()
@@ -348,6 +387,30 @@ where
                     BodySize::Sized(n) => Some(n),
                     BodySize::Stream => None,
                 };
+                // Only large/unsized bodies can grow the LDM window to its
+                // ~35 MiB ceiling. On exhaustion fall back to no-LDM instead
+                // of queueing so a slow reader can't stall others.
+                let slot = match &large_slots {
+                    Some(sem) if pledge.is_none_or(|n| n >= LARGE_BODY_THRESHOLD) => {
+                        match sem.clone().try_acquire_owned() {
+                            Ok(p) => LdmSlot::Held(p),
+                            Err(_) => LdmSlot::Fallback,
+                        }
+                    }
+                    _ => LdmSlot::NotNeeded,
+                };
+                let (cfg, permit) = match slot {
+                    LdmSlot::NotNeeded => (*cfg, None),
+                    LdmSlot::Held(p) => (*cfg, Some(p)),
+                    LdmSlot::Fallback => (
+                        ZstdConfig {
+                            long_distance_matching: false,
+                            window_log: 0,
+                            ..*cfg
+                        },
+                        None,
+                    ),
+                };
                 match build_encoder(&cfg, pledge) {
                     Ok(enc) => {
                         head.headers_mut()
@@ -358,6 +421,7 @@ where
                         CompressedBody::Zstd(Box::new(ZstdBody::new(
                             BodyAsStream(body),
                             Box::new(enc),
+                            permit,
                         )))
                     }
                     // Only reachable with an invalid `[zstd]` config.
@@ -422,7 +486,7 @@ mod tests {
 
         let inner = stream::iter(chunks.into_iter().map(Ok::<_, io::Error>));
         let enc = build_encoder(&ZstdConfig::default(), Some(original.len() as u64)).unwrap();
-        let body = ZstdBody::new(inner, Box::new(enc));
+        let body = ZstdBody::new(inner, Box::new(enc), None);
         futures_util::pin_mut!(body);
 
         let mut compressed = Vec::new();
@@ -487,5 +551,74 @@ mod tests {
         .await;
         assert!(res.headers().get(CONTENT_ENCODING).is_none());
         assert_eq!(test::read_body(res).await, "ok");
+    }
+
+    #[actix_web::test]
+    async fn large_encoder_slots_gate_only_large_bodies() {
+        use actix_web::{App, HttpResponse, body::SizedStream, test, web};
+        use futures_util::stream;
+
+        // Handler that reports a large size but whose body never yields, so
+        // the encoder (and its permit) stay alive until the response is
+        // dropped.
+        fn large_body() -> HttpResponse {
+            let s = stream::pending::<Result<Bytes, io::Error>>();
+            HttpResponse::Ok().body(SizedStream::new(LARGE_BODY_THRESHOLD, s))
+        }
+
+        let small = Bytes::from(vec![b's'; 8 * 1024]);
+
+        let cfg = ZstdConfig {
+            max_ldm_encoders_per_worker: 1,
+            ..ZstdConfig::default()
+        };
+        let mw = ZstdMiddleware::new(cfg);
+        let slots = mw.large_slots().expect("LDM on -> semaphore present");
+        assert_eq!(slots.available_permits(), 1);
+        let app = test::init_service(
+            App::new()
+                .wrap(mw)
+                .route("/large", web::get().to(|| async { large_body() }))
+                .route(
+                    "/small",
+                    web::get().to(move || {
+                        let b = small.clone();
+                        async move { HttpResponse::Ok().body(b) }
+                    }),
+                ),
+        )
+        .await;
+
+        let zstd_req = |uri: &str| {
+            test::TestRequest::get()
+                .uri(uri)
+                .insert_header((ACCEPT_ENCODING, "zstd"))
+                .to_request()
+        };
+
+        // First large response takes the only slot.
+        let held = test::call_service(&app, zstd_req("/large")).await;
+        assert_eq!(held.headers().get(CONTENT_ENCODING).unwrap(), "zstd");
+        assert_eq!(slots.available_permits(), 0);
+
+        // Small bodies bypass the semaphore entirely.
+        let res = test::call_service(&app, zstd_req("/small")).await;
+        assert_eq!(res.headers().get(CONTENT_ENCODING).unwrap(), "zstd");
+        assert_eq!(slots.available_permits(), 0);
+
+        // Second large response overflows -> still zstd (no-LDM fallback),
+        // and crucially does not block waiting for a slot.
+        let overflow = test::call_service(&app, zstd_req("/large")).await;
+        assert_eq!(overflow.headers().get(CONTENT_ENCODING).unwrap(), "zstd");
+        drop(overflow);
+        // Fallback held no permit, so dropping it changes nothing.
+        assert_eq!(slots.available_permits(), 0);
+
+        // Dropping the held body returns the slot.
+        drop(held);
+        assert_eq!(slots.available_permits(), 1);
+        let res = test::call_service(&app, zstd_req("/large")).await;
+        assert_eq!(res.headers().get(CONTENT_ENCODING).unwrap(), "zstd");
+        assert_eq!(slots.available_permits(), 0);
     }
 }
