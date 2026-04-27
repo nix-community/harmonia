@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-bench"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "criterion",
  "nix",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-cache"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "actix-files",
  "actix-web",
@@ -1011,11 +1011,11 @@ dependencies = [
 
 [[package]]
 name = "harmonia-client"
-version = "3.0.0"
+version = "3.1.0"
 
 [[package]]
 name = "harmonia-daemon"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -1036,7 +1036,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-nar"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "bstr",
  "bytes",
@@ -1061,7 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-protocol"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "async-stream",
  "bstr",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-protocol-derive"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1102,7 +1102,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-ssh-store"
-version = "3.0.0"
+version = "3.1.0"
 
 [[package]]
 name = "harmonia-store-aterm"
@@ -1146,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-db"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-remote"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "async-stream",
  "futures-core",
