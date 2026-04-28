@@ -21,6 +21,15 @@ Various changes, and supporting the latest Nix `master` branch.
 - Path-info switched to V3 format with structured signatures.
 - Build-result switched to structured signatures in `built_outputs`.
 
+### Fixed
+
+- Content-addressed fixed-output store path computation.
+
+### Security
+
+- `SecretKey` bytes are now compared in constant time.
+- `SecretKey` is redacted in `Debug` output and key buffers are zeroized on drop.
+
 ### Added
 
 - `BasicDerivation` JSON serialization and deserialization, using a flat store-path array for inputs (vs. `Derivation`'s nested `{srcs, drvs}` format).
@@ -35,6 +44,8 @@ Various changes, and supporting the latest Nix `master` branch.
 
 ### Changed
 
+- Replaced `ring` with `ed25519-dalek`/`getrandom` for signing.
+- Dropped `serde_with` in favour of a small `impl_serde_via_string!` macro.
 - `Realisation::dependent_realisations` is now always empty (Nix hardcodes `"dependentRealisations": {}` for backwards compat).
 
 ## [0.0.0-alpha.0]
