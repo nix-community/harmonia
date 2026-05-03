@@ -1125,7 +1125,7 @@ dependencies = [
  "data-encoding",
  "derive_more",
  "ed25519-dalek",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "harmonia-store-core",
  "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
