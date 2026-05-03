@@ -35,7 +35,7 @@ version = "3.1.0"
 async-stream = "0.3"
 bstr = "1.11"
 bytes = "1.11"
-data-encoding = "2.6"
+data-encoding = "2.11"
 derive_more = { version = "2.1", features = [ "display" ] }
 ed25519-dalek = "2"
 futures-core = "0.3"
