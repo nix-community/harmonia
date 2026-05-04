@@ -1,10 +1,9 @@
 use crate::error::{CacheError, ConfigError, Result};
 use crate::store::Store;
 use harmonia_store_core::signature::SecretKey;
+use harmonia_store_core::store_path::StoreDir;
 use serde::Deserialize;
-use std::ffi::OsStr;
 use std::fs::read_to_string;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 fn default_bind() -> String {
@@ -208,19 +207,20 @@ pub(crate) fn load() -> Result<Config> {
                 })?;
         settings.secret_keys.push(key);
     }
-    let virtual_store_dir = std::env::var_os("NIX_STORE_DIR")
-        .map(|s| s.into_encoded_bytes())
-        .unwrap_or_else(|| {
-            settings
-                .virtual_nix_store
-                .as_os_str()
-                .as_encoded_bytes()
-                .to_vec()
-        });
+    let virtual_store_str = std::env::var("NIX_STORE_DIR").unwrap_or_else(|_| {
+        settings
+            .virtual_nix_store
+            .to_str()
+            .unwrap_or("/nix/store")
+            .to_owned()
+    });
+    let store_dir = StoreDir::new(&virtual_store_str).map_err(|_| ConfigError::Invalid {
+        reason: format!("invalid store dir: {virtual_store_str}"),
+    })?;
     let real_store_path = settings
         .real_nix_store
         .clone()
-        .unwrap_or_else(|| PathBuf::from(OsStr::from_bytes(&virtual_store_dir)));
+        .unwrap_or_else(|| AsRef::<Path>::as_ref(&store_dir).to_path_buf());
     let db_path = settings
         .nix_db_path
         .clone()
@@ -240,13 +240,6 @@ pub(crate) fn load() -> Result<Config> {
         }
         .into());
     }
-    settings.store = Store::new(
-        virtual_store_dir,
-        settings
-            .real_nix_store
-            .clone()
-            .map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
-        db_path,
-    );
+    settings.store = Store::new(store_dir, settings.real_nix_store.clone(), db_path);
     Ok(settings)
 }

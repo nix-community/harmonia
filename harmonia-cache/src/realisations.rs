@@ -6,8 +6,6 @@
 
 use actix_web::{HttpResponse, web};
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::realisation::UnkeyedRealisation;
-use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::StorePath;
 
 use crate::config::Config;
@@ -30,7 +28,7 @@ pub async fn get(path: web::Path<(String, String)>, settings: web::Data<Config>)
                 .body(format!("Invalid derivation path: {e}")));
         }
     };
-    let _output_name: OutputName = match output_raw.parse() {
+    let output_name: OutputName = match output_raw.parse() {
         Ok(o) => o,
         Err(e) => {
             tracing::debug!("Invalid output name '{output_raw}': {e}");
@@ -40,11 +38,7 @@ pub async fn get(path: web::Path<(String, String)>, settings: web::Data<Config>)
         }
     };
 
-    // BuildTraceV3 keys on the *base name* of the drv path, which is exactly
-    // the StorePath display form (hash-name.drv).
-    let row = settings
-        .store
-        .query_realisation(&drv_path.to_string(), &output_raw)?;
+    let row = settings.store.query_realisation(&drv_path, &output_name)?;
 
     let row = match row {
         Some(r) => r,
@@ -56,43 +50,8 @@ pub async fn get(path: web::Path<(String, String)>, settings: web::Data<Config>)
         }
     };
 
-    let out_path: StorePath = match settings.store.store_dir().parse(&row.output_path) {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!(
-                "invalid output_path '{}' in BuildTraceV3: {e}",
-                row.output_path
-            );
-            return Ok(HttpResponse::NotFound()
-                .insert_header(cache_control_no_store())
-                .body("realisation not found"));
-        }
-    };
-
-    let signatures = match row
-        .signatures
-        .as_deref()
-        .unwrap_or("")
-        .split_whitespace()
-        .map(|s| s.parse::<Signature>().map_err(|e| (s.to_owned(), e)))
-        .collect::<std::result::Result<_, _>>()
-    {
-        Ok(sigs) => sigs,
-        Err((sig, e)) => {
-            tracing::warn!("invalid signature '{sig}' in BuildTraceV3: {e}");
-            return Ok(HttpResponse::InternalServerError()
-                .insert_header(cache_control_no_store())
-                .body("invalid realisation signature"));
-        }
-    };
-
-    let realisation = UnkeyedRealisation {
-        out_path,
-        signatures,
-    };
-
     Ok(HttpResponse::Ok()
         .insert_header(cache_control_max_age_1y())
         .content_type("application/json")
-        .json(realisation))
+        .json(row.realisation.value))
 }

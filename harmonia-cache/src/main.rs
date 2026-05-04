@@ -54,9 +54,7 @@ fn nixhash(settings: &web::Data<Config>, hash: &[u8]) -> Result<Option<StorePath
             reason: format!("Invalid hash format: {e}"),
         })?;
 
-    settings
-        .store
-        .query_path_from_hash_part(&store_path_hash.to_string())
+    settings.store.query_path_from_hash_part(&store_path_hash)
 }
 
 const TAILWIND_CSS: &str = include_str!("styles/output.css");
@@ -125,7 +123,6 @@ impl actix_web::error::ResponseError for ServerError {
             | CacheError::Server(_)
             | CacheError::Signing(_)
             | CacheError::Fingerprint(_)
-            | CacheError::NarInfo(_)
             // `ServeError::AccessDenied` is a server-side store anomaly (path
             // without a file name), not client authz, hence 500 not 403.
             | CacheError::Serve(_) => StatusCode::INTERNAL_SERVER_ERROR,

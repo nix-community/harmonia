@@ -27,7 +27,8 @@ composed.
                          ↓
 ┌──────────────────────────────────────────────────────┐
 │  Core (pure)                                         │
-│  harmonia-store-core                                 │
+│  harmonia-store-core · harmonia-store-aterm          │
+│  harmonia-store-path-info                            │
 │  store paths, derivations, references, signatures    │
 │  no I/O, no async                                    │
 └──────────────────────────────────────────────────────┘
@@ -45,6 +46,7 @@ composed.
 |-------|---------|
 | [harmonia-store-core](../../harmonia-store-core/README.md) | Store paths, derivations, signatures (pure) |
 | [harmonia-store-aterm](../../harmonia-store-aterm/) | ATerm derivation parser |
+| [harmonia-store-path-info](../../harmonia-store-path-info/) | ValidPathInfo types (pure) |
 | [harmonia-store-db](../../harmonia-store-db/README.md) | SQLite store metadata |
 | [harmonia-nar](../../harmonia-nar/README.md) | NAR archive format |
 | [harmonia-protocol](../../harmonia-protocol/README.md) | Daemon wire protocol |
@@ -67,25 +69,75 @@ could be reused outside Harmonia.
 
 ## Dependency Graph
 
+<!-- Regenerate both diagrams with: python3 scripts/dependency-diagram.py --update -->
+
+```mermaid
+---
+title: Full dependency graph
+---
+graph BT
+    subgraph Utilities
+        utils-base-encoding
+        utils-hash
+        utils-io
+    end
+    nar --> utils-io
+    utils-hash --> utils-base-encoding
+    store-core --> utils-base-encoding
+    store-core --> utils-hash
+    store-aterm --> store-core
+    store-aterm --> utils-hash
+    store-path-info --> store-core
+    store-path-info --> utils-hash
+    protocol --> nar
+    protocol --> protocol-derive
+    protocol --> store-core
+    protocol --> store-path-info
+    protocol --> utils-hash
+    protocol --> utils-io
+    store-db --> store-core
+    store-db --> store-path-info
+    store-db --> utils-hash
+    cache --> nar
+    cache --> store-core
+    cache --> store-db
+    cache --> store-path-info
+    cache --> utils-hash
+    daemon --> protocol
+    daemon --> store-core
+    daemon --> store-db
+    daemon --> utils-hash
+    daemon --> utils-io
+    store-remote --> nar
+    store-remote --> protocol
+    store-remote --> store-core
+    store-remote --> utils-io
 ```
-utils-io      utils-base-encoding
-   ↑                 ↑
-   │           utils-hash
-   │                 ↑
-   ├───────────┬─────┤
-   │           │     │
-  nar    store-core  │   store-db
-   ↑      ↑    ↑     │   (rusqlite only)
-   │      │  store-aterm
-   ├──────┴────┬─────┘
-   │           │
-   │       protocol
-   │        ↑     ↑
-   │        │     └── daemon (+ store-db)
-   │   store-remote
-   │        ↑
-   └─────┬──┘
-       cache
+
+```mermaid
+---
+title: Transitive reduction
+---
+graph BT
+    subgraph Utilities
+        utils-base-encoding
+        utils-hash
+        utils-io
+    end
+    nar --> utils-io
+    utils-hash --> utils-base-encoding
+    store-core --> utils-hash
+    store-aterm --> store-core
+    store-path-info --> store-core
+    protocol --> nar
+    protocol --> protocol-derive
+    protocol --> store-path-info
+    store-db --> store-path-info
+    cache --> nar
+    cache --> store-db
+    daemon --> protocol
+    daemon --> store-db
+    store-remote --> protocol
 ```
 
 `harmonia-client`, `harmonia-ssh-store` and `harmonia-bench` currently have no
@@ -104,6 +156,8 @@ intra-workspace dependencies.
 - No I/O, no async, no `tokio`.
 - Pure, deterministic functions returning `Result`; no panics.
 - Stream-friendly (no unbounded buffers).
+- `harmonia-store-aterm` and `harmonia-store-path-info` would typically be part of `harmonia-store-core`.
+  However, since these data types / formats both have issues, they are instead placed in separate libraries to make sure they don't "infect" the rest of `harmonia-store-core`.
 
 **Format** (`harmonia-nar`)
 - Works against generic `AsyncRead`/`AsyncWrite`.
@@ -112,6 +166,7 @@ intra-workspace dependencies.
 
 **Database** (`harmonia-store-db`)
 - Schema matches Nix's `db.sqlite` exactly.
+- Uses `harmonia-store-core` types for realisations, store paths, etc.
 - System database opened read-only/immutable.
 - Synchronous API; callers wrap in `spawn_blocking`.
 - Tests use `:memory:`.

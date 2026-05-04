@@ -96,29 +96,23 @@ fn test_sqlite_with_nix_initialized_store() {
                 .next()
                 .and_then(|line| line.split_whitespace().next())
             {
-                // Test is_valid_path - use full path string
-                let is_valid = db.is_valid_path(path).unwrap();
-                assert!(is_valid, "Path {path} should be valid");
+                let sd =
+                    StoreDir::new(store_dir.to_str().unwrap_or("/nix/store")).unwrap_or_default();
+                if let Ok(sp) = sd.parse(path) {
+                    // Test is_valid_path
+                    let is_valid = db.is_valid_path(&sd, &sp).unwrap();
+                    assert!(is_valid, "Path {path} should be valid");
 
-                // Test query_path_info - use full path string
-                let info = db.query_path_info(path).unwrap();
-                assert!(info.is_some(), "Should get path info for {path}");
+                    // Test query_path_info
+                    let info = db.query_path_info(&sd, &sp).unwrap();
+                    assert!(info.is_some(), "Should get path info for {path}");
 
-                // Extract hash part (first 32 chars of the base name)
-                let store_path = std::path::Path::new(path);
-                if let Some(hash_part) = store_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .filter(|name| name.len() >= 32)
-                    .map(|name| &name[..32])
-                {
                     // Test query_path_from_hash_part
-                    let found_path = db
-                        .query_path_from_hash_part(&store_dir.to_string_lossy(), hash_part)
-                        .unwrap();
+                    let found_path = db.query_path_from_hash_part(&sd, sp.hash()).unwrap();
                     assert!(
                         found_path.is_some(),
-                        "Should find path by hash part {hash_part}"
+                        "Should find path by hash part {}",
+                        sp.hash()
                     );
                 }
             }
@@ -126,10 +120,14 @@ fn test_sqlite_with_nix_initialized_store() {
     }
 
     // Even if we couldn't copy anything, at least verify the empty database works
-    let is_valid = db
-        .is_valid_path(&store_dir.join("non-existent-path").to_string_lossy())
-        .unwrap();
-    assert!(!is_valid, "Non-existent path should not be valid");
+    {
+        let sd = StoreDir::new(store_dir.to_str().unwrap_or("/nix/store")).unwrap_or_default();
+        let fake_path: StorePath = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-non-existent"
+            .parse()
+            .unwrap();
+        let is_valid = db.is_valid_path(&sd, &fake_path).unwrap();
+        assert!(!is_valid, "Non-existent path should not be valid");
+    }
 }
 
 #[tokio::test]
@@ -194,14 +192,25 @@ async fn test_handler_query_realisation() {
     let db_path = temp_dir.path().join("db.sqlite");
 
     let drv_base = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ca.drv";
-    let out_full = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-out";
     let sig = "cache.nixos.org-1:0CpHca+06TwFp9VkMyz5OaphT3E8mnS+1SWymYlvFaghKSYPCMQ66TS1XPAr1+y9rfQZPLaHrBjjnIRktE/nAA==";
 
     {
         let db = StoreDb::open(&db_path, harmonia_store_db::OpenMode::Create).unwrap();
         db.create_schema().unwrap();
-        db.register_realisation(drv_base, "out", out_full, Some(sig))
-            .unwrap();
+        db.register_realisation(
+            &store_dir,
+            &harmonia_store_core::realisation::Realisation {
+                key: harmonia_store_core::realisation::DrvOutput {
+                    drv_path: drv_base.parse().unwrap(),
+                    output_name: "out".parse().unwrap(),
+                },
+                value: harmonia_store_core::realisation::UnkeyedRealisation {
+                    out_path: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-out".parse().unwrap(),
+                    signatures: [sig.parse().unwrap()].into_iter().collect(),
+                },
+            },
+        )
+        .unwrap();
     }
 
     let handler = LocalStoreHandler::new(store_dir, db_path).await.unwrap();

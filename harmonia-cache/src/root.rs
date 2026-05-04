@@ -15,10 +15,7 @@ pub(crate) async fn get(
 ) -> Result<HttpResponse, Box<dyn Error>> {
     let mut vars = HashMap::new();
     vars.insert("version", CARGO_VERSION.to_string());
-    vars.insert(
-        "store",
-        html_escape(&String::from_utf8_lossy(config.store.virtual_store())),
-    );
+    vars.insert("store", html_escape(config.store.store_dir().as_ref()));
     vars.insert("priority", config.priority.to_string());
     vars.insert("homepage", CARGO_HOME_PAGE.to_string());
     vars.insert("name", CARGO_NAME.to_string());

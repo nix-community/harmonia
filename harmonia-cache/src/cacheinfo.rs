@@ -6,9 +6,10 @@ use actix_web::{HttpResponse, http, web};
 pub(crate) async fn get(config: web::Data<config::Config>) -> Result<HttpResponse, Box<dyn Error>> {
     let priority_str = config.priority.to_string();
 
+    let store_dir = config.store.store_dir().to_string();
     let body = crate::build_bytes!(
         b"StoreDir: ",
-        config.store.virtual_store(),
+        store_dir.as_bytes(),
         b"\nWantMassQuery: 1\nPriority: ",
         priority_str.as_bytes(),
         b"\n"

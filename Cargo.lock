@@ -986,6 +986,7 @@ dependencies = [
  "harmonia-nar",
  "harmonia-store-core",
  "harmonia-store-db",
+ "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-test",
  "http-range",
@@ -1072,6 +1073,7 @@ dependencies = [
  "harmonia-nar",
  "harmonia-protocol-derive",
  "harmonia-store-core",
+ "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-io",
  "harmonia-utils-test",
@@ -1148,10 +1150,28 @@ dependencies = [
 name = "harmonia-store-db"
 version = "3.1.0"
 dependencies = [
+ "harmonia-store-core",
+ "harmonia-store-path-info",
+ "harmonia-utils-hash",
  "rusqlite",
  "tempfile",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "harmonia-store-path-info"
+version = "3.1.0"
+dependencies = [
+ "harmonia-store-core",
+ "harmonia-store-path-info",
+ "harmonia-utils-hash",
+ "harmonia-utils-test",
+ "hex-literal",
+ "proptest",
+ "proptest-derive",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -8,13 +8,11 @@
 
 use std::collections::BTreeSet;
 use std::future::ready;
-use std::num::NonZero;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use harmonia_protocol::NarHash;
 use harmonia_protocol::daemon::{
     DaemonError as ProtocolError, DaemonResult, DaemonStore, FutureResultExt, HandshakeDaemonStore,
     ResultLog, TrustLevel,
@@ -23,7 +21,6 @@ use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
 use harmonia_store_core::realisation::{DrvOutput, UnkeyedRealisation};
 use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_store_db::StoreDb;
-use harmonia_utils_hash::{Hash, fmt::Any};
 
 use crate::error::DaemonError;
 
@@ -46,73 +43,6 @@ impl LocalStoreHandler {
             db: Arc::new(Mutex::new(db)),
         })
     }
-
-    /// Convert a harmonia_store_db::ValidPathInfo to the protocol UnkeyedValidPathInfo.
-    fn to_protocol_path_info(
-        info: harmonia_store_db::ValidPathInfo,
-        store_dir: StoreDir,
-    ) -> Result<UnkeyedValidPathInfo, ProtocolError> {
-        // Parse the hash from database format (e.g., "sha256:...")
-        let hash_any = info.hash.parse::<Any<Hash>>().map_err(|e| {
-            ProtocolError::custom(format!("Failed to parse hash '{}': {e}", info.hash))
-        })?;
-        let nar_hash = NarHash::try_from(hash_any.into_hash()).map_err(|e| {
-            ProtocolError::custom(format!("Failed to convert hash '{}': {e}", info.hash))
-        })?;
-
-        // Convert references from String to StorePath
-        let references = info
-            .references
-            .iter()
-            .filter_map(|path| {
-                // References are stored as full paths, extract just the name
-                let base_name = std::path::Path::new(path)
-                    .file_name()
-                    .and_then(|n| n.to_str())?;
-                StorePath::from_base_path(base_name).ok()
-            })
-            .collect();
-
-        // Convert deriver
-        let deriver = info.deriver.as_ref().and_then(|d| {
-            let base_name = std::path::Path::new(d)
-                .file_name()
-                .and_then(|n| n.to_str())?;
-            StorePath::from_base_path(base_name).ok()
-        });
-
-        // Convert registration time
-        let registration_time = info
-            .registration_time
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| NonZero::new(d.as_secs() as i64))
-            .unwrap_or(None);
-
-        // Parse signatures
-        let signatures = info
-            .sigs
-            .map(|s| {
-                s.split_whitespace()
-                    .filter_map(|sig| sig.parse().ok())
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // Parse content address
-        let ca = info.ca.and_then(|s| s.parse().ok());
-
-        Ok(UnkeyedValidPathInfo {
-            deriver,
-            nar_hash,
-            references,
-            registration_time,
-            nar_size: info.nar_size.unwrap_or(0),
-            ultimate: info.ultimate,
-            signatures,
-            ca,
-            store_dir,
-        })
-    }
 }
 
 impl HandshakeDaemonStore for LocalStoreHandler {
@@ -133,11 +63,12 @@ impl DaemonStore for LocalStoreHandler {
         path: &'a StorePath,
     ) -> impl ResultLog<Output = DaemonResult<bool>> + Send + 'a {
         async move {
-            let full_path = format!("{}/{}", self.store_dir, path);
+            let path = path.clone();
             let db = self.db.clone();
+            let store_dir = self.store_dir.clone();
             tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                db.is_valid_path(&full_path)
+                db.is_valid_path(&store_dir, &path)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -151,20 +82,18 @@ impl DaemonStore for LocalStoreHandler {
         path: &'a StorePath,
     ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedValidPathInfo>>> + Send + 'a {
         async move {
-            let full_path = format!("{}/{}", self.store_dir, path);
+            let path = path.clone();
             let db = self.db.clone();
             let store_dir = self.store_dir.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                db.query_path_info(&full_path)
+                db.query_path_info(&store_dir, &path)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
             .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
 
-            result
-                .map(|info| Self::to_protocol_path_info(info, store_dir))
-                .transpose()
+            Ok(result.map(|info| info.info))
         }
         .empty_logs()
     }
@@ -174,23 +103,16 @@ impl DaemonStore for LocalStoreHandler {
         hash: &'a StorePathHash,
     ) -> impl ResultLog<Output = DaemonResult<Option<StorePath>>> + Send + 'a {
         async move {
-            let hash_str = hash.to_string();
+            let hash = *hash;
             let db = self.db.clone();
-            let store_dir = self.store_dir.to_str().to_string();
-            let result = tokio::task::spawn_blocking(move || {
+            let store_dir = self.store_dir.clone();
+            tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                db.query_path_from_hash_part(&store_dir, &hash_str)
+                db.query_path_from_hash_part(&store_dir, &hash)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
-            .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
-
-            Ok(result.and_then(|path| {
-                let base_name = std::path::Path::new(&path)
-                    .file_name()
-                    .and_then(|n| n.to_str())?;
-                StorePath::from_base_path(base_name).ok()
-            }))
+            .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))
         }
         .empty_logs()
     }
@@ -200,15 +122,16 @@ impl DaemonStore for LocalStoreHandler {
         output_id: &'a DrvOutput,
     ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedRealisation>>> + Send + 'a {
         async move {
-            let drv_path = output_id.drv_path.to_string();
-            let output_name = output_id.output_name.to_string();
+            let store_dir = self.store_dir.clone();
+            let drv_path = output_id.drv_path.clone();
+            let output_name = output_id.output_name.clone();
             let db = self.db.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
                 if !db.has_ca_schema()? {
                     return Ok(None);
                 }
-                db.query_realisation(&drv_path, &output_name)
+                db.query_realisation(&store_dir, &drv_path, &output_name)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -218,28 +141,7 @@ impl DaemonStore for LocalStoreHandler {
                 return Ok(None);
             };
 
-            let base_name = std::path::Path::new(&row.output_path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(&row.output_path);
-            let out_path = StorePath::from_base_path(base_name).map_err(|e| {
-                ProtocolError::custom(format!(
-                    "Invalid output path '{}' in BuildTraceV3: {e}",
-                    row.output_path
-                ))
-            })?;
-            let signatures = row
-                .signatures
-                .as_deref()
-                .unwrap_or("")
-                .split_whitespace()
-                .filter_map(|s| s.parse().ok())
-                .collect();
-
-            Ok(Some(UnkeyedRealisation {
-                out_path,
-                signatures,
-            }))
+            Ok(Some(row.realisation.value))
         }
         .empty_logs()
     }
@@ -253,11 +155,12 @@ impl DaemonStore for LocalStoreHandler {
         async move {
             let mut valid = BTreeSet::new();
             for path in paths {
-                let full_path = format!("{}/{}", self.store_dir, path);
+                let path_owned = path.clone();
                 let db = self.db.clone();
+                let store_dir = self.store_dir.clone();
                 let is_valid = tokio::task::spawn_blocking(move || {
                     let db = db.blocking_lock();
-                    db.is_valid_path(&full_path)
+                    db.is_valid_path(&store_dir, &path_owned)
                 })
                 .await
                 .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
