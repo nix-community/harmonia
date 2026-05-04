@@ -22,6 +22,7 @@ pub const TAG: Symbol = Symbol("tag");
 pub const BOUND: Symbol = Symbol("bound");
 pub const SERIALIZE: Symbol = Symbol("serialize");
 pub const DESERIALIZE: Symbol = Symbol("deserialize");
+pub const FOR_TYPE: Symbol = Symbol("for_type");
 
 impl PartialEq<Symbol> for Path {
     fn eq(&self, word: &Symbol) -> bool {

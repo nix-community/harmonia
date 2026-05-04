@@ -31,13 +31,12 @@ pub mod build_result;
 pub mod daemon_wire;
 pub mod de;
 pub mod log;
-pub mod nar_hash;
 pub mod ser;
 pub mod types;
 pub mod valid_path_info;
 pub mod version;
 
-pub use nar_hash::NarHash;
+pub use harmonia_store_path_info::NarHash;
 
 pub use version::{
     FEATURE_REALISATION_WITH_PATH, Feature, FeatureSet, ProtocolVersion, supported_features,

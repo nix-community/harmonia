@@ -8,10 +8,44 @@
 
 use std::collections::BTreeSet;
 
-use harmonia_store_db::{RegisterPathParams, StoreDb};
+use harmonia_store_core::signature::Signature;
+use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathHash};
+use harmonia_store_db::StoreDb;
+use harmonia_store_path_info::{NarHash, UnkeyedValidPathInfo};
 
-fn make_path(hash: &str, name: &str) -> String {
-    format!("/nix/store/{hash}-{name}")
+fn sd() -> StoreDir {
+    StoreDir::default()
+}
+
+/// Create a `StorePath` from a name, hashing the name to produce a unique
+/// hash part (like Hydra's test helper).
+fn sp(name: &str) -> StorePath {
+    let digest = harmonia_utils_hash::Algorithm::SHA256.digest(name);
+    let sha = harmonia_utils_hash::Sha256::from_slice(&digest).unwrap();
+    StorePath::from_hash(&sha, name.parse().unwrap())
+}
+
+/// A zero NarHash for tests.
+fn zero_nar_hash() -> NarHash {
+    NarHash::from_slice(&[0u8; 32]).unwrap()
+}
+
+fn test_sig() -> Signature {
+    Signature::from_parts("test", &[0u8; 64]).unwrap()
+}
+
+fn empty_info() -> UnkeyedValidPathInfo {
+    UnkeyedValidPathInfo {
+        deriver: None,
+        nar_hash: zero_nar_hash(),
+        references: BTreeSet::new(),
+        registration_time: None,
+        nar_size: 0,
+        ultimate: false,
+        signatures: BTreeSet::new(),
+        ca: None,
+        store_dir: sd(),
+    }
 }
 
 /// Verify schema creation and empty queries work.
@@ -28,24 +62,22 @@ fn test_schema_creation() {
 fn test_path_roundtrip() {
     let mut db = StoreDb::open_memory().unwrap();
 
-    let params = RegisterPathParams {
-        path: make_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "hello"),
-        hash: "sha256:".to_string() + &"0".repeat(64),
-        nar_size: Some(12345),
+    let path = sp("hello");
+    let info = UnkeyedValidPathInfo {
+        nar_size: 12345,
         ultimate: true,
-        sigs: Some("cache.example.com:abc123".into()),
-        ..Default::default()
+        signatures: [test_sig()].into_iter().collect(),
+        ..empty_info()
     };
 
-    let id = db.register_valid_path(&params).unwrap();
+    let id = db.register_valid_path(&sd(), &path, &info).unwrap();
     assert!(id > 0);
 
-    let info = db.query_path_info(&params.path).unwrap().unwrap();
-    assert_eq!(info.path, params.path);
-    assert_eq!(info.hash, params.hash);
-    assert_eq!(info.nar_size, params.nar_size);
-    assert!(info.ultimate);
-    assert!(info.is_signed());
+    let result = db.query_path_info(&sd(), &path).unwrap().unwrap();
+    assert_eq!(result.path, path);
+    assert_eq!(result.info.nar_size, 12345);
+    assert!(result.info.ultimate);
+    assert!(!result.info.signatures.is_empty());
 }
 
 /// `query_path_info_by_hash_part` must not return the lexicographic neighbour
@@ -54,36 +86,41 @@ fn test_path_roundtrip() {
 fn test_query_path_info_by_hash_part() {
     let mut db = StoreDb::open_memory().unwrap();
 
-    let dep = RegisterPathParams {
-        path: make_path("cccccccccccccccccccccccccccccccc", "dep"),
-        hash: "sha256:".to_string() + &"c".repeat(64),
-        nar_size: Some(1),
-        ..Default::default()
-    };
-    db.register_valid_path(&dep).unwrap();
+    let dep = sp("dep");
+    let pkg = sp("hello");
 
-    let pkg = RegisterPathParams {
-        path: make_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "hello"),
-        hash: "sha256:".to_string() + &"b".repeat(64),
-        nar_size: Some(42),
-        references: BTreeSet::from([dep.path.clone()]),
-        ..Default::default()
-    };
-    db.register_valid_path(&pkg).unwrap();
+    db.register_valid_path(
+        &sd(),
+        &dep,
+        &UnkeyedValidPathInfo {
+            nar_size: 1,
+            ..empty_info()
+        },
+    )
+    .unwrap();
+    db.register_valid_path(
+        &sd(),
+        &pkg,
+        &UnkeyedValidPathInfo {
+            nar_size: 42,
+            references: BTreeSet::from([dep.clone()]),
+            ..empty_info()
+        },
+    )
+    .unwrap();
 
     // Hit: exact hash part returns the row plus its references.
     let info = db
-        .query_path_info_by_hash_part("/nix/store", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        .query_path_info_by_hash_part(&sd(), pkg.hash())
         .unwrap()
         .unwrap();
-    assert_eq!(info.path, pkg.path);
-    assert_eq!(info.nar_size, Some(42));
-    assert!(info.references.contains(&dep.path));
+    assert_eq!(info.path, pkg);
+    assert_eq!(info.info.nar_size, 42);
+    assert!(info.info.references.contains(&dep));
 
     // Miss: a hash part that sorts before an existing entry must not leak it.
-    let miss = db
-        .query_path_info_by_hash_part("/nix/store", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        .unwrap();
+    let miss_hash = StorePathHash::new([0u8; 20]);
+    let miss = db.query_path_info_by_hash_part(&sd(), &miss_hash).unwrap();
     assert!(miss.is_none());
 }
 
@@ -93,39 +130,42 @@ fn test_reference_graph() {
     let mut db = StoreDb::open_memory().unwrap();
 
     // Create a dependency chain: app -> lib -> glibc
-    let glibc = RegisterPathParams {
-        path: make_path("gggggggggggggggggggggggggggggggg", "glibc"),
-        hash: "g".repeat(64),
-        ..Default::default()
-    };
-    let lib = RegisterPathParams {
-        path: make_path("llllllllllllllllllllllllllllllll", "mylib"),
-        hash: "l".repeat(64),
-        references: BTreeSet::from([glibc.path.clone()]),
-        ..Default::default()
-    };
-    let app = RegisterPathParams {
-        path: make_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "myapp"),
-        hash: "a".repeat(64),
-        references: BTreeSet::from([lib.path.clone(), glibc.path.clone()]),
-        ..Default::default()
-    };
+    let glibc = sp("glibc");
+    let lib = sp("mylib");
+    let app = sp("myapp");
 
-    db.register_valid_path(&glibc).unwrap();
-    db.register_valid_path(&lib).unwrap();
-    db.register_valid_path(&app).unwrap();
+    db.register_valid_path(&sd(), &glibc, &empty_info())
+        .unwrap();
+    db.register_valid_path(
+        &sd(),
+        &lib,
+        &UnkeyedValidPathInfo {
+            references: BTreeSet::from([glibc.clone()]),
+            ..empty_info()
+        },
+    )
+    .unwrap();
+    db.register_valid_path(
+        &sd(),
+        &app,
+        &UnkeyedValidPathInfo {
+            references: BTreeSet::from([lib.clone(), glibc.clone()]),
+            ..empty_info()
+        },
+    )
+    .unwrap();
 
     // Check forward references
-    let app_refs = db.query_references(&app.path).unwrap();
+    let app_refs = db.query_references(&sd(), &app).unwrap();
     assert_eq!(app_refs.len(), 2);
-    assert!(app_refs.contains(&lib.path));
-    assert!(app_refs.contains(&glibc.path));
+    assert!(app_refs.contains(&lib));
+    assert!(app_refs.contains(&glibc));
 
     // Check reverse references (referrers)
-    let glibc_referrers = db.query_referrers(&glibc.path).unwrap();
+    let glibc_referrers = db.query_referrers(&sd(), &glibc).unwrap();
     assert_eq!(glibc_referrers.len(), 2);
-    assert!(glibc_referrers.contains(&lib.path));
-    assert!(glibc_referrers.contains(&app.path));
+    assert!(glibc_referrers.contains(&lib));
+    assert!(glibc_referrers.contains(&app));
 }
 
 /// Verify derivation output tracking.
@@ -133,32 +173,32 @@ fn test_reference_graph() {
 fn test_derivation_outputs() {
     let mut db = StoreDb::open_memory().unwrap();
 
-    let drv = RegisterPathParams {
-        path: make_path("dddddddddddddddddddddddddddddddd", "hello.drv"),
-        hash: "d".repeat(64),
-        ..Default::default()
-    };
-    let out = RegisterPathParams {
-        path: make_path("oooooooooooooooooooooooooooooooo", "hello"),
-        hash: "o".repeat(64),
-        deriver: Some(drv.path.clone()),
-        ..Default::default()
-    };
+    let drv = sp("hello.drv");
+    let out = sp("hello");
+    let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
 
-    db.register_valid_path(&drv).unwrap();
-    db.register_valid_path(&out).unwrap();
-    db.register_derivation_output(&drv.path, "out", &out.path)
+    db.register_valid_path(&sd(), &drv, &empty_info()).unwrap();
+    db.register_valid_path(
+        &sd(),
+        &out,
+        &UnkeyedValidPathInfo {
+            deriver: Some(drv.clone()),
+            ..empty_info()
+        },
+    )
+    .unwrap();
+    db.register_derivation_output(&sd(), &drv, &out_name, &out)
         .unwrap();
 
     // Query outputs from derivation
-    let outputs = db.query_derivation_outputs(&drv.path).unwrap();
+    let outputs = db.query_derivation_outputs(&sd(), &drv).unwrap();
     assert_eq!(outputs.len(), 1);
-    assert_eq!(outputs[0].output_id, "out");
-    assert_eq!(outputs[0].path, out.path);
+    assert_eq!(outputs[0].output_id.as_ref(), "out");
+    assert_eq!(outputs[0].path, out);
 
     // Query derivers from output
-    let derivers = db.query_valid_derivers(&out.path).unwrap();
-    assert_eq!(derivers, vec![drv.path]);
+    let derivers = db.query_valid_derivers(&sd(), &out).unwrap();
+    assert_eq!(derivers, vec![drv]);
 }
 
 /// Verify CA realisations roundtrip through the BuildTraceV3 table.
@@ -166,21 +206,73 @@ fn test_derivation_outputs() {
 fn test_realisation_roundtrip() {
     let db = StoreDb::open_memory().unwrap();
 
-    let drv = "dddddddddddddddddddddddddddddddd-hello.drv";
-    let out = make_path("oooooooooooooooooooooooooooooooo", "hello");
+    let drv_path = sp("hello.drv");
+    let out_path = sp("hello");
+    let output_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
 
-    assert!(db.query_realisation(drv, "out").unwrap().is_none());
+    assert!(
+        db.query_realisation(&sd(), &drv_path, &output_name)
+            .unwrap()
+            .is_none()
+    );
 
-    db.register_realisation(drv, "out", &out, Some("k:sig1 k:sig2"))
+    let realisation = harmonia_store_core::realisation::Realisation {
+        key: harmonia_store_core::realisation::DrvOutput {
+            drv_path: drv_path.clone(),
+            output_name: output_name.clone(),
+        },
+        value: harmonia_store_core::realisation::UnkeyedRealisation {
+            out_path: out_path.clone(),
+            signatures: [test_sig()].into_iter().collect(),
+        },
+    };
+    db.register_realisation(&sd(), &realisation).unwrap();
+
+    let r = db
+        .query_realisation(&sd(), &drv_path, &output_name)
+        .unwrap()
         .unwrap();
+    assert_eq!(r.realisation.key.drv_path, drv_path);
+    assert_eq!(r.realisation.key.output_name.as_ref(), "out");
+    assert_eq!(r.realisation.value.out_path, out_path);
+    assert_eq!(r.realisation.value.signatures.len(), 1);
 
-    let r = db.query_realisation(drv, "out").unwrap().unwrap();
-    assert_eq!(r.drv_path, drv);
-    assert_eq!(r.output_name, "out");
-    assert_eq!(r.output_path, out);
-    assert_eq!(r.signatures.as_deref(), Some("k:sig1 k:sig2"));
+    let dev_name: harmonia_store_core::derived_path::OutputName = "dev".parse().unwrap();
+    assert!(
+        db.query_realisation(&sd(), &drv_path, &dev_name)
+            .unwrap()
+            .is_none()
+    );
+}
 
-    assert!(db.query_realisation(drv, "dev").unwrap().is_none());
+/// Nix stores `drvPath` as a base path but `outputPath` as a full path
+/// (with `/nix/store/` prefix) in `BuildTraceV3`. Verify we can read
+/// realisations written that way.
+#[test]
+fn test_realisation_nix_compat() {
+    let db = StoreDb::open_memory().unwrap();
+
+    let drv_path = sp("hello.drv");
+    let out_path = sp("hello");
+    let output_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
+
+    // Simulate what Nix C++ does: base path for drvPath, full path for outputPath.
+    db.connection().execute(
+        "INSERT INTO BuildTraceV3 (drvPath, outputName, outputPath, signatures) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![
+            drv_path.to_string(),
+            "out",
+            format!("{}/{}", sd(), out_path),
+            "test:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ],
+    ).unwrap();
+
+    let r = db
+        .query_realisation(&sd(), &drv_path, &output_name)
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.realisation.key.drv_path, drv_path);
+    assert_eq!(r.realisation.value.out_path, out_path);
 }
 
 /// Verify path invalidation cascades correctly.
@@ -188,29 +280,27 @@ fn test_realisation_roundtrip() {
 fn test_invalidation_cascade() {
     let mut db = StoreDb::open_memory().unwrap();
 
-    let dep = RegisterPathParams {
-        path: make_path("dddddddddddddddddddddddddddddddd", "dep"),
-        hash: "d".repeat(64),
-        ..Default::default()
-    };
-    // Self-reference (allowed in Nix)
-    let main = RegisterPathParams {
-        path: make_path("mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm", "main"),
-        hash: "m".repeat(64),
-        references: BTreeSet::from([dep.path.clone()]),
-        ..Default::default()
-    };
+    let dep = sp("dep");
+    let main = sp("main");
 
-    db.register_valid_path(&dep).unwrap();
-    db.register_valid_path(&main).unwrap();
+    db.register_valid_path(&sd(), &dep, &empty_info()).unwrap();
+    db.register_valid_path(
+        &sd(),
+        &main,
+        &UnkeyedValidPathInfo {
+            references: BTreeSet::from([dep.clone()]),
+            ..empty_info()
+        },
+    )
+    .unwrap();
 
     // Add self-reference
-    db.add_reference(&main.path, &main.path).unwrap();
+    db.add_reference(&sd(), &main, &main).unwrap();
 
     // Invalidate main - should work despite self-reference (trigger handles it)
-    assert!(db.invalidate_path(&main.path).unwrap());
-    assert!(!db.is_valid_path(&main.path).unwrap());
+    assert!(db.invalidate_path(&sd(), &main).unwrap());
+    assert!(!db.is_valid_path(&sd(), &main).unwrap());
 
     // dep should still exist
-    assert!(db.is_valid_path(&dep.path).unwrap());
+    assert!(db.is_valid_path(&sd(), &dep).unwrap());
 }

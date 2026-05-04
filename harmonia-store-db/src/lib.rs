@@ -40,4 +40,3 @@ pub use connection::{OpenMode, StoreDb};
 pub use error::{Error, Result};
 pub use schema::SCHEMA_VERSION;
 pub use types::*;
-pub use write::*;

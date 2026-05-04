@@ -178,5 +178,10 @@ let
   );
 in
 {
-  inherit harmonia clippy tests;
+  inherit
+    src
+    harmonia
+    clippy
+    tests
+    ;
 }

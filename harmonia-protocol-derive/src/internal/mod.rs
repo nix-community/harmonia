@@ -145,6 +145,9 @@ impl<'a> Container<'a> {
     }
 
     pub fn ident_type(&self) -> syn::Type {
+        if let Some(for_type) = &self.attrs.for_type {
+            return for_type.clone();
+        }
         let path: syn::Path = self.ident.clone().into();
         let tp = syn::TypePath { qself: None, path };
         tp.into()

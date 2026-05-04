@@ -36,6 +36,7 @@ tracing          = { workspace = true }
 harmonia-nar             = { version = "3.0.0" }
 harmonia-protocol-derive = { version = "3.1.0" }
 harmonia-store-core      = { version = "0.0.0-alpha.0" }
+harmonia-store-path-info = { path = "../harmonia-store-path-info" }
 harmonia-utils-hash      = { version = "0.0.0-alpha.0" }
 harmonia-utils-io        = { version = "0.0.0-alpha.0" }
 harmonia-utils-test      = { version = "0.0.0-alpha.0", optional = true }

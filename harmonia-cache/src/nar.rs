@@ -6,7 +6,7 @@ use actix_web::{HttpRequest, HttpResponse, http, web};
 use harmonia_nar::NarByteStream;
 use harmonia_store_core::store_path::StorePathHash;
 use harmonia_utils_hash::Hash;
-use harmonia_utils_hash::fmt::{Any, CommonHash};
+use harmonia_utils_hash::fmt::CommonHash;
 use serde::Deserialize;
 
 /// Represents the query string of a NAR URL.
@@ -90,7 +90,7 @@ pub(crate) async fn get(
     // Single SQLite lookup yields both the store path and its nar hash/size.
     let info = match settings
         .store
-        .query_path_info_by_hash_part(&store_path_hash.to_string())?
+        .query_path_info_by_hash_part(&store_path_hash)?
     {
         Some(info) => info,
         None => {
@@ -99,30 +99,10 @@ pub(crate) async fn get(
                 .body("store path not found"));
         }
     };
-    let store_path = settings.store.store_dir().parse(&info.path).map_err(|e| {
-        CacheError::from(StoreError::PathQuery {
-            hash: outhash.to_string(),
-            reason: format!("invalid store path in db: {e}"),
-        })
-    })?;
+    let store_path = &info.path;
 
-    // db stores `sha256:<base16>`; URL narhash is bare base32.
-    let nar_hash: Hash = info
-        .hash
-        .parse::<Any<Hash>>()
-        .map_err(|e| {
-            CacheError::from(StoreError::PathQuery {
-                hash: outhash.to_string(),
-                reason: format!("invalid nar hash in db: {e}"),
-            })
-        })?
-        .into_hash();
-    let nar_size = info.nar_size.ok_or_else(|| {
-        CacheError::from(StoreError::PathQuery {
-            hash: outhash.to_string(),
-            reason: format!("missing narSize for {}", info.path),
-        })
-    })?;
+    let nar_hash: Hash = info.info.nar_hash.into();
+    let nar_size = info.info.nar_size;
     let expected_hash = nar_hash.as_base32().as_bare().to_string();
     if narhash != expected_hash {
         return Ok(HttpResponse::NotFound()
@@ -133,7 +113,7 @@ pub(crate) async fn get(
     let rlength = nar_size;
     let mut res = HttpResponse::Ok();
 
-    let real_path = settings.store.get_real_path(&store_path);
+    let real_path = settings.store.get_real_path(store_path);
 
     // Credit actix_web actix-files: https://github.com/actix/actix-web/blob/master/actix-files/src/named.rs#L525
     if let Some(ranges) = req.headers().get(http::header::RANGE) {

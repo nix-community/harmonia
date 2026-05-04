@@ -24,9 +24,6 @@ pub enum CacheError {
     #[error("Fingerprint error: {0}")]
     Fingerprint(#[from] harmonia_store_core::signature::FingerprintError),
 
-    #[error("NARInfo error: {0}")]
-    NarInfo(#[from] NarInfoError),
-
     #[error("File serving error: {0}")]
     Serve(#[from] ServeError),
 }
@@ -66,12 +63,6 @@ pub enum StoreError {
 
     #[error("nix database error ({path}): {reason}")]
     Db { path: String, reason: String },
-}
-
-#[derive(Error, Debug)]
-pub enum NarInfoError {
-    #[error("Failed to query path info: {reason}")]
-    QueryFailed { reason: String },
 }
 
 #[derive(Error, Debug)]

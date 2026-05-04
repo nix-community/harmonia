@@ -6,6 +6,7 @@ members = [
     "harmonia-utils-hash",
     "harmonia-store-core",
     "harmonia-store-db",
+    "harmonia-store-path-info",
     "harmonia-store-remote",
     "harmonia-store-aterm",
     "harmonia-nar",
