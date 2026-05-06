@@ -55,6 +55,7 @@ pub enum Operation {
     AddBuildLog = 45,
     BuildPathsWithResults = 46,
     AddPermRoot = 47,
+    SubmitOutput = 1000,
 }
 
 impl Operation {

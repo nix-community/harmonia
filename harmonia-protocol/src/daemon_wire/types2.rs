@@ -20,7 +20,7 @@ use crate::types::{ClientOptions, DaemonPath, DaemonString};
 use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
-use harmonia_store_core::derived_path::DerivedPath;
+use harmonia_store_core::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_core::realisation::{DrvOutput, Realisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
@@ -188,6 +188,7 @@ pub enum Request {
     AddBuildLog(BaseStorePath),
     BuildPathsWithResults(BuildPathsRequest),
     AddPermRoot(AddPermRootRequest),
+    SubmitOutput(SubmitOutputRequest),
 }
 
 impl Request {
@@ -223,6 +224,7 @@ impl Request {
             Request::AddBuildLog(_) => Operation::AddBuildLog,
             Request::BuildPathsWithResults(_) => Operation::BuildPathsWithResults,
             Request::AddPermRoot(_) => Operation::AddPermRoot,
+            Request::SubmitOutput(_) => Operation::SubmitOutput,
         }
     }
 
@@ -318,6 +320,9 @@ impl Request {
             Request::AddPermRoot(req) => {
                 let gc_root = String::from_utf8_lossy(&req.gc_root);
                 debug_span!("AddPermRoot", path=?req.store_path, ?gc_root)
+            }
+            Request::SubmitOutput(req) => {
+                debug_span!("SubmitOutput", path=?req.path, output=?req.output)
             }
         }
     }
@@ -428,6 +433,12 @@ pub struct AddMultipleToStoreRequest {
 pub struct AddPermRootRequest {
     pub store_path: StorePath,
     pub gc_root: DaemonPath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
+pub struct SubmitOutputRequest {
+    pub path: SingleDerivedPath,
+    pub output: OutputName,
 }
 
 macro_rules! optional_info {

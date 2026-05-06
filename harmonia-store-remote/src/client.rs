@@ -47,7 +47,7 @@ use harmonia_protocol::{FEATURE_REALISATION_WITH_PATH, ProtocolVersion};
 // From harmonia-store-core
 use harmonia_protocol::log::{LogMessage, Message, Verbosity};
 use harmonia_store_core::derivation::BasicDerivation;
-use harmonia_store_core::derived_path::{DerivedPath, OutputName};
+use harmonia_store_core::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
@@ -964,6 +964,21 @@ where
         }
         .future_result()
         .fill_operation(Operation::AddPermRoot)
+    }
+
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        async move {
+            self.writer.write_value(&Operation::SubmitOutput).await?;
+            self.writer.write_value(path).await?;
+            self.writer.write_value(output).await?;
+            Ok(self.process_stderr().map_ok(|_: IgnoredOne| ()))
+        }
+        .future_result()
+        .fill_operation(Operation::SubmitOutput)
     }
 
     fn add_ca_to_store<'a, 'r, S>(

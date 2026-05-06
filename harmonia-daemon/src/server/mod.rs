@@ -572,6 +572,16 @@ where
         trace!("Shutdown Size {}", size_of_val(&ret));
         ret
     }
+
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a harmonia_store_core::derived_path::SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        let ret = Box::pin(self.0.submit_output(path, output));
+        trace!("SubmitOutput Size {}", size_of_val(&ret));
+        ret
+    }
 }
 
 pub struct DaemonConnection<R, W> {
@@ -1066,6 +1076,10 @@ where
                 let logs = store.add_perm_root(&req.store_path, &req.gc_root);
                 let value = self.process_logs(logs).await?;
                 self.writer.write_value(&value).await?;
+            }
+            SubmitOutput(req) => {
+                let logs = store.submit_output(&req.path, &req.output);
+                self.process_logs(logs).await?;
             }
         }
         Ok(())

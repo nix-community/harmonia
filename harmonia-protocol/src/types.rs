@@ -21,7 +21,7 @@ use crate::log::Verbosity;
 use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
-use harmonia_store_core::derived_path::{DerivedPath, OutputName};
+use harmonia_store_core::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
@@ -565,6 +565,14 @@ pub trait DaemonStore: Send {
         ready(Err(DaemonError::unimplemented(Operation::AddPermRoot))).empty_logs()
     }
 
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        ready(Err(DaemonError::unimplemented(Operation::SubmitOutput))).empty_logs()
+    }
+
     fn add_ca_to_store<'a, 'r, R>(
         &'a mut self,
         name: &'a str,
@@ -824,6 +832,14 @@ where
         gc_root: &'a DaemonPath,
     ) -> impl ResultLog<Output = DaemonResult<DaemonPath>> + Send + 'a {
         (**self).add_perm_root(path, gc_root)
+    }
+
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        (**self).submit_output(path, output)
     }
 
     fn add_ca_to_store<'a, 'r, R>(
