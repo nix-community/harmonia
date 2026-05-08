@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "harmonia-store-build-result",
     "harmonia-client",
     "harmonia-utils-io",
     "harmonia-utils-base-encoding",
@@ -95,6 +96,7 @@ harmonia-nar                 = { path = "harmonia-nar" }
 harmonia-protocol            = { path = "harmonia-protocol" }
 harmonia-protocol-derive     = { path = "harmonia-protocol-derive" }
 harmonia-store-aterm         = { path = "harmonia-store-aterm" }
+harmonia-store-build-result  = { path = "harmonia-store-build-result" }
 harmonia-store-core          = { path = "harmonia-store-core" }
 harmonia-store-db            = { path = "harmonia-store-db" }
 harmonia-store-remote        = { path = "harmonia-store-remote" }

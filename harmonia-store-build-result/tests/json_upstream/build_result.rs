@@ -1,7 +1,7 @@
 //! BuildResult JSON tests
 
 use super::{libstore_test_data_path, test_upstream_json};
-use harmonia_protocol::daemon_wire::types2::{
+use harmonia_store_build_result::{
     BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, FailureStatus,
     Microseconds, SuccessStatus,
 };
@@ -50,7 +50,7 @@ test_upstream_json!(
         BuildResult {
             inner: BuildResultInner::Failure(BuildResultFailure {
                 status: FailureStatus::OutputRejected,
-                error_msg: "no idea why".into(),
+                error_msg: b"no idea why".to_vec(),
                 is_non_deterministic: false,
             }),
             times_built: 3,
@@ -69,7 +69,7 @@ test_upstream_json!(
         BuildResult {
             inner: BuildResultInner::Failure(BuildResultFailure {
                 status: FailureStatus::NotDeterministic,
-                error_msg: "no idea why".into(),
+                error_msg: b"no idea why".to_vec(),
                 is_non_deterministic: false,
             }),
             times_built: 1,
