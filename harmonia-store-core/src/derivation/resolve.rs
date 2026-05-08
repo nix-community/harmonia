@@ -26,7 +26,43 @@ impl Derivation {
     /// indicates an output that hasn't been built yet.
     ///
     /// Returns [`None`] if any required input output path can't be resolved.
+    ///
+    /// Any `InputAddressed` outputs to [`Deferred`](DerivationOutput::Deferred) since their
+    /// original hashes are invalidated by the resolution.
     pub fn try_resolve(
+        &self,
+        store_dir: &StoreDir,
+        query: &mut impl FnMut(&[(&SingleDerivedPath, &OutputName)]) -> Vec<Option<StorePath>>,
+    ) -> Option<BasicDerivation> {
+        let mut resolved = self.try_resolve_force(store_dir, query)?;
+
+        // InputAddressed becomes Deferred when the inputs had Built
+        // entries, since the original output hashes are no longer valid.
+        let has_built_inputs = self
+            .inputs
+            .iter()
+            .any(|i| matches!(i, SingleDerivedPath::Built { .. }));
+        if has_built_inputs {
+            for output in resolved.outputs.values_mut() {
+                if matches!(output, DerivationOutput::InputAddressed(_)) {
+                    *output = DerivationOutput::Deferred;
+                }
+            }
+        }
+
+        Some(resolved)
+    }
+
+    /// Resolve input derivation references into concrete store paths, keeping the original output
+    /// definitions unchanged.
+    ///
+    /// Unlike [`try_resolve`](Self::try_resolve), this does *not* convert `InputAddressed` outputs
+    /// to `Deferred`. The resulting derivation is not a valid resolved derivation (the output
+    /// hashes don't match the resolved inputs). However, this invalid derivation is still useful
+    /// for e.g. remote building where the builder should produce outputs at the
+    /// originally-scheduled paths and need to know anything about how the inputs of the derivation
+    /// were produced.
+    pub fn try_resolve_force(
         &self,
         store_dir: &StoreDir,
         query: &mut impl FnMut(&[(&SingleDerivedPath, &OutputName)]) -> Vec<Option<StorePath>>,
@@ -47,8 +83,6 @@ impl Derivation {
             }
         }
 
-        let non_trivial_resolution = !built_inputs.is_empty();
-
         let resolved_paths = query(&built_inputs);
         assert_eq!(resolved_paths.len(), built_inputs.len());
 
@@ -66,25 +100,9 @@ impl Derivation {
             input_srcs.insert(actual_path);
         }
 
-        // InputAddressed becomes Deferred when the inputs had CA rewrites, since the
-        // original paths are no longer valid.
-        let outputs = self
-            .outputs
-            .iter()
-            .map(|(name, output)| {
-                let output = match output {
-                    DerivationOutput::InputAddressed(_) if non_trivial_resolution => {
-                        DerivationOutput::Deferred
-                    }
-                    other => other.clone(),
-                };
-                (name.clone(), output)
-            })
-            .collect();
-
         let mut resolved = BasicDerivation {
             name: self.name.clone(),
-            outputs,
+            outputs: self.outputs.clone(),
             inputs: input_srcs,
             platform: self.platform.clone(),
             builder: self.builder.clone(),
