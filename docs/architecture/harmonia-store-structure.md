@@ -87,10 +87,12 @@ graph BT
     store-core --> utils-hash
     store-aterm --> store-core
     store-aterm --> utils-hash
+    store-build-result --> store-core
     store-path-info --> store-core
     store-path-info --> utils-hash
     protocol --> nar
     protocol --> protocol-derive
+    protocol --> store-build-result
     protocol --> store-core
     protocol --> store-path-info
     protocol --> utils-hash
@@ -128,9 +130,11 @@ graph BT
     utils-hash --> utils-base-encoding
     store-core --> utils-hash
     store-aterm --> store-core
+    store-build-result --> store-core
     store-path-info --> store-core
     protocol --> nar
     protocol --> protocol-derive
+    protocol --> store-build-result
     protocol --> store-path-info
     store-db --> store-path-info
     cache --> nar

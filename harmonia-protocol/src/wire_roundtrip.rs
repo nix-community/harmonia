@@ -57,8 +57,8 @@ macro_rules! wire_roundtrip {
     };
 }
 
-use crate::build_result::BuildResult;
 use crate::daemon_wire::types2::QueryMissingResult;
+use harmonia_store_build_result::BuildResult;
 use harmonia_store_core::derived_path::DerivedPath;
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 

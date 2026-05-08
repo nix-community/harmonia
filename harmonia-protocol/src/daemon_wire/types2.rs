@@ -1,13 +1,12 @@
-pub use crate::build_result::{
+pub use harmonia_store_build_result::{
     BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, FailureStatus,
-    SuccessStatus,
+    Microseconds, SuccessStatus,
 };
 
 use std::fmt;
 use std::num::NonZero;
 use std::str::FromStr;
 use std::str::from_utf8;
-use std::time::Duration;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 #[cfg(test)]
@@ -29,47 +28,6 @@ use harmonia_store_core::store_path::{
 
 use super::IgnoredZero;
 use super::types::Operation;
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    NixDeserialize,
-    NixSerialize,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[nix(from = "i64", into = "i64")]
-#[serde(transparent)]
-pub struct Microseconds(pub i64);
-
-impl From<i64> for Microseconds {
-    fn from(value: i64) -> Self {
-        Microseconds(value)
-    }
-}
-
-impl From<Microseconds> for Duration {
-    fn from(value: Microseconds) -> Self {
-        Duration::from_micros(value.0.unsigned_abs())
-    }
-}
-
-impl TryFrom<Duration> for Microseconds {
-    type Error = std::num::TryFromIntError;
-    fn try_from(value: Duration) -> Result<Self, Self::Error> {
-        Ok(Microseconds(value.as_micros().try_into()?))
-    }
-}
-
-impl From<Microseconds> for i64 {
-    fn from(value: Microseconds) -> Self {
-        value.0
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
 #[nix(from_str, display)]
@@ -571,20 +529,6 @@ pub mod arbitrary {
                 5 => Just(Check),
             ]
             .boxed()
-        }
-    }
-
-    impl Arbitrary for Microseconds {
-        type Parameters = ();
-        type Strategy = BoxedStrategy<Microseconds>;
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            arb_microseconds().boxed()
-        }
-    }
-    prop_compose! {
-        fn arb_microseconds()(ms in 0i64..i64::MAX) -> Microseconds {
-            Microseconds(ms)
         }
     }
 }
