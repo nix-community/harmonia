@@ -72,6 +72,7 @@ tokio = { version = "1", features = [
 tokio-util = "0.7"
 toml = "1.1"
 tracing = "0.1"
+tracing-futures = "0.2"
 tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
 
 # Proc-macro toolkit (harmonia-protocol-derive)

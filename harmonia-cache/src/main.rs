@@ -62,8 +62,6 @@ const TAILWIND_CSS: &str = include_str!("styles/output.css");
 const CARGO_NAME: &str = env!("CARGO_PKG_NAME");
 const CARGO_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CARGO_HOME_PAGE: &str = env!("CARGO_PKG_HOMEPAGE");
-const NIXBASE32_ALPHABET: &str = "0123456789abcdfghijklmnpqrsvwxyz";
-
 fn cache_control_max_age(max_age: u32) -> http::header::CacheControl {
     http::header::CacheControl(vec![http::header::CacheDirective::MaxAge(max_age)])
 }
@@ -170,13 +168,16 @@ async fn inner_main() -> Result<()> {
     let config_data = c.clone();
     let metrics_data = web::Data::new(metrics.clone());
 
-    let nar_route = format!("/nar/{{narhash:[{NIXBASE32_ALPHABET}]{{52}}}}.nar");
+    let nar_route = format!(
+        "/nar/{{narhash:[{}]{{52}}}}.nar",
+        harmonia_utils_base_encoding::base32::ALPHABET
+    );
     // narinfos served by nix-serve have the narhash embedded in the nar URL.
     // While we don't do that, if nix-serve is replaced with harmonia, the old nar URLs
     // will stay in client caches for a while - so support them anyway.
     let nix_serve_nar_route = format!(
         "/nar/{{outhash:[{a}]{{32}}}}-{{narhash:[{a}]{{52}}}}.nar",
-        a = NIXBASE32_ALPHABET
+        a = harmonia_utils_base_encoding::base32::ALPHABET
     );
     let mut server = HttpServer::new(move || {
         App::new()

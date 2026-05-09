@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
-# SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+# SPDX-FileCopyrightText: 2026 Jörg Thalheim (Harmonia adaptation)
 # SPDX-License-Identifier: MIT
 
 [package]
@@ -33,10 +33,15 @@ zerocopy                     = { version = "0.8", features = [ "derive" ] }
 zeroize                      = { version = "1" }
 
 [dev-dependencies]
+futures-util       = { workspace = true }
+harmonia-nar       = { version = "3.0.0" }
 harmonia-store-core = { path = ".", features = [ "test" ] }
-hex-literal         = { workspace = true }
-rstest              = { workspace = true }
-tempfile            = { workspace = true }
+hex-literal        = { workspace = true }
+rstest             = { workspace = true }
+rstest_reuse       = "0.7"
+tempfile           = { workspace = true }
+test-log           = "0.2"
+tokio              = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 test = [ "proptest", "proptest-derive", "harmonia-utils-test", "harmonia-utils-hash/test" ]

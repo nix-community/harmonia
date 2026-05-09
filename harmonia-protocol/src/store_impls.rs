@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
-// SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+// SPDX-FileCopyrightText: 2026 Jörg Thalheim (Harmonia adaptation)
 // SPDX-License-Identifier: EUPL-1.2 OR MIT
 
 //! Hand-written NixSerialize/NixDeserialize implementations for harmonia-store-core types.
@@ -20,7 +20,9 @@ use crate::de::{NixDeserialize, NixRead};
 use crate::log::{Activity, ActivityResult, LogMessage, StopActivity};
 use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
-use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, StructuredAttrs};
+use harmonia_store_core::derivation::{
+    BasicDerivation, DerivationOutput, OutputPathName, StructuredAttrs,
+};
 use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::store_path::{
@@ -120,14 +122,6 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
 
 // ========== DerivationOutput ==========
 
-fn output_path_name(drv_name: &StorePathName, output_name: &OutputName) -> String {
-    if output_name.is_default() {
-        drv_name.to_string()
-    } else {
-        format!("{}-{}", drv_name, output_name)
-    }
-}
-
 async fn read_derivation_output<R>(
     reader: &mut R,
     _drv_name: &StorePathName,
@@ -139,34 +133,40 @@ where
     use crate::de::Error;
     use harmonia_utils_hash::fmt::Base32;
 
-    let store_path_str = reader.read_value::<String>().await?;
+    let path_str = reader.read_value::<String>().await?;
     let method_str = reader.read_value::<String>().await?;
     let hash_str = reader.read_value::<String>().await?;
 
-    if hash_str == "impure" {
-        let algo = method_str.parse().map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::Impure(algo))
-    } else if store_path_str.is_empty() && !method_str.is_empty() {
-        let algo = method_str.parse().map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::CAFloating(algo))
-    } else if store_path_str.is_empty() && method_str.is_empty() && hash_str.is_empty() {
-        Ok(DerivationOutput::Deferred)
-    } else if method_str.is_empty() && hash_str.is_empty() {
-        let store_path = reader
-            .store_dir()
-            .parse(&store_path_str)
-            .map_err(R::Error::invalid_data)?;
+    let store_dir = reader.store_dir();
+    (|| -> Result<DerivationOutput, String> {
+        if hash_str == "impure" {
+            let algo: ContentAddressMethodAlgorithm =
+                method_str.parse().map_err(|e| format!("{e}"))?;
+            return Ok(DerivationOutput::Impure(algo));
+        }
+        if !method_str.is_empty() && !hash_str.is_empty() {
+            let algo: ContentAddressMethodAlgorithm =
+                method_str.parse().map_err(|e| format!("{e}"))?;
+            let hash = Base32::from_str(&hash_str)
+                .map(|h| *h.as_hash())
+                .map_err(|e| format!("{hash_str}: {e}"))?;
+            let ca = ContentAddress::from_hash(algo.method(), hash)
+                .map_err(|e| format!("invalid CA: {e}"))?;
+            return Ok(DerivationOutput::CAFixed(ca));
+        }
+        if !method_str.is_empty() {
+            let algo = method_str.parse().map_err(|e| format!("{e}"))?;
+            return Ok(DerivationOutput::CAFloating(algo));
+        }
+        if path_str.is_empty() {
+            return Ok(DerivationOutput::Deferred);
+        }
+        let store_path = store_dir
+            .parse::<StorePath>(&path_str)
+            .map_err(|e| format!("{path_str}: {e}"))?;
         Ok(DerivationOutput::InputAddressed(store_path))
-    } else {
-        // CAFixed
-        let method_algo = method_str
-            .parse::<ContentAddressMethodAlgorithm>()
-            .map_err(R::Error::invalid_data)?;
-        let hash = Base32::from_str(&hash_str).map_err(R::Error::invalid_data)?;
-        let ca = ContentAddress::from_hash(method_algo.method(), *hash.as_hash())
-            .map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::CAFixed(ca))
-    }
+    })()
+    .map_err(R::Error::invalid_data)
 }
 
 async fn write_derivation_output<W>(
@@ -178,40 +178,37 @@ async fn write_derivation_output<W>(
 where
     W: NixWrite,
 {
-    use crate::ser::Error;
-
-    match output {
-        DerivationOutput::InputAddressed(store_path) => {
-            writer.write_value(store_path).await?;
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-        }
+    let store_dir = writer.store_dir().clone();
+    let (path_str, method_str, hash_str) = match output {
+        DerivationOutput::InputAddressed(path) => (
+            store_dir.display(path).to_string(),
+            String::new(),
+            String::new(),
+        ),
         DerivationOutput::CAFixed(ca) => {
-            let name = output_path_name(drv_name, output_name)
-                .to_string()
-                .parse()
-                .map_err(Error::unsupported_data)?;
-            let path = writer.store_dir().make_store_path_from_ca(name, *ca);
-            writer.write_value(&path).await?;
-            writer.write_value(&ca.method_algorithm()).await?;
-            writer.write_display(ca.hash().base32().bare()).await?;
+            let out_name = OutputPathName {
+                drv_name,
+                output_name,
+            }
+            .to_string()
+            .parse()
+            .expect("output path name should be valid");
+            let path = store_dir.make_store_path_from_ca(out_name, *ca);
+            (
+                store_dir.display(&path).to_string(),
+                ca.method_algorithm().to_string(),
+                ca.hash().base32().bare().to_string(),
+            )
         }
-        DerivationOutput::Deferred => {
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-        }
-        DerivationOutput::CAFloating(algo) => {
-            writer.write_value("").await?;
-            writer.write_value(algo).await?;
-            writer.write_value("").await?;
-        }
+        DerivationOutput::CAFloating(algo) => (String::new(), algo.to_string(), String::new()),
+        DerivationOutput::Deferred => (String::new(), String::new(), String::new()),
         DerivationOutput::Impure(algo) => {
-            writer.write_value("").await?;
-            writer.write_value(algo).await?;
-            writer.write_value("impure").await?;
+            (String::new(), algo.to_string(), "impure".to_string())
         }
-    }
+    };
+    writer.write_value(&path_str).await?;
+    writer.write_value(&method_str).await?;
+    writer.write_value(&hash_str).await?;
     Ok(())
 }
 
