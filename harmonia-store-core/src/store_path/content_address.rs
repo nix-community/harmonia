@@ -22,7 +22,7 @@ pub enum ContentAddressMethod {
     Flat,
     #[display("fixed:r")]
     #[serde(rename = "nar")]
-    Recursive,
+    NixArchive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
@@ -33,7 +33,7 @@ pub enum ContentAddressMethodAlgorithm {
     #[display("{_0}")]
     Flat(Algorithm),
     #[display("r:{_0}")]
-    Recursive(Algorithm),
+    NixArchive(Algorithm),
 }
 
 /// Raw representation for JSON serialization/deserialization
@@ -66,8 +66,8 @@ impl<'de> Deserialize<'de> for ContentAddressMethodAlgorithm {
         Ok(match raw.method {
             ContentAddressMethod::Text => ContentAddressMethodAlgorithm::Text,
             ContentAddressMethod::Flat => ContentAddressMethodAlgorithm::Flat(raw.hash_algo),
-            ContentAddressMethod::Recursive => {
-                ContentAddressMethodAlgorithm::Recursive(raw.hash_algo)
+            ContentAddressMethod::NixArchive => {
+                ContentAddressMethodAlgorithm::NixArchive(raw.hash_algo)
             }
         })
     }
@@ -78,7 +78,7 @@ impl ContentAddressMethodAlgorithm {
         match self {
             ContentAddressMethodAlgorithm::Text => Algorithm::SHA256,
             ContentAddressMethodAlgorithm::Flat(algorithm) => *algorithm,
-            ContentAddressMethodAlgorithm::Recursive(algorithm) => *algorithm,
+            ContentAddressMethodAlgorithm::NixArchive(algorithm) => *algorithm,
         }
     }
 
@@ -86,7 +86,7 @@ impl ContentAddressMethodAlgorithm {
         match self {
             ContentAddressMethodAlgorithm::Text => ContentAddressMethod::Text,
             ContentAddressMethodAlgorithm::Flat(_) => ContentAddressMethod::Flat,
-            ContentAddressMethodAlgorithm::Recursive(_) => ContentAddressMethod::Recursive,
+            ContentAddressMethodAlgorithm::NixArchive(_) => ContentAddressMethod::NixArchive,
         }
     }
 }
@@ -98,7 +98,7 @@ impl FromStr for ContentAddressMethodAlgorithm {
         if s == "text:sha256" {
             Ok(Self::Text)
         } else if let Some(algo) = s.strip_prefix("r:") {
-            Ok(Self::Recursive(algo.parse()?))
+            Ok(Self::NixArchive(algo.parse()?))
         } else {
             Ok(Self::Flat(s.parse()?))
         }
@@ -113,7 +113,7 @@ pub enum ContentAddress {
     #[display("fixed:{}", _0.as_base32())]
     Flat(Hash),
     #[display("fixed:r:{}", _0.as_base32())]
-    Recursive(Hash),
+    NixArchive(Hash),
 }
 
 impl ContentAddress {
@@ -124,7 +124,7 @@ impl ContentAddress {
         Ok(match method {
             ContentAddressMethod::Text => ContentAddress::Text(hash.try_into()?),
             ContentAddressMethod::Flat => ContentAddress::Flat(hash),
-            ContentAddressMethod::Recursive => ContentAddress::Recursive(hash),
+            ContentAddressMethod::NixArchive => ContentAddress::NixArchive(hash),
         })
     }
     pub fn algorithm(&self) -> Algorithm {
@@ -134,7 +134,7 @@ impl ContentAddress {
         match self {
             ContentAddress::Text(_) => ContentAddressMethod::Text,
             ContentAddress::Flat(_) => ContentAddressMethod::Flat,
-            ContentAddress::Recursive(_) => ContentAddressMethod::Recursive,
+            ContentAddress::NixArchive(_) => ContentAddressMethod::NixArchive,
         }
     }
 
@@ -142,8 +142,8 @@ impl ContentAddress {
         match self {
             ContentAddress::Text(_) => ContentAddressMethodAlgorithm::Text,
             ContentAddress::Flat(hash) => ContentAddressMethodAlgorithm::Flat(hash.algorithm()),
-            ContentAddress::Recursive(hash) => {
-                ContentAddressMethodAlgorithm::Recursive(hash.algorithm())
+            ContentAddress::NixArchive(hash) => {
+                ContentAddressMethodAlgorithm::NixArchive(hash.algorithm())
             }
         }
     }
@@ -152,7 +152,7 @@ impl ContentAddress {
         match *self {
             ContentAddress::Text(sha256) => sha256.into(),
             ContentAddress::Flat(hash) => hash,
-            ContentAddress::Recursive(hash) => hash,
+            ContentAddress::NixArchive(hash) => hash,
         }
     }
 }
@@ -207,10 +207,10 @@ impl FromStr for ContentAddress {
             let hash = hash_s
                 .parse::<NonSRI<Hash>>()
                 .map_err(|err| {
-                    ParseContentAddressError::InvalidHash(ContentAddressMethod::Recursive, err)
+                    ParseContentAddressError::InvalidHash(ContentAddressMethod::NixArchive, err)
                 })?
                 .into_hash();
-            Ok(Self::Recursive(hash))
+            Ok(Self::NixArchive(hash))
         } else if let Some(hash_s) = s.strip_prefix("fixed:") {
             let hash = hash_s
                 .parse::<NonSRI<Hash>>()
@@ -259,7 +259,7 @@ mod unittests {
     )]
     #[case::recursive(
         "fixed:r:sha256:1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s",
-        ContentAddressMethod::Recursive,
+        ContentAddressMethod::NixArchive,
         Algorithm::SHA256
     )]
     fn content_address_parse(
@@ -297,7 +297,7 @@ mod unittests {
     #[rstest]
     #[case(ContentAddressMethod::Text, "text:")]
     #[case(ContentAddressMethod::Flat, "")]
-    #[case(ContentAddressMethod::Recursive, "r:")]
+    #[case(ContentAddressMethod::NixArchive, "r:")]
     fn content_address_method_parse(#[case] method: ContentAddressMethod, #[case] value: &str) {
         assert_eq!(method.to_string(), value);
         let actual = value.parse::<ContentAddressMethod>().unwrap();
@@ -311,14 +311,14 @@ mod unittests {
     #[case(ContentAddressMethodAlgorithm::Flat(Algorithm::SHA1), "sha1")]
     #[case(ContentAddressMethodAlgorithm::Flat(Algorithm::SHA256), "sha256")]
     #[case(ContentAddressMethodAlgorithm::Flat(Algorithm::SHA512), "sha512")]
-    #[case(ContentAddressMethodAlgorithm::Recursive(Algorithm::MD5), "r:md5")]
-    #[case(ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA1), "r:sha1")]
+    #[case(ContentAddressMethodAlgorithm::NixArchive(Algorithm::MD5), "r:md5")]
+    #[case(ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA1), "r:sha1")]
     #[case(
-        ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256),
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256),
         "r:sha256"
     )]
     #[case(
-        ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA512),
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA512),
         "r:sha512"
     )]
     fn content_address_method_algo_parse(

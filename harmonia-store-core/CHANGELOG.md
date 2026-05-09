@@ -8,6 +8,7 @@ Various changes, and supporting the latest Nix `master` branch.
 
 #### Types
 
+- Renamed `ContentAddress::Recursive` to `ContentAddress::NixArchive`, `ContentAddressMethod::Recursive` to `ContentAddressMethod::NixArchive`, and `ContentAddressMethodAlgorithm::Recursive` to `ContentAddressMethodAlgorithm::NixArchive`, aligning with upstream Nix's terminology.
 - `Realisation` restructured to `{ key: DrvOutput, value: UnkeyedRealisation }`, matching upstream Nix's key-value composition.
   The old flat fields and `dependent_realisations` are removed.
 - `DrvOutput` now uses `StorePath` (not `Hash`) for `drv_path`, and uses `^` as the separator in its string format.

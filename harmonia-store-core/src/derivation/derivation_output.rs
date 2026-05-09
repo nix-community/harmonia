@@ -131,7 +131,7 @@ impl<'de> Deserialize<'de> for DerivationOutput {
             let ca_method_algo = match method {
                 ContentAddressMethod::Text => ContentAddressMethodAlgorithm::Text,
                 ContentAddressMethod::Flat => ContentAddressMethodAlgorithm::Flat(algo),
-                ContentAddressMethod::Recursive => ContentAddressMethodAlgorithm::Recursive(algo),
+                ContentAddressMethod::NixArchive => ContentAddressMethodAlgorithm::NixArchive(algo),
             };
             if raw.impure {
                 Ok(DerivationOutput::Impure(ca_method_algo))
@@ -247,7 +247,7 @@ pub mod arbitrary {
         prop_oneof![
             any::<hash::Hash>().prop_map(|h| DerivationOutput::CAFixed(ContentAddress::Flat(h))),
             any::<hash::Hash>()
-                .prop_map(|h| DerivationOutput::CAFixed(ContentAddress::Recursive(h)))
+                .prop_map(|h| DerivationOutput::CAFixed(ContentAddress::NixArchive(h)))
         ]
     }
 
@@ -265,7 +265,7 @@ pub mod arbitrary {
         prop_oneof![
             1 => Just(ContentAddressMethodAlgorithm::Text),
             2 => hash_type.clone().prop_map(ContentAddressMethodAlgorithm::Flat),
-            2 => hash_type.prop_map(ContentAddressMethodAlgorithm::Recursive),
+            2 => hash_type.prop_map(ContentAddressMethodAlgorithm::NixArchive),
         ]
         .prop_map(DerivationOutput::CAFloating)
     }
