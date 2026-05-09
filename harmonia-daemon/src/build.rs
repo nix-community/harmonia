@@ -14,12 +14,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use futures::StreamExt as _;
+use futures_util::StreamExt as _;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
 
-use harmonia_protocol::NarHash;
-use harmonia_protocol::build_result::{
+use harmonia_store_path_info::NarHash;
+use harmonia_store_build_result::{
     BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, FailureStatus,
     SuccessStatus,
 };
@@ -388,15 +388,9 @@ async fn check_mode_verify(
             hash_and_scan(&full_path, &BTreeSet::new(), out_path).await?;
 
         // Compare against registered hash
-        let full_path_str = full_path.to_string_lossy().to_string();
         let db_guard = db.lock().await;
-        if let Ok(Some(info)) = db_guard.query_path_info(&full_path_str) {
-            let existing_hash: harmonia_utils_hash::fmt::Any<harmonia_utils_hash::Hash> =
-                info.hash.parse().map_err(|e| {
-                    ProtocolError::custom(format!("Failed to parse existing hash: {e}"))
-                })?;
-            let existing_nar_hash = NarHash::try_from(existing_hash.into_hash())
-                .map_err(|e| ProtocolError::custom(format!("Hash conversion: {e}")))?;
+        if let Ok(Some(info)) = db_guard.query_path_info(store_dir, out_path) {
+            let existing_nar_hash = info.info.nar_hash;
             if existing_nar_hash != nar_hash {
                 non_deterministic = true;
                 tracing::warn!(
@@ -450,11 +444,11 @@ async fn check_all_outputs_exist(
             .path(store_dir, &drv.name, name)
             .map_err(|e| ProtocolError::custom(format!("Invalid output path: {e}")))?
         {
-            let full_path = format!("{}/{}", store_dir, path);
             let db = db.clone();
+            let store_dir = store_dir.clone();
             let exists = tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                db.is_valid_path(&full_path)
+                db.is_valid_path(&store_dir, &path)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -1039,48 +1033,28 @@ async fn register_outputs(
     tokio::task::spawn_blocking(move || {
         let mut db = db.blocking_lock();
         for output in &outputs {
-            let full_path = store_dir
-                .to_path()
-                .join(output.path.to_string())
-                .to_string_lossy()
-                .to_string();
-
             // In repair mode, remove the old entry so we can re-register
             if repair {
-                let _ = db.invalidate_path(&full_path);
+                let _ = db.invalidate_path(&store_dir, &output.path);
             }
 
-            let hash_str = format!("{}", output.nar_hash.as_base16());
-            let deriver_str = store_dir
-                .to_path()
-                .join(drv_path.to_string())
-                .to_string_lossy()
-                .to_string();
-            let refs: BTreeSet<String> = output
-                .references
-                .iter()
-                .map(|r| {
-                    store_dir
-                        .to_path()
-                        .join(r.to_string())
-                        .to_string_lossy()
-                        .to_string()
-                })
-                .collect();
-
-            let params = harmonia_store_db::RegisterPathParams {
-                path: full_path,
-                hash: hash_str,
-                registration_time: SystemTime::now(),
-                deriver: Some(deriver_str),
-                nar_size: Some(output.nar_size),
+            let reg_time = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| std::num::NonZero::new(d.as_secs() as i64))
+                .unwrap_or(None);
+            let unkeyed_info = harmonia_store_path_info::UnkeyedValidPathInfo {
+                deriver: Some(drv_path.clone()),
+                nar_hash: output.nar_hash,
+                references: output.references.clone(),
+                registration_time: reg_time,
+                nar_size: output.nar_size,
                 ultimate: true,
-                sigs: None,
+                signatures: BTreeSet::new(),
                 ca: None,
-                references: refs,
+                store_dir: store_dir.clone(),
             };
 
-            db.register_valid_path(&params)
+            db.register_valid_path(&store_dir, &output.path, &unkeyed_info)
                 .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
         }
         Ok(())

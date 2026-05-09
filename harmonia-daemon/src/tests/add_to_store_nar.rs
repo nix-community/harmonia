@@ -6,9 +6,8 @@
 use std::collections::BTreeSet;
 
 use harmonia_nar::archive::{test_data, write_nar};
-use harmonia_protocol::NarHash;
 use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
-use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
+use harmonia_store_path_info::{NarHash, UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_core::store_path::{StoreDir, StorePath};
 use tokio::io::AsyncReadExt as _;
 
@@ -133,7 +132,7 @@ async fn test_add_to_store_nar_hash_mismatch() {
 async fn test_add_to_store_nar_signature_verification() {
     // Generate a keypair
     let secret_key =
-        SecretKey::generate("test-key".to_string(), &ring::rand::SystemRandom::new()).unwrap();
+        SecretKey::generate("test-key".to_string()).unwrap();
     let public_key = secret_key.to_public_key();
 
     let ts = TestStore::with_trusted_keys(vec![public_key]);
@@ -251,7 +250,7 @@ async fn test_add_multiple_to_store_three_paths() {
         }));
     }
 
-    let stream = futures::stream::iter(items);
+    let stream = futures_util::stream::iter(items);
     store
         .add_multiple_to_store(false, true, stream)
         .await
@@ -314,7 +313,7 @@ async fn test_add_multiple_to_store_partial_failure() {
         }),
     ];
 
-    let stream = futures::stream::iter(items);
+    let stream = futures_util::stream::iter(items);
     let result = store.add_multiple_to_store(false, true, stream).await;
     assert!(
         result.is_err(),

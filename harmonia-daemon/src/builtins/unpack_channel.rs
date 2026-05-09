@@ -99,7 +99,7 @@ pub async fn builtin_unpack_channel(
 
 #[cfg(test)]
 mod tests {
-    use harmonia_protocol::build_result::BuildResultInner;
+    use harmonia_store_build_result::BuildResultInner;
     use harmonia_protocol::daemon_wire::types2::BuildMode;
     use harmonia_store_core::derivation::{DerivationOutput, DerivationT};
     use harmonia_store_core::derived_path::OutputName;

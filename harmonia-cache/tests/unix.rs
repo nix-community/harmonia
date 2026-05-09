@@ -1,41 +1,26 @@
 use std::process::Command;
 
-mod daemon;
+mod common;
 
-use daemon::{CanonicalTempDir, Daemon, DaemonConfig, HarmoniaDaemon, start_harmonia_cache};
+use common::{CanonicalTempDir, LocalStore, start_harmonia_cache};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::test]
 async fn test_unix_socket() -> Result<()> {
     let temp_dir = CanonicalTempDir::new()?;
+    let store = LocalStore::init(temp_dir.path())?;
 
-    // Set up daemon
-    let daemon_config = DaemonConfig {
-        socket_path: temp_dir.path().join("harmonia-daemon.sock"),
-        store_dir: temp_dir.path().join("store"),
-        state_dir: temp_dir.path().join("var"),
-    };
-
-    let daemon = HarmoniaDaemon::start(daemon_config).await?;
-
-    println!(
-        "Starting Unix socket test with daemon at {}...",
-        daemon.socket_path.display()
-    );
-
-    // Define the Unix socket path
     let unix_socket_path = temp_dir.path().join("harmonia-socket");
 
-    // Start harmonia-cache with Unix socket binding
     let cache_config = format!(
         r#"
 bind = "unix:{}"
-daemon_socket = "{}"
+nix_db_path = "{}"
 priority = 30
 "#,
         unix_socket_path.display(),
-        daemon.socket_path.display(),
+        store.db_path().display(),
     );
 
     // Use a fake port for the helper function (it won't be used for Unix sockets)

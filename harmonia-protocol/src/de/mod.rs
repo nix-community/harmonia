@@ -6,6 +6,7 @@ use std::{fmt, io};
 use ::bytes::Bytes;
 
 use super::ProtocolVersion;
+use crate::version::FeatureSet;
 use harmonia_store_core::store_path::StoreDir;
 
 mod bytes;
@@ -67,6 +68,12 @@ pub trait NixRead: Send {
     /// of the protocol and so this can be used for implementing that.
     fn version(&self) -> ProtocolVersion;
     fn store_dir(&self) -> &StoreDir;
+
+    /// Negotiated worker-protocol feature set (>= 1.38).
+    fn features(&self) -> &FeatureSet;
+    fn has_feature(&self, feature: &str) -> bool {
+        self.features().contains(feature)
+    }
 
     /// Read a single u64 from the protocol.
     /// This returns an Option to support gracefull shutdown.
@@ -157,6 +164,10 @@ impl<T: ?Sized + NixRead> NixRead for &mut T {
 
     fn store_dir(&self) -> &StoreDir {
         (**self).store_dir()
+    }
+
+    fn features(&self) -> &FeatureSet {
+        (**self).features()
     }
 
     fn try_read_number(

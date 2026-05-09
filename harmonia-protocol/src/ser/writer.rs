@@ -12,6 +12,7 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::ProtocolVersion;
+use crate::version::FeatureSet;
 use harmonia_store_core::store_path::StoreDir;
 use harmonia_utils_io::wire::{ZEROS, calc_padding};
 use harmonia_utils_io::{DEFAULT_BUF_SIZE, RESERVED_BUF_SIZE};
@@ -24,6 +25,7 @@ pub struct NixWriterBuilder {
     display_buf_size: usize,
     initial_buf_size: usize,
     version: ProtocolVersion,
+    features: FeatureSet,
     store_dir: StoreDir,
 }
 
@@ -35,6 +37,7 @@ impl Default for NixWriterBuilder {
             display_buf_size: 8192,
             initial_buf_size: DEFAULT_BUF_SIZE,
             version: Default::default(),
+            features: Default::default(),
             store_dir: Default::default(),
         }
     }
@@ -74,6 +77,11 @@ impl NixWriterBuilder {
         self
     }
 
+    pub fn set_features(mut self, features: FeatureSet) -> Self {
+        self.features = features;
+        self
+    }
+
     pub fn set_store_dir(mut self, store_dir: &StoreDir) -> Self {
         self.store_dir = store_dir.clone();
         self
@@ -91,6 +99,7 @@ impl NixWriterBuilder {
             reserved_buf_size: self.reserved_buf_size,
             max_buf_size: self.initial_buf_size,
             version: self.version,
+            features: self.features,
             store_dir: self.store_dir,
         }
     }
@@ -106,6 +115,7 @@ pin_project! {
         reserved_buf_size: usize,
         max_buf_size: usize,
         version: ProtocolVersion,
+        features: FeatureSet,
         store_dir: StoreDir,
     }
 }
@@ -130,6 +140,18 @@ where
 
     pub fn set_version(&mut self, version: ProtocolVersion) {
         self.version = version;
+    }
+
+    pub fn set_features(&mut self, features: FeatureSet) {
+        self.features = features;
+    }
+
+    pub fn features(&self) -> &FeatureSet {
+        &self.features
+    }
+
+    pub fn version(&self) -> ProtocolVersion {
+        self.version
     }
 
     /// Remaining capacity in internal buffer
@@ -299,6 +321,10 @@ where
 
     fn store_dir(&self) -> &StoreDir {
         &self.store_dir
+    }
+
+    fn features(&self) -> &FeatureSet {
+        &self.features
     }
 
     async fn write_number(&mut self, value: u64) -> Result<(), Self::Error> {

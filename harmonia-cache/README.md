@@ -49,7 +49,7 @@ tls_key_path = "/path/to/key.pem"
 
 ## Key Characteristics
 
-- **High performance**: Actix-web with connection pooling to daemon
+- **High performance**: Actix-web with direct SQLite metadata access
 - **nix-serve compatible**: Drop-in replacement with same URL structure
 - **Prometheus integration**: Monitor cache performance
 - **Flexible binding**: TCP, TLS, or Unix sockets

@@ -210,7 +210,7 @@ mod tests {
     use super::*;
     use std::fs;
 
-    use futures::StreamExt as _;
+    use futures_util::StreamExt as _;
 
     /// Helper: dump a path as NAR, feeding each byte chunk through the scanner.
     async fn scan_nar_for_references(

@@ -258,16 +258,25 @@ mod unittests {
     #[case::output(
         ContentAddress::Recursive("sha1:84983e441c3bd26ebaae4aa1f95129e5e54670f1".parse::<Any<Hash>>().unwrap().into()),
         "konsole-18.12.3",
-        Some("fixed:out:r:sha1:84983e441c3bd26ebaae4aa1f95129e5e54670f1"),
-        "output:out:sha256:3519044ac96a4bc192ada46062b3554eada7ba1f3574a0cb90c1697c6c68f4c1:/nix/store:konsole-18.12.3",
-        "ag0y7g6rci9zsdz9nxcq5l1qllx3r99x-konsole-18.12.3"
+        Some("fixed:out:r:sha1:84983e441c3bd26ebaae4aa1f95129e5e54670f1:"),
+        "output:out:sha256:5341f5afdd0fb724c8f7eae0e346de5bb151a00422d47ae683aed85cd78f7120:/nix/store:konsole-18.12.3",
+        "ww9d58nz1xsl5ck0vcpc99h23l1y2hln-konsole-18.12.3"
     )]
     #[case::flat_output(
         ContentAddress::Flat("sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1".parse::<Any<Hash>>().unwrap().into()),
         "konsole-18.12.3",
-        Some("fixed:out:sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"),
-        "output:out:sha256:646f2df192aa311e8b6920068dac2ab52d0ea87cedf864c034d30c19ccd17b7f:/nix/store:konsole-18.12.3",
-        "g9ngnw4w5vr9y3xkb7k2awl3mp95abrb-konsole-18.12.3"
+        Some("fixed:out:sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1:"),
+        "output:out:sha256:e55d6c8c9a08e91f15d5344612c42305702f04f08c487a7aff0b56c4c4add3e7:/nix/store:konsole-18.12.3",
+        "jw8chmp9sf8f7pw684cszp6pa2zmn0bx-konsole-18.12.3"
+    )]
+    // Regression test: real-world fetchurl FOD (libssh2-1.11.1.tar.gz)
+    // verified against `nix-store -q --outputs` on the actual derivation.
+    #[case::flat_output_libssh2(
+        ContentAddress::Flat("sha256:d9ec76cbe34db98eec3539fe2c899d26b0c837cb3eb466a56b0f109cabf658f7".parse::<Any<Hash>>().unwrap().into()),
+        "libssh2-1.11.1.tar.gz",
+        Some("fixed:out:sha256:d9ec76cbe34db98eec3539fe2c899d26b0c837cb3eb466a56b0f109cabf658f7:"),
+        "output:out:sha256:00ab8c141988e4eedd4695bda86a40373b1f87efe846e29a81a28929a657ee2c:/nix/store:libssh2-1.11.1.tar.gz",
+        "j04yfblg6sk5abb4n067xv0x0dfraf73-libssh2-1.11.1.tar.gz"
     )]
     fn test_make_store_path_from_ca(
         #[case] ca: ContentAddress,

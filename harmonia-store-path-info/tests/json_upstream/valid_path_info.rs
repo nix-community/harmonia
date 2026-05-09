@@ -1,10 +1,9 @@
 //! ValidPathInfo JSON tests
 
 use crate::libstore_test_data_path;
-use harmonia_protocol::NarHash;
-use harmonia_protocol::valid_path_info::{Pure, UnkeyedValidPathInfo};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{ContentAddress, StoreDir};
+use harmonia_store_path_info::{NarHash, Pure, UnkeyedValidPathInfo};
 use harmonia_utils_hash::Sha256;
 use harmonia_utils_test::test_upstream_json;
 use hex_literal::hex;
@@ -83,25 +82,25 @@ fn impure_info() -> UnkeyedValidPathInfo {
 // Pure format
 test_upstream_json!(
     test_valid_path_info_empty_pure,
-    libstore_test_data_path("path-info/json-2/empty_pure.json"),
+    libstore_test_data_path("path-info/json-3/empty_pure.json"),
     Pure(empty_info())
 );
 
 test_upstream_json!(
     test_valid_path_info_pure,
-    libstore_test_data_path("path-info/json-2/pure.json"),
+    libstore_test_data_path("path-info/json-3/pure.json"),
     Pure(pure_info())
 );
 
-// Impure format tests - default serialization
+// Impure format
 test_upstream_json!(
     test_valid_path_info_empty_impure,
-    libstore_test_data_path("path-info/json-2/empty_impure.json"),
+    libstore_test_data_path("path-info/json-3/empty_impure.json"),
     empty_info()
 );
 
 test_upstream_json!(
     test_valid_path_info_impure,
-    libstore_test_data_path("path-info/json-2/impure.json"),
+    libstore_test_data_path("path-info/json-3/impure.json"),
     impure_info()
 );

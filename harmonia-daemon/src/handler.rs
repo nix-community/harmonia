@@ -16,17 +16,16 @@ use std::sync::Arc;
 use tokio::io::AsyncBufRead;
 use tokio::sync::Mutex;
 
-use harmonia_protocol::NarHash;
 use harmonia_protocol::daemon::{
     AddToStoreItem, DaemonError as ProtocolError, DaemonResult, DaemonStore, FutureResultExt,
     HandshakeDaemonStore, ResultLog, ResultLogExt as _, TrustLevel,
 };
-use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
+use harmonia_store_core::realisation::{DrvOutput, UnkeyedRealisation};
 use harmonia_store_core::signature::{PublicKey, fingerprint_path};
 use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_store_db::StoreDb;
-use harmonia_utils_hash::Hash;
-use harmonia_utils_hash::fmt::{Any, CommonHash as _};
+use harmonia_store_path_info::{NarHash, UnkeyedValidPathInfo, ValidPathInfo};
+use harmonia_utils_hash::fmt::CommonHash as _;
 
 use crate::config::SandboxConfig;
 use crate::error::DaemonError;
@@ -108,72 +107,6 @@ impl LocalStoreHandler {
         self.sandbox_config = config;
     }
 
-    /// Convert a harmonia_store_db::ValidPathInfo to the protocol UnkeyedValidPathInfo.
-    fn to_protocol_path_info(
-        info: harmonia_store_db::ValidPathInfo,
-        store_dir: StoreDir,
-    ) -> Result<UnkeyedValidPathInfo, ProtocolError> {
-        // Parse the hash from database format (e.g., "sha256:...")
-        let hash_any = info.hash.parse::<Any<Hash>>().map_err(|e| {
-            ProtocolError::custom(format!("Failed to parse hash '{}': {e}", info.hash))
-        })?;
-        let nar_hash = NarHash::try_from(hash_any.into_hash()).map_err(|e| {
-            ProtocolError::custom(format!("Failed to convert hash '{}': {e}", info.hash))
-        })?;
-
-        // Convert references from String to StorePath
-        let references = info
-            .references
-            .iter()
-            .filter_map(|path| {
-                // References are stored as full paths, extract just the name
-                let base_name = std::path::Path::new(path)
-                    .file_name()
-                    .and_then(|n| n.to_str())?;
-                StorePath::from_base_path(base_name).ok()
-            })
-            .collect();
-
-        // Convert deriver
-        let deriver = info.deriver.as_ref().and_then(|d| {
-            let base_name = std::path::Path::new(d)
-                .file_name()
-                .and_then(|n| n.to_str())?;
-            StorePath::from_base_path(base_name).ok()
-        });
-
-        // Convert registration time
-        let registration_time = info
-            .registration_time
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| NonZero::new(d.as_secs() as i64))
-            .unwrap_or(None);
-
-        // Parse signatures
-        let signatures = info
-            .sigs
-            .map(|s| {
-                s.split_whitespace()
-                    .filter_map(|sig| sig.parse().ok())
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // Parse content address
-        let ca = info.ca.and_then(|s| s.parse().ok());
-
-        Ok(UnkeyedValidPathInfo {
-            deriver,
-            nar_hash,
-            references,
-            registration_time,
-            nar_size: info.nar_size.unwrap_or(0),
-            ultimate: info.ultimate,
-            signatures,
-            ca,
-            store_dir,
-        })
-    }
 }
 
 impl LocalStoreHandler {
@@ -234,11 +167,12 @@ impl DaemonStore for LocalStoreHandler {
         path: &'a StorePath,
     ) -> impl ResultLog<Output = DaemonResult<bool>> + Send + 'a {
         async move {
-            let full_path = format!("{}/{}", self.store_dir, path);
+            let path = path.clone();
             let db = self.db.clone();
+            let store_dir = self.store_dir.clone();
             tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                db.is_valid_path(&full_path)
+                db.is_valid_path(&store_dir, &path)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -252,20 +186,18 @@ impl DaemonStore for LocalStoreHandler {
         path: &'a StorePath,
     ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedValidPathInfo>>> + Send + 'a {
         async move {
-            let full_path = format!("{}/{}", self.store_dir, path);
+            let path = path.clone();
             let db = self.db.clone();
             let store_dir = self.store_dir.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                db.query_path_info(&full_path)
+                db.query_path_info(&store_dir, &path)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
             .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
 
-            result
-                .map(|info| Self::to_protocol_path_info(info, store_dir))
-                .transpose()
+            Ok(result.map(|info| info.info))
         }
         .empty_logs()
     }
@@ -275,23 +207,45 @@ impl DaemonStore for LocalStoreHandler {
         hash: &'a StorePathHash,
     ) -> impl ResultLog<Output = DaemonResult<Option<StorePath>>> + Send + 'a {
         async move {
-            let hash_str = hash.to_string();
+            let hash = *hash;
             let db = self.db.clone();
-            let store_dir = self.store_dir.to_str().to_string();
+            let store_dir = self.store_dir.clone();
+            tokio::task::spawn_blocking(move || {
+                let db = db.blocking_lock();
+                db.query_path_from_hash_part(&store_dir, &hash)
+            })
+            .await
+            .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
+            .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))
+        }
+        .empty_logs()
+    }
+
+    fn query_realisation<'a>(
+        &'a mut self,
+        output_id: &'a DrvOutput,
+    ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedRealisation>>> + Send + 'a {
+        async move {
+            let store_dir = self.store_dir.clone();
+            let drv_path = output_id.drv_path.clone();
+            let output_name = output_id.output_name.clone();
+            let db = self.db.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                db.query_path_from_hash_part(&store_dir, &hash_str)
+                if !db.has_ca_schema()? {
+                    return Ok(None);
+                }
+                db.query_realisation(&store_dir, &drv_path, &output_name)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
             .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
 
-            Ok(result.and_then(|path| {
-                let base_name = std::path::Path::new(&path)
-                    .file_name()
-                    .and_then(|n| n.to_str())?;
-                StorePath::from_base_path(base_name).ok()
-            }))
+            let Some(row) = result else {
+                return Ok(None);
+            };
+
+            Ok(Some(row.realisation.value))
         }
         .empty_logs()
     }
@@ -305,11 +259,12 @@ impl DaemonStore for LocalStoreHandler {
         async move {
             let mut valid = BTreeSet::new();
             for path in paths {
-                let full_path = format!("{}/{}", self.store_dir, path);
+                let path_owned = path.clone();
                 let db = self.db.clone();
+                let store_dir = self.store_dir.clone();
                 let is_valid = tokio::task::spawn_blocking(move || {
                     let db = db.blocking_lock();
-                    db.is_valid_path(&full_path)
+                    db.is_valid_path(&store_dir, &path_owned)
                 })
                 .await
                 .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -350,15 +305,15 @@ impl DaemonStore for LocalStoreHandler {
 
         async move {
             let dest_path = store_dir.to_path().join(path.to_string());
-            let full_path = dest_path.to_string_lossy().to_string();
 
             // Check if path already exists (idempotent)
             {
                 let db = db.clone();
-                let full_path = full_path.clone();
+                let store_dir = store_dir.clone();
+                let path = path.clone();
                 let exists = tokio::task::spawn_blocking(move || {
                     let db = db.blocking_lock();
-                    db.is_valid_path(&full_path)
+                    db.is_valid_path(&store_dir, &path)
                 })
                 .await
                 .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -389,7 +344,7 @@ impl DaemonStore for LocalStoreHandler {
             // on disk.
             let (hashing_reader, hash_state) = harmonia_utils_hash::HashingReader::new(source);
             let events = harmonia_nar::parse_nar(hashing_reader);
-            use futures::StreamExt as _;
+            use futures_util::StreamExt as _;
             let mapped = events.map(|item| match item {
                 Ok(event) => Ok(event),
                 Err(e) => Err(harmonia_nar::NarWriteError::create_file_error(
@@ -453,8 +408,9 @@ impl DaemonStore for LocalStoreHandler {
             // Acquire a filesystem lock on the output path, matching Nix's
             // PathLocks pattern.  This prevents races between concurrent
             // imports of the same path (including across processes / GC).
-            let full_path_for_reg = full_path.clone();
             let db = db.clone();
+            let store_dir_reg = store_dir.clone();
+            let path_reg = path.clone();
             tokio::task::spawn_blocking(move || {
                 let _output_lock = crate::pathlocks::PathLock::lock(&dest_path)
                     .map_err(|e| ProtocolError::custom(format!("Path lock error: {e}")))?;
@@ -462,7 +418,7 @@ impl DaemonStore for LocalStoreHandler {
                 let mut db = db.blocking_lock();
 
                 // Re-check under lock — another task may have registered it
-                if !repair && let Ok(true) = db.is_valid_path(&full_path_for_reg) {
+                if !repair && let Ok(true) = db.is_valid_path(&store_dir_reg, &path_reg) {
                     // temp_dir drops here, cleaning up temp_dest
                     return Ok(());
                 }
@@ -498,50 +454,23 @@ impl DaemonStore for LocalStoreHandler {
                 let _ = temp_dir.keep();
 
                 // Register in database
-                let hash_str = format!("{}", expected_hash.as_base16());
-                let sigs_str = if signatures.is_empty() {
-                    None
-                } else {
-                    Some(
-                        signatures
-                            .iter()
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    )
-                };
-                let ca_str = ca.map(|c| c.to_string());
-                let deriver_str = deriver.map(|d| {
-                    store_dir
-                        .to_path()
-                        .join(d.to_string())
-                        .to_string_lossy()
-                        .to_string()
-                });
-                let refs: BTreeSet<String> = references
-                    .iter()
-                    .map(|r| {
-                        store_dir
-                            .to_path()
-                            .join(r.to_string())
-                            .to_string_lossy()
-                            .to_string()
-                    })
-                    .collect();
-
-                let params = harmonia_store_db::RegisterPathParams {
-                    path: full_path_for_reg,
-                    hash: hash_str,
-                    registration_time: std::time::SystemTime::now(),
-                    deriver: deriver_str,
-                    nar_size: Some(nar_size),
+                let reg_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| NonZero::new(d.as_secs() as i64))
+                    .unwrap_or(None);
+                let unkeyed_info = UnkeyedValidPathInfo {
+                    deriver,
+                    nar_hash: expected_hash,
+                    references,
+                    registration_time: reg_time,
+                    nar_size,
                     ultimate,
-                    sigs: sigs_str,
-                    ca: ca_str,
-                    references: refs,
+                    signatures,
+                    ca,
+                    store_dir: store_dir_reg.clone(),
                 };
 
-                db.register_valid_path(&params)
+                db.register_valid_path(&store_dir_reg, &path_reg, &unkeyed_info)
                     .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
                 Ok(())
             })
@@ -559,15 +488,15 @@ impl DaemonStore for LocalStoreHandler {
         stream: S,
     ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<()>> + Send + 'r>>
     where
-        S: futures::Stream<Item = Result<AddToStoreItem<R>, ProtocolError>> + Send + 'i,
+        S: futures_core::Stream<Item = Result<AddToStoreItem<R>, ProtocolError>> + Send + 'i,
         R: AsyncBufRead + Send + Unpin + 'i,
         's: 'r,
         'i: 'r,
     {
-        use futures::StreamExt as _;
+        use futures_util::StreamExt as _;
         let mut handler = self.clone();
         async move {
-            futures::pin_mut!(stream);
+            futures_util::pin_mut!(stream);
             while let Some(item) = stream.next().await {
                 let item = item?;
                 handler
@@ -612,11 +541,12 @@ impl DaemonStore for LocalStoreHandler {
         path: &'a StorePath,
     ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
         async move {
-            let full_path = format!("{}/{}", self.store_dir, path);
+            let path_owned = path.clone();
             let db = self.db.clone();
+            let store_dir = self.store_dir.clone();
             let valid = tokio::task::spawn_blocking(move || {
                 let db = db.blocking_lock();
-                db.is_valid_path(&full_path)
+                db.is_valid_path(&store_dir, &path_owned)
             })
             .await
             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -650,13 +580,17 @@ impl DaemonStore for LocalStoreHandler {
                     drv_path_full.display()
                 ))
             })?;
-            let drv_name = path
+            let drv_name_str = path
                 .name()
+                .as_ref()
                 .strip_suffix(".drv")
-                .unwrap_or_else(|| path.name());
+                .unwrap_or(path.name().as_ref());
+            let drv_name: harmonia_store_core::store_path::StorePathName = drv_name_str
+                .parse()
+                .map_err(|e| ProtocolError::custom(format!("invalid derivation name '{drv_name_str}': {e}")))?;
             let content_str = std::str::from_utf8(&content)
                 .map_err(|e| ProtocolError::custom(format!("invalid UTF-8 in {path}: {e}")))?;
-            let drv = harmonia_protocol::aterm::parse(&self.store_dir, content_str, drv_name)
+            let drv = harmonia_store_aterm::parse_derivation_aterm(&self.store_dir, content_str, drv_name)
                 .map_err(|e| ProtocolError::custom(format!("cannot parse {path}: {e}")))?;
 
             let mut map = std::collections::BTreeMap::new();
@@ -685,11 +619,12 @@ impl DaemonStore for LocalStoreHandler {
                 match path {
                     DerivedPath::Opaque(store_path) => {
                         // Ensure the path exists in the store
-                        let full_path = self.store_dir.display(store_path).to_string();
+                        let store_path_owned = store_path.clone();
                         let db = self.db.clone();
+                        let store_dir = self.store_dir.clone();
                         let is_valid = tokio::task::spawn_blocking(move || {
                             let db = db.blocking_lock();
-                            db.is_valid_path(&full_path)
+                            db.is_valid_path(&store_dir, &store_path_owned)
                         })
                         .await
                         .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -727,17 +662,32 @@ impl DaemonStore for LocalStoreHandler {
                                 })?;
 
                         let drv_name_str = drv_store_path.name().as_ref();
-                        let drv_name = drv_name_str.strip_suffix(".drv").unwrap_or(drv_name_str);
+                        let drv_name_str = drv_name_str.strip_suffix(".drv").unwrap_or(drv_name_str);
+                        let drv_name: harmonia_store_core::store_path::StorePathName = drv_name_str
+                            .parse()
+                            .map_err(|e| ProtocolError::custom(format!(
+                                "invalid derivation name '{drv_name_str}': {e}"
+                            )))?;
 
                         let store_dir = self.store_dir.clone();
                         let drv =
-                            harmonia_protocol::aterm::parse(&store_dir, &drv_content, drv_name)
+                            harmonia_store_aterm::parse_derivation_aterm(&store_dir, &drv_content, drv_name)
                                 .map_err(|e| {
                                     ProtocolError::custom(format!(
                                         "cannot parse derivation '{}': {}",
                                         drv_disk_path, e
                                     ))
                                 })?;
+
+                        // Convert Derivation → BasicDerivation by
+                        // flattening inputs to just store paths
+                        let drv = drv.map_inputs(|inputs| {
+                            use harmonia_store_core::derivation::DerivationInputs;
+                            let di = DerivationInputs::from(&inputs);
+                            let mut paths = di.srcs;
+                            paths.extend(di.drvs.into_keys());
+                            paths
+                        });
 
                         // Build it
                         let config = crate::build::BuildConfig {
@@ -792,11 +742,12 @@ impl DaemonStore for LocalStoreHandler {
             for path in paths {
                 match path {
                     DerivedPath::Opaque(store_path) => {
-                        let full_path = format!("{}/{}", self.store_dir, store_path);
+                        let store_path_owned = store_path.clone();
                         let db = self.db.clone();
+                        let store_dir = self.store_dir.clone();
                         let is_valid = tokio::task::spawn_blocking(move || {
                             let db = db.blocking_lock();
-                            db.is_valid_path(&full_path)
+                            db.is_valid_path(&store_dir, &store_path_owned)
                         })
                         .await
                         .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?
@@ -818,11 +769,12 @@ impl DaemonStore for LocalStoreHandler {
                         ) = drv_path.as_ref()
                         {
                             // Check if the derivation itself exists
-                            let drv_full = format!("{}/{}", self.store_dir, drv_store_path);
+                            let drv_store_path_owned = drv_store_path.clone();
                             let db = self.db.clone();
+                            let store_dir = self.store_dir.clone();
                             let drv_exists = tokio::task::spawn_blocking(move || {
                                 let db = db.blocking_lock();
-                                db.is_valid_path(&drv_full)
+                                db.is_valid_path(&store_dir, &drv_store_path_owned)
                             })
                             .await
                             .map_err(|e| ProtocolError::custom(format!("Task join error: {e}")))?

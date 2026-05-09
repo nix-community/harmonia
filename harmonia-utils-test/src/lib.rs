@@ -40,13 +40,6 @@ impl CanonicalTempDir {
     }
 }
 
-/// Byte string type alias.
-pub type ByteString = bytes::Bytes;
-
-// Re-export paste for macro hygiene
-#[doc(hidden)]
-pub use paste;
-
 pub mod helpers;
 pub mod json_upstream;
 
@@ -68,8 +61,8 @@ prop_compose! {
 }
 
 prop_compose! {
-    pub fn arb_byte_string()(data in any::<Vec<u8>>()) -> ByteString {
-        ByteString::from(data)
+    pub fn arb_byte_string()(data in any::<Vec<u8>>()) -> bytes::Bytes {
+        bytes::Bytes::from(data)
     }
 }
 

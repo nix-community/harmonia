@@ -174,6 +174,8 @@ pub const TOK_FILE: &[u8] = token!(b"regular", b"contents");
 pub const TOK_SYM: &[u8] = token!(b"symlink", b"target");
 pub const TOK_DIR: &[u8] = token!(b"directory");
 
+const MAX_NAR_DEPTH: usize = 4096;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NodeType {
     File,
@@ -379,6 +381,12 @@ impl<const P: bool> Inner<P> {
                 */
                 InnerState::ReadDir => {
                     trace!(self.level, parsed, "InnerState::ReadDir");
+                    if self.level >= MAX_NAR_DEPTH {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "NAR directory nesting too deep",
+                        ));
+                    }
                     self.level += 1;
                     if !P {
                         break;
@@ -811,7 +819,7 @@ mod unittests {
 
     use super::NarReader;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     #[rstest]
     #[case::text_file(text_file())]
     #[case::exec_file(exec_file())]
@@ -898,7 +906,7 @@ mod proptests {
     use crate::archive::NarReader;
     use crate::test::arbitrary::archive::arb_nar_contents;
 
-    #[test_log::test]
+    #[test]
     fn proptest_read_nar() {
         let r = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

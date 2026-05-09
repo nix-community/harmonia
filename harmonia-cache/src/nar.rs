@@ -5,7 +5,7 @@ use actix_web::web::Bytes;
 use actix_web::{HttpRequest, HttpResponse, http, web};
 use harmonia_nar::NarByteStream;
 use harmonia_store_core::store_path::StorePathHash;
-use harmonia_store_remote::DaemonStore;
+use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::CommonHash;
 use serde::Deserialize;
 
@@ -71,88 +71,65 @@ pub(crate) async fn get(
     } else {
         path.outhash.as_deref()
     };
-    let store_path = match outhash {
-        Some(outhash) => {
-            // Parse outhash to StorePathHash
-            let store_path_hash =
-                StorePathHash::decode_digest(outhash.as_bytes()).map_err(|e| {
-                    CacheError::from(StoreError::PathQuery {
-                        hash: outhash.to_string(),
-                        reason: format!("Invalid hash format: {e}"),
-                    })
-                })?;
-
-            let mut guard = settings.store.acquire().await?;
-            guard
-                .client()
-                .query_path_from_hash_part(&store_path_hash)
-                .await
-                .map_err(|e| {
-                    CacheError::from(StoreError::PathQuery {
-                        hash: outhash.to_string(),
-                        reason: e.to_string(),
-                    })
-                })?
-        }
+    let outhash = match outhash {
+        Some(outhash) => outhash,
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(crate::cache_control_no_store())
                 .body("missing outhash"));
         }
     };
-    let store_path = match store_path {
-        Some(store_path) => store_path,
+    // Validate hash shape so garbage input becomes a 4xx, not a db scan.
+    let store_path_hash = StorePathHash::decode_digest(outhash.as_bytes()).map_err(|e| {
+        CacheError::from(StoreError::PathQuery {
+            hash: outhash.to_string(),
+            reason: format!("Invalid hash format: {e}"),
+        })
+    })?;
+
+    // Single SQLite lookup yields both the store path and its nar hash/size.
+    let info = match settings
+        .store
+        .query_path_info_by_hash_part(&store_path_hash)?
+    {
+        Some(info) => info,
         None => {
             return Ok(HttpResponse::NotFound()
                 .insert_header(crate::cache_control_no_store())
                 .body("store path not found"));
         }
     };
+    let store_path = &info.path;
 
-    // lookup the path info.
-    let info = {
-        let mut guard = settings.store.acquire().await?;
-
-        match guard
-            .client()
-            .query_path_info(&store_path)
-            .await
-            .map_err(|e| CacheError::from(StoreError::Remote(e)))?
-        {
-            Some(info) => info,
-            None => {
-                return Ok(HttpResponse::NotFound()
-                    .insert_header(crate::cache_control_no_store())
-                    .body("path info not found"));
-            }
-        }
-    }; // guard is dropped here
-
-    // URL narhash is bare (no sha256: prefix), so use as_bare() for comparison
-    let expected_hash = info.nar_hash.as_base32().as_bare().to_string();
+    let nar_hash: Hash = info.info.nar_hash.into();
+    let nar_size = info.info.nar_size;
+    let expected_hash = nar_hash.as_base32().as_bare().to_string();
     if narhash != expected_hash {
         return Ok(HttpResponse::NotFound()
             .insert_header(crate::cache_control_no_store())
             .body("hash mismatch detected"));
     }
 
-    let rlength = info.nar_size;
+    let rlength = nar_size;
     let mut res = HttpResponse::Ok();
 
-    let real_path = settings.store.get_real_path(&store_path);
+    let real_path = settings.store.get_real_path(store_path);
 
     // Credit actix_web actix-files: https://github.com/actix/actix-web/blob/master/actix-files/src/named.rs#L525
     if let Some(ranges) = req.headers().get(http::header::RANGE) {
         if let Ok(ranges_header) = ranges.to_str() {
-            if let Ok(ranges) = HttpRange::parse(ranges_header, rlength) {
-                let range_length = ranges[0].length;
-                let offset = ranges[0].start;
+            if let Ok(ranges) = HttpRange::parse(ranges_header, rlength)
+                && let Some(first) = ranges.first()
+            {
+                let range_length = first.length;
+                let offset = first.start;
 
                 if settings.enable_compression {
-                    // don't allow compression middleware to modify partial content
+                    // The zstd middleware skips responses that already carry a
+                    // Content-Encoding; partial content must stay byte-exact.
                     res.insert_header((
                         http::header::CONTENT_ENCODING,
-                        http::header::HeaderValue::from_static("none"),
+                        http::header::HeaderValue::from_static("identity"),
                     ));
                 }
 
@@ -162,7 +139,7 @@ pub(crate) async fn get(
                         "bytes {}-{}/{}",
                         offset,
                         offset + range_length - 1,
-                        info.nar_size
+                        nar_size
                     ),
                 ));
 
@@ -194,6 +171,7 @@ pub(crate) async fn get(
         .insert_header((http::header::CONTENT_TYPE, "application/x-nix-archive"))
         .insert_header((http::header::ACCEPT_RANGES, "bytes"))
         .insert_header(cache_control_max_age_1y())
+        // Sized so the zstd middleware can pledge the exact length.
         .body(actix_web::body::SizedStream::new(rlength, stream)))
 }
 
@@ -202,14 +180,14 @@ fn create_range_stream<S>(
     stream: S,
     offset: u64,
     length: u64,
-) -> impl futures::Stream<Item = std::result::Result<Bytes, std::io::Error>>
+) -> impl futures_core::Stream<Item = std::result::Result<Bytes, std::io::Error>>
 where
-    S: futures::Stream<Item = std::result::Result<Bytes, std::io::Error>> + Unpin,
+    S: futures_core::Stream<Item = std::result::Result<Bytes, std::io::Error>> + Unpin,
 {
-    futures::stream::unfold(
+    futures_util::stream::unfold(
         (stream, offset, length, 0u64),
         |(mut stream, offset, length, mut sent)| async move {
-            use futures::StreamExt;
+            use futures_util::StreamExt;
 
             loop {
                 match stream.next().await {
@@ -255,7 +233,7 @@ where
 mod test {
     use super::*;
     use crate::error::{IoErrorContext, Result};
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -263,7 +241,7 @@ mod test {
 
     async fn dump_to_vec(path: PathBuf) -> Vec<u8> {
         let stream = NarByteStream::new(path);
-        futures::pin_mut!(stream);
+        futures_util::pin_mut!(stream);
 
         let mut result = Vec::new();
         while let Some(chunk) = stream.next().await {

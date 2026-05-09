@@ -1,12 +1,12 @@
-use crate::error::{CacheError, NarInfoError, Result, StoreError};
+use crate::error::{CacheError, Result, StoreError};
 use actix_web::{HttpResponse, http, web};
-use harmonia_store_core::store_path::StorePath;
-use harmonia_store_remote::DaemonStore;
-use harmonia_utils_hash::fmt::CommonHash;
-use serde::{Deserialize, Serialize};
+use harmonia_store_core::store_path::{StoreDir, StorePathHash};
+use harmonia_store_db::ValidPathInfo;
+use harmonia_utils_hash::Hash;
+use serde::Deserialize;
 
 use crate::config::Config;
-use crate::{cache_control_max_age_1d, nixhash, some_or_404};
+use crate::{cache_control_max_age_1d, some_or_404};
 use harmonia_store_core::signature::{SecretKey, fingerprint_path};
 
 #[derive(Debug, Deserialize)]
@@ -14,99 +14,55 @@ pub struct Param {
     json: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+/// NarInfo wraps a `ValidPathInfo` with narinfo-specific fields.
+#[derive(Debug)]
 struct NarInfo {
-    store_path: Vec<u8>,
-    url: Vec<u8>,
-    compression: Vec<u8>,
-    nar_hash: Vec<u8>,
-    nar_size: u64,
-    references: Vec<Vec<u8>>,
-    deriver: Option<Vec<u8>>,
-    sigs: Vec<Vec<u8>>,
-    ca: Option<Vec<u8>>,
+    /// The underlying path info (with all signatures including cache sigs).
+    info: ValidPathInfo,
+    /// URL to fetch the NAR.
+    url: String,
+    /// Compression method (e.g. "none").
+    compression: String,
+    /// Hash of the (possibly compressed) file. Same as nar_hash when uncompressed.
+    file_hash: Option<Hash>,
+    /// Size of the (possibly compressed) file. Same as nar_size when uncompressed.
+    file_size: Option<u64>,
 }
 
-async fn query_narinfo(
-    virtual_nix_store: &[u8],
-    store_path: &StorePath,
+/// Build a `NarInfo` from a `ValidPathInfo`, signing with the cache keys.
+fn build_narinfo(
+    store_dir: &StoreDir,
+    mut info: ValidPathInfo,
     hash: &str,
     sign_keys: &[SecretKey],
-    settings: &web::Data<Config>,
-) -> Result<Option<NarInfo>> {
-    let mut guard = settings.store.acquire().await?;
+) -> Result<NarInfo> {
+    use harmonia_utils_hash::fmt::CommonHash as _;
 
-    let path_info = match guard
-        .client()
-        .query_path_info(store_path)
-        .await
-        .map_err(|e| CacheError::from(StoreError::Remote(e)))?
-    {
-        Some(info) => info,
-        None => {
-            return Ok(None);
-        }
-    };
-    // as_base32() already includes the "sha256:" prefix
-    let nar_hash = format!("{}", path_info.nar_hash.as_base32()).into_bytes();
-    // For URL, we need just the bare hash (without sha256: prefix)
-    let nar_hash_bare = format!("{}", path_info.nar_hash.as_base32().as_bare()).into_bytes();
-    // Build full store path with virtual store prefix
-    let store_path_str = store_path.to_string();
-    let full_store_path = crate::build_bytes!(virtual_nix_store, b"/", store_path_str.as_bytes(),);
-    let mut res = NarInfo {
-        store_path: full_store_path,
-        url: crate::build_bytes!(b"nar/", &nar_hash_bare, b".nar?hash=", hash.as_bytes(),),
-        compression: b"none".to_vec(),
-        nar_hash: nar_hash.clone(),
-        nar_size: path_info.nar_size,
-        references: vec![],
-        // Deriver and References use just the basename (hash-name), not full paths
-        deriver: path_info
-            .deriver
-            .as_ref()
-            .map(|d| d.to_string().as_bytes().to_vec()),
-        sigs: vec![],
-        ca: path_info.ca.as_ref().map(|ca| ca.to_string().into_bytes()),
-    };
+    let nar_hash_obj: Hash = info.info.nar_hash.into();
+    let nar_hash = format!("{}", nar_hash_obj.as_base32()).into_bytes();
+    let nar_hash_bare = format!("{}", nar_hash_obj.as_base32().as_bare());
 
-    if !path_info.references.is_empty() {
-        res.references = path_info
-            .references
-            .iter()
-            .map(|r| r.to_string().as_bytes().to_vec())
-            .collect::<Vec<Vec<u8>>>();
-    }
+    let url = format!("nar/{nar_hash_bare}.nar?hash={hash}");
 
-    // Convert virtual_nix_store bytes to StoreDir
-    let store_dir = harmonia_store_core::store_path::StoreDir::new(
-        std::str::from_utf8(virtual_nix_store)
-            .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidUtf8(e)))?,
-    )
-    .map_err(|e| CacheError::NarInfo(NarInfoError::InvalidStoreDir(format!("{}", e))))?;
-
+    // Sign with the cache's secret keys and add to the signatures set.
     let fingerprint = fingerprint_path(
-        &store_dir,
-        store_path,
-        &res.nar_hash,
-        res.nar_size,
-        &path_info.references,
+        store_dir,
+        &info.path,
+        &nar_hash,
+        info.info.nar_size,
+        &info.info.references,
     )?;
     for sk in sign_keys {
-        let signature = sk.sign(&fingerprint);
-        res.sigs.push(signature.to_string().into_bytes());
+        info.info.signatures.insert(sk.sign(&fingerprint));
     }
 
-    if res.sigs.is_empty() {
-        // Convert Signature objects to their string representation
-        res.sigs = path_info
-            .signatures
-            .iter()
-            .map(|sig| sig.to_string().into_bytes())
-            .collect();
-    }
-
-    Ok(Some(res))
+    Ok(NarInfo {
+        info,
+        url,
+        compression: "none".into(),
+        file_hash: None,
+        file_size: None,
+    })
 }
 
 /// Helper macro for adding lines to narinfo
@@ -118,75 +74,60 @@ macro_rules! push_line {
     };
 }
 
-fn format_narinfo_txt(narinfo: &NarInfo) -> Vec<u8> {
-    let nar_size_str = narinfo.nar_size.to_string();
-    let nar_size_bytes = nar_size_str.as_bytes();
+fn format_narinfo_txt(store_dir: &StoreDir, narinfo: &NarInfo) -> Vec<u8> {
+    use harmonia_utils_hash::fmt::CommonHash as _;
 
-    // Pre-calculate capacity
-    let mut capacity = 0;
-    capacity += 11 + narinfo.store_path.len() + 1;
-    capacity += 5 + narinfo.url.len() + 1;
-    capacity += 13 + narinfo.compression.len() + 1;
-    capacity += 10 + narinfo.nar_hash.len() + 1;
-    capacity += 10 + nar_size_bytes.len() + 1;
-    capacity += 9 + narinfo.nar_hash.len() + 1;
-    capacity += 9 + nar_size_bytes.len() + 1;
+    let path = &narinfo.info.path;
+    let pi = &narinfo.info.info;
 
-    if !narinfo.references.is_empty() {
-        capacity += 12
-            + narinfo
-                .references
-                .iter()
-                .map(|r| r.len() + 1)
-                .sum::<usize>();
-    }
+    let nar_hash_obj: Hash = pi.nar_hash.into();
+    let nar_hash_str = format!("{}", nar_hash_obj.as_base32());
+    let nar_size_str = pi.nar_size.to_string();
 
-    if let Some(drv) = &narinfo.deriver {
-        capacity += 9 + drv.len() + 1;
-    }
+    let store_path_display = store_dir.display(path).to_string();
 
-    capacity += narinfo
-        .sigs
-        .iter()
-        .map(|sig| 5 + sig.len() + 1)
-        .sum::<usize>();
+    let mut result = Vec::new();
 
-    if let Some(ca) = &narinfo.ca {
-        capacity += 4 + ca.len() + 1;
-    }
-
-    let mut result = Vec::with_capacity(capacity);
+    let file_hash_str = narinfo
+        .file_hash
+        .map(|h| format!("{}", h.as_base32()))
+        .unwrap_or_else(|| nar_hash_str.clone());
+    let file_size_str = narinfo
+        .file_size
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| nar_size_str.clone());
 
     // Required fields
-    push_line!(result, b"StorePath: ", &narinfo.store_path);
-    push_line!(result, b"URL: ", &narinfo.url);
-    push_line!(result, b"Compression: ", &narinfo.compression);
-    push_line!(result, b"FileHash: ", &narinfo.nar_hash);
-    push_line!(result, b"FileSize: ", nar_size_bytes);
-    push_line!(result, b"NarHash: ", &narinfo.nar_hash);
-    push_line!(result, b"NarSize: ", nar_size_bytes);
+    push_line!(result, b"StorePath: ", store_path_display.as_bytes());
+    push_line!(result, b"URL: ", narinfo.url.as_bytes());
+    push_line!(result, b"Compression: ", narinfo.compression.as_bytes());
+    push_line!(result, b"FileHash: ", file_hash_str.as_bytes());
+    push_line!(result, b"FileSize: ", file_size_str.as_bytes());
+    push_line!(result, b"NarHash: ", nar_hash_str.as_bytes());
+    push_line!(result, b"NarSize: ", nar_size_str.as_bytes());
 
     // References
-    if !narinfo.references.is_empty() {
+    if !pi.references.is_empty() {
         result.extend_from_slice(b"References:");
-        for r in &narinfo.references {
+        for r in &pi.references {
             result.push(b' ');
-            result.extend_from_slice(r);
+            result.extend_from_slice(r.to_string().as_bytes());
         }
         result.push(b'\n');
     }
 
     // Optional fields
-    if let Some(drv) = &narinfo.deriver {
-        push_line!(result, b"Deriver: ", drv);
+    if let Some(drv) = &pi.deriver {
+        push_line!(result, b"Deriver: ", drv.to_string().as_bytes());
     }
 
-    for sig in &narinfo.sigs {
-        push_line!(result, b"Sig: ", sig);
+    // All signatures (DB sigs + cache signing key sigs).
+    for sig in &pi.signatures {
+        push_line!(result, b"Sig: ", sig.to_string().as_bytes());
     }
 
-    if let Some(ca) = &narinfo.ca {
-        push_line!(result, b"CA: ", ca);
+    if let Some(ca) = &pi.ca {
+        push_line!(result, b"CA: ", ca.to_string().as_bytes());
     }
 
     result
@@ -198,44 +139,38 @@ pub(crate) async fn get(
     settings: web::Data<Config>,
 ) -> crate::ServerResult {
     let hash = hash.into_inner();
-    let real_store_path =
-        some_or_404!(
-            nixhash(&settings, hash.as_bytes())
-                .await
-                .map_err(|e| CacheError::from(NarInfoError::QueryFailed {
-                    reason: format!("Could not query nar hash in database: {e}"),
-                }))?
-        );
+    // Reject malformed hash parts up front so the `path >= ?` index scan in
+    // SQLite cannot be tricked into matching an unrelated store path.
+    let store_path_hash = StorePathHash::decode_digest(hash.as_bytes()).map_err(|e| {
+        CacheError::from(StoreError::PathQuery {
+            hash: hash.clone(),
+            reason: format!("Invalid hash format: {e}"),
+        })
+    })?;
 
-    // Convert real store path to virtual store path
-    let store_path = settings.store.to_virtual_path(&real_store_path);
-
-    let narinfo = match query_narinfo(
-        settings.store.virtual_store(),
-        &store_path,
+    let info = some_or_404!(
+        settings
+            .store
+            .query_path_info_by_hash_part(&store_path_hash)?
+    );
+    let narinfo = build_narinfo(
+        settings.store.store_dir(),
+        info,
         &hash,
         &settings.secret_keys,
-        &settings,
-    )
-    .await?
-    {
-        Some(narinfo) => narinfo,
-        None => {
-            return Ok(HttpResponse::NotFound()
-                .insert_header(cache_control_max_age_1d())
-                .body("missed hash"));
-        }
-    };
+    )?;
 
     if param.json.is_some() {
+        // JSON format: return the underlying path info.
         Ok(HttpResponse::Ok()
             .insert_header(cache_control_max_age_1d())
-            .json(narinfo))
+            .json(&narinfo.info.info))
     } else {
-        let res = format_narinfo_txt(&narinfo);
+        let url = narinfo.url.clone();
+        let res = format_narinfo_txt(settings.store.store_dir(), &narinfo);
         Ok(HttpResponse::Ok()
             .insert_header((http::header::CONTENT_TYPE, "text/x-nix-narinfo"))
-            .insert_header(("Nix-Link", narinfo.url))
+            .insert_header(("Nix-Link", url))
             .insert_header(cache_control_max_age_1d())
             .body(res))
     }
@@ -244,37 +179,45 @@ pub(crate) async fn get(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harmonia_store_path_info::{NarHash, UnkeyedValidPathInfo};
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_format_narinfo_minimal() {
+        let path: harmonia_store_core::store_path::StorePath =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0-test".parse().unwrap();
         let narinfo = NarInfo {
-            store_path: b"/nix/store/abc123-test".to_vec(),
-            url: b"nar/abc123.nar?hash=test".to_vec(),
-            compression: b"none".to_vec(),
-            nar_hash: b"sha256:0000000000000000000000000000000000000000000000000000".to_vec(),
-            nar_size: 1234,
-            references: vec![],
-            deriver: None,
-            sigs: vec![],
-            ca: None,
+            info: ValidPathInfo {
+                id: 1,
+                path: path.clone(),
+                info: UnkeyedValidPathInfo {
+                    deriver: None,
+                    nar_hash: NarHash::from_slice(&[0u8; 32]).unwrap(),
+                    references: BTreeSet::new(),
+                    registration_time: None,
+                    nar_size: 1234,
+                    ultimate: false,
+                    signatures: BTreeSet::new(),
+                    ca: None,
+                    store_dir: StoreDir::default(),
+                },
+            },
+            url: "nar/abc123.nar?hash=test".into(),
+            compression: "none".into(),
+            file_hash: None,
+            file_size: None,
         };
 
-        let result = format_narinfo_txt(&narinfo);
+        let result = format_narinfo_txt(&StoreDir::default(), &narinfo);
         let result_str = String::from_utf8_lossy(&result);
 
         let lines: Vec<&str> = result_str.trim().split('\n').collect();
-        assert_eq!(lines[0], "StorePath: /nix/store/abc123-test");
+        assert!(lines[0].starts_with("StorePath: /nix/store/"));
         assert_eq!(lines[1], "URL: nar/abc123.nar?hash=test");
         assert_eq!(lines[2], "Compression: none");
-        assert_eq!(
-            lines[3],
-            "FileHash: sha256:0000000000000000000000000000000000000000000000000000"
-        );
+        assert!(lines[3].starts_with("FileHash: sha256:"));
         assert_eq!(lines[4], "FileSize: 1234");
-        assert_eq!(
-            lines[5],
-            "NarHash: sha256:0000000000000000000000000000000000000000000000000000"
-        );
+        assert!(lines[5].starts_with("NarHash: sha256:"));
         assert_eq!(lines[6], "NarSize: 1234");
         assert_eq!(lines.len(), 7);
     }

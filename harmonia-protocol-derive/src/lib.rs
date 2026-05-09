@@ -532,3 +532,39 @@ pub fn nix_serialize_remote(item: TokenStream) -> TokenStream {
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
+
+/// Derive `NixDeserialize` and `NixSerialize` for a type defined in another
+/// crate.
+///
+/// The struct definition is used only for its field layout — the struct itself
+/// is **not** emitted. The `#[nix(for_type = "...")]` attribute specifies the
+/// external type that will receive the trait implementations.
+///
+/// #### Example
+///
+/// ```rust,ignore
+/// // In harmonia-protocol, implementing wire format for a type from
+/// // harmonia-store-path-info:
+/// harmonia_protocol_derive::nix_derive_for! {
+///     #[nix(for_type = "harmonia_store_path_info::ValidPathInfo")]
+///     struct ValidPathInfo {
+///         pub path: StorePath,
+///         pub info: UnkeyedValidPathInfo,
+///     }
+/// }
+/// ```
+#[proc_macro]
+pub fn nix_derive_for(item: TokenStream) -> TokenStream {
+    let mut input = syn::parse_macro_input!(item as DeriveInput);
+    let crate_path = get_crate_path(&input);
+
+    let de = de::expand_nix_deserialize(crate_path.clone(), &mut input)
+        .unwrap_or_else(syn::Error::into_compile_error);
+    let ser = ser::expand_nix_serialize(crate_path, &mut input)
+        .unwrap_or_else(syn::Error::into_compile_error);
+
+    let mut out = proc_macro2::TokenStream::new();
+    out.extend(de);
+    out.extend(ser);
+    out.into()
+}

@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
 use bytes::Buf;
-use futures::Stream;
+use futures_core::Stream;
 use pin_project_lite::pin_project;
 use tokio::io::AsyncRead;
 use tracing::trace;
@@ -14,6 +14,11 @@ use harmonia_utils_io::{AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending
 
 use super::NarEvent;
 use super::read_nar::{Inner, InnerState, NodeType};
+
+// Cap fully-buffered length fields so a hostile NAR cannot force unbounded
+// allocation; both well above NAME_MAX/PATH_MAX.
+const MAX_ENTRY_NAME_LEN: u64 = 4096;
+const MAX_SYMLINK_TARGET_LEN: u64 = 64 * 1024;
 
 pin_project! {
     pub struct NarParser<R> {
@@ -94,32 +99,40 @@ where
                     })));
                 }
                 InnerState::ReadContents(NodeType::Symlink, len, aligned) => {
-                    let aligned = aligned.try_into().map_err(|_| {
-                        io::Error::new(io::ErrorKind::InvalidData, "Symlink target way too long")
-                    })?;
+                    if len > MAX_SYMLINK_TARGET_LEN {
+                        return Poll::Ready(Some(Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "symlink target too long",
+                        ))));
+                    }
+                    let (len, aligned) = (len as usize, aligned as usize);
                     while buf.len() < aligned {
                         buf = ready!(reader.as_mut().poll_force_fill_buf(cx))?;
                     }
 
-                    let target = buf.split_to(len as usize);
-                    buf.advance(aligned - len as usize);
+                    let target = buf.split_to(len);
+                    buf.advance(aligned - len);
                     reader.as_mut().consume(aligned);
                     this.state.bump_next();
                     let name = this.name.take().unwrap_or_default();
                     return Poll::Ready(Some(Ok(NarEvent::Symlink { name, target })));
                 }
                 InnerState::ReadEntryName(len, aligned) => {
-                    let aligned = aligned.try_into().map_err(|_| {
-                        io::Error::new(io::ErrorKind::InvalidData, "Entry name way too long")
-                    })?;
+                    if len > MAX_ENTRY_NAME_LEN {
+                        return Poll::Ready(Some(Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "directory entry name too long",
+                        ))));
+                    }
+                    let (len, aligned) = (len as usize, aligned as usize);
                     while buf.len() < aligned {
                         buf = ready!(reader.as_mut().poll_force_fill_buf(cx))?;
                         trace!(len = buf.len(), "Reading name");
                     }
-                    let name_buf = buf.split_to(len as usize);
+                    let name_buf = buf.split_to(len);
                     trace!(len = buf.len(), ?name_buf, "Read name");
                     *this.name = Some(name_buf);
-                    buf.advance(aligned - len as usize);
+                    buf.advance(aligned - len);
                     reader.as_mut().consume(aligned);
                     this.state.bump_next();
                 }
@@ -152,7 +165,7 @@ pub async fn read_nar<R>(source: R) -> io::Result<crate::archive::test_data::Tes
 where
     R: AsyncRead + Unpin,
 {
-    use futures::stream::TryStreamExt as _;
+    use futures_util::stream::TryStreamExt as _;
     parse_nar(source)
         .and_then(NarEvent::read_file)
         .try_collect()
@@ -161,55 +174,45 @@ where
 
 #[cfg(test)]
 mod unittests {
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
 
-    use bytes::Bytes;
-    use futures::TryStreamExt;
     use rstest::rstest;
     use tokio::fs::File;
-    use tokio::io::AsyncReadExt as _;
 
+    use crate::archive::read_nar::{TOK_DIR, TOK_ENTRY, TOK_ROOT, TOK_SYM};
     use crate::archive::{test_data, write_nar};
 
     use super::*;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     #[rstest]
     #[case::dir_example("test-data/test-dir.nar", test_data::dir_example())]
     #[case::exec_file("test-data/test-exec.nar", test_data::exec_file())]
     #[case::text_file("test-data/test-text.nar", test_data::text_file())]
     async fn test_parse_nar(#[case] file: &str, #[case] expected: test_data::TestNarEvents) {
         let io = File::open(file).await.unwrap();
-        let s = parse_nar(io)
-            .and_then(|event| async {
-                Ok(match event {
-                    NarEvent::File {
-                        name,
-                        executable,
-                        size,
-                        mut reader,
-                    } => {
-                        let mut content = Vec::new();
-                        reader.read_to_end(&mut content).await?;
-                        NarEvent::File {
-                            name,
-                            executable,
-                            size,
-                            reader: Cursor::new(Bytes::from(content)),
-                        }
-                    }
-                    NarEvent::Symlink { name, target } => NarEvent::Symlink { name, target },
-                    NarEvent::StartDirectory { name } => NarEvent::StartDirectory { name },
-                    NarEvent::EndDirectory => NarEvent::EndDirectory,
-                })
-            })
-            .try_collect::<test_data::TestNarEvents>()
-            .await
-            .unwrap();
-        assert_eq!(s, expected);
+        let actual = read_nar(io).await.unwrap();
+        assert_eq!(actual, expected);
     }
 
-    #[test_log::test(tokio::test)]
+    /// Hostile length fields must yield InvalidData, not allocate or panic.
+    #[tokio::test]
+    #[rstest]
+    #[case::symlink_huge(TOK_SYM, 1 << 30)]
+    #[case::symlink_wrap(TOK_SYM, u64::MAX)]
+    #[case::name_huge(&[TOK_DIR, TOK_ENTRY].concat(), 1 << 30)]
+    #[case::name_wrap(&[TOK_DIR, TOK_ENTRY].concat(), u64::MAX)]
+    async fn reject_oversized_length(#[case] prefix: &[u8], #[case] len: u64) {
+        let mut nar = Vec::from(TOK_ROOT);
+        nar.extend_from_slice(prefix);
+        nar.extend_from_slice(&len.to_le_bytes());
+        nar.extend_from_slice(&[0u8; 64]); // enough for one drive() iteration
+
+        let err = read_nar(Cursor::new(nar)).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
     #[rstest]
     #[case::text_file(test_data::text_file())]
     #[case::exec_file(test_data::exec_file())]

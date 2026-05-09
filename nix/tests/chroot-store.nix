@@ -12,6 +12,9 @@ pkgs.testers.nixosTest {
           settings = {
             real_nix_store = "/guest/nix/store";
             virtual_nix_store = "/nix/store";
+            # Metadata stays in the system database; only file contents are
+            # served from the chroot copy.
+            nix_db_path = "/nix/var/nix/db/db.sqlite";
           };
         };
 
@@ -38,7 +41,7 @@ pkgs.testers.nixosTest {
     import json
     start_all()
 
-    # Create a dummy file and add it to the SYSTEM store (so daemon knows it)
+    # Create a dummy file and add it to the system store
     harmonia.succeed("echo 'test contents' > /my-file")
     f = harmonia.succeed("nix --extra-experimental-features nix-command store add-file /my-file").strip()
 
@@ -51,7 +54,7 @@ pkgs.testers.nixosTest {
     harmonia.succeed(f"cp -a {d} /guest{d}")
 
     # Wait for harmonia
-    harmonia.wait_for_unit("harmonia-dev.service")
+    harmonia.wait_for_unit("harmonia-dev.socket")
     harmonia.wait_for_open_port(5000)
 
     # Client checks

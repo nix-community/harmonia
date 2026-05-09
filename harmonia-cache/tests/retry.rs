@@ -6,11 +6,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command as AsyncCommand;
 
-mod daemon;
+mod common;
 
-use daemon::{
-    CanonicalTempDir, Daemon, DaemonConfig, NixDaemon, pick_unused_port, start_harmonia_cache,
-};
+use common::{CanonicalTempDir, LocalStore, pick_unused_port, start_harmonia_cache};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -102,13 +100,7 @@ async fn test_download_retry_over_flaky_connection() -> Result<()> {
     let store_dir = temp.path().join("store");
     let state_dir = temp.path().join("var");
 
-    // Start nix-daemon (inits store)
-    let daemon = NixDaemon::start(DaemonConfig {
-        socket_path: temp.path().join("daemon.sock"),
-        store_dir: store_dir.clone(),
-        state_dir: state_dir.clone(),
-    })
-    .await?;
+    let store = LocalStore::init_at(store_dir.clone(), state_dir.clone())?;
 
     // Create 50KB test file - triggers 2 retries with 30KB limit
     let big_file = temp.path().join("big-file");
@@ -141,8 +133,8 @@ async fn test_download_retry_over_flaky_connection() -> Result<()> {
     // Start harmonia-cache
     let cache_port = pick_unused_port().ok_or("No port")?;
     let config = format!(
-        "bind = \"127.0.0.1:{cache_port}\"\ndaemon_socket = \"{}\"\nvirtual_nix_store = \"{}\"\nreal_nix_store = \"{}\"",
-        daemon.socket_path.display(),
+        "bind = \"127.0.0.1:{cache_port}\"\nnix_db_path = \"{}\"\nvirtual_nix_store = \"{}\"\nreal_nix_store = \"{}\"",
+        store.db_path().display(),
         store_dir.display(),
         store_dir.display()
     );

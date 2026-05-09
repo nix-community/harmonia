@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytes::{Buf, BufMut, BytesMut};
-use futures::Sink;
+use futures_sink::Sink;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncWrite};
 
@@ -218,7 +218,7 @@ pub fn write_nar<'e, E>(events: E) -> bytes::Bytes
 where
     E: IntoIterator<Item = &'e super::test_data::TestNarEvent>,
 {
-    use futures::{FutureExt as _, SinkExt as _, StreamExt as _, stream::iter};
+    use futures_util::{FutureExt as _, SinkExt as _, StreamExt as _, stream::iter};
     use std::io::Cursor;
 
     let mut buf = Vec::new();
@@ -239,8 +239,8 @@ where
 
 #[cfg(test)]
 mod unittests {
-    use futures::StreamExt as _;
-    use futures::stream::iter;
+    use futures_util::StreamExt as _;
+    use futures_util::stream::iter;
     use rstest::rstest;
     use tempfile::tempdir;
     use tokio::fs::File;

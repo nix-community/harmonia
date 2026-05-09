@@ -99,7 +99,7 @@ pub(crate) fn builtin_buildenv(
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use harmonia_protocol::build_result::BuildResultInner;
+    use harmonia_store_build_result::BuildResultInner;
     use harmonia_protocol::daemon_wire::types2::BuildMode;
     use harmonia_store_core::derivation::{DerivationOutput, DerivationT};
     use harmonia_store_core::derived_path::OutputName;

@@ -42,7 +42,7 @@ pub(crate) async fn builtin_fetchurl(
             // Treat the file as a NAR and restore it
             let cursor = std::io::Cursor::new(content);
             let events = harmonia_nar::parse_nar(cursor);
-            use futures::StreamExt as _;
+            use futures_util::StreamExt as _;
             let mapped = events.map(|item| match item {
                 Ok(event) => Ok(event),
                 Err(e) => Err(harmonia_nar::NarWriteError::create_file_error(
@@ -73,7 +73,7 @@ pub(crate) async fn builtin_fetchurl(
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use harmonia_protocol::build_result::BuildResultInner;
+    use harmonia_store_build_result::BuildResultInner;
     use harmonia_protocol::daemon_wire::types2::BuildMode;
     use harmonia_store_core::derivation::{DerivationOutput, DerivationT};
     use harmonia_store_core::derived_path::OutputName;

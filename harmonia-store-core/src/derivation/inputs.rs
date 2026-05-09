@@ -75,6 +75,15 @@ impl From<&DerivationInputs> for BTreeSet<SingleDerivedPath> {
     }
 }
 
+impl From<&StorePathSet> for DerivationInputs {
+    fn from(srcs: &StorePathSet) -> Self {
+        DerivationInputs {
+            srcs: srcs.clone(),
+            drvs: BTreeMap::new(),
+        }
+    }
+}
+
 impl From<&BTreeSet<SingleDerivedPath>> for DerivationInputs {
     fn from(paths: &BTreeSet<SingleDerivedPath>) -> Self {
         let mut result = Self::default();

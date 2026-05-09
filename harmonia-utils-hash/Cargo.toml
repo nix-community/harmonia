@@ -3,38 +3,39 @@
 # SPDX-License-Identifier: MIT
 
 [package]
-name = "harmonia-utils-hash"
-version = "0.0.0-alpha.0"
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-utils-hash"
+version              = "0.0.0-alpha.0"
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-description = "Hash utilities for Harmonia (content addressing, hash types)"
-readme = "README.md"
+description          = "Hash utilities for Harmonia (content addressing, hash types)"
+readme               = "README.md"
 
 [dependencies]
-data-encoding = { workspace = true }
-derive_more = { workspace = true }
+data-encoding                = { workspace = true }
+derive_more                  = { workspace = true }
 harmonia-utils-base-encoding = { version = "0.0.0-alpha.0" }
-md5 = { workspace = true }
-pin-project-lite = { workspace = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
-ring = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util"] }
+md5                          = { workspace = true }
+pin-project-lite             = { workspace = true }
+proptest                     = { workspace = true, optional = true }
+proptest-derive              = { workspace = true, optional = true }
+serde                        = { workspace = true }
+sha1                         = { workspace = true }
+sha2                         = { workspace = true }
+thiserror                    = { workspace = true }
+tokio                        = { workspace = true, features = [ "io-util" ] }
 
 [dev-dependencies]
-hex-literal = "1.1"
-proptest = { workspace = true }
-rstest = { workspace = true }
-rstest_reuse = "0.7"
-serde_json = { workspace = true }
+hex-literal     = { workspace = true }
+proptest        = { workspace = true }
+proptest-derive = { workspace = true }
+rstest          = { workspace = true }
+serde_json      = { workspace = true }
 
 [features]
-test = ["proptest", "proptest-derive"]
+test = [ "proptest", "proptest-derive" ]
 
 [lints]
 workspace = true

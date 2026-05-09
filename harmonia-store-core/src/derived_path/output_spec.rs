@@ -190,4 +190,12 @@ mod unittests {
     fn display(#[case] value: OutputSpec, #[case] expected: &str) {
         assert_eq!(value.to_string(), expected);
     }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_display_parse(spec in proptest::prelude::any::<OutputSpec>()) {
+            let s = spec.to_string();
+            proptest::prop_assert_eq!(s.parse::<OutputSpec>().unwrap(), spec);
+        }
+    }
 }

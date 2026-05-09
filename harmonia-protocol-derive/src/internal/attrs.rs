@@ -8,7 +8,7 @@ use crate::internal::symbol::{BOUND, DESERIALIZE, SERIALIZE};
 
 use super::Context;
 use super::symbol::{
-    CRATE, DEFAULT, DISPLAY, FROM, FROM_STORE_DIR_STR, FROM_STR, INTO, NIX, SKIP,
+    CRATE, DEFAULT, DISPLAY, FOR_TYPE, FROM, FROM_STORE_DIR_STR, FROM_STR, INTO, NIX, SKIP,
     STORE_DIR_DISPLAY, Symbol, TAG, TRY_FROM, TRY_INTO, VERSION,
 };
 
@@ -129,6 +129,9 @@ pub struct Container {
     pub tag: Option<syn::Type>,
     pub ser_bound: Option<Vec<syn::WherePredicate>>,
     pub de_bound: Option<Vec<syn::WherePredicate>>,
+    /// When set, generate impls for this type instead of the struct's own ident.
+    /// Used by `nix_derive_for!` to implement traits on types from other crates.
+    pub for_type: Option<syn::Type>,
 }
 
 impl Container {
@@ -145,6 +148,7 @@ impl Container {
         let mut tag = None;
         let mut ser_bound = None;
         let mut de_bound = None;
+        let mut for_type = None;
 
         for attr in attrs {
             if attr.path() != NIX {
@@ -177,6 +181,8 @@ impl Container {
                     tag = parse_lit(ctx, &meta, TAG)?;
                 } else if meta.path == CRATE {
                     crate_path = parse_lit(ctx, &meta, CRATE)?;
+                } else if meta.path == FOR_TYPE {
+                    for_type = parse_lit(ctx, &meta, FOR_TYPE)?;
                 } else if meta.path == BOUND {
                     (ser_bound, de_bound) =
                         get_ser_and_de(ctx, BOUND, &meta, parse_lit_into_where)?;
@@ -206,6 +212,7 @@ impl Container {
             tag,
             ser_bound,
             de_bound,
+            for_type,
         }
     }
 }
@@ -563,6 +570,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -588,6 +596,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -613,6 +622,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -638,6 +648,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -663,6 +674,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -688,6 +700,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -713,6 +726,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -738,6 +752,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -763,6 +778,7 @@ mod test {
                 tag: None,
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }
@@ -788,6 +804,7 @@ mod test {
                 tag: Some(parse_quote!(::test::Operation)),
                 ser_bound: None,
                 de_bound: None,
+                for_type: None,
             }
         );
     }

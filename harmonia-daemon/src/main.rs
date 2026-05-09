@@ -5,11 +5,16 @@ use harmonia_daemon::server::DaemonServer;
 use std::path::PathBuf;
 use tokio::signal;
 use tracing::{error, info};
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), DaemonError> {
-    // Initialize tracing subscriber
-    tracing_subscriber::fmt::init();
+    // Initialize tracing; bridges `log` records (tokio, rusqlite) via tracing-log.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
 
     // Load configuration
     let config = match std::env::var("HARMONIA_DAEMON_CONFIG") {

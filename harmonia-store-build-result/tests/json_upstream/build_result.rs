@@ -1,12 +1,12 @@
 //! BuildResult JSON tests
 
 use super::{libstore_test_data_path, test_upstream_json};
-use harmonia_protocol::daemon_wire::types2::{
+use harmonia_store_build_result::{
     BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, FailureStatus,
     Microseconds, SuccessStatus,
 };
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::realisation::Realisation;
+use harmonia_store_core::realisation::UnkeyedRealisation;
 
 test_upstream_json!(
     test_build_result_success,
@@ -18,24 +18,16 @@ test_upstream_json!(
                 built_outputs: [
                     (
                         "bar".parse::<OutputName>().unwrap(),
-                        Realisation {
-                            id: "sha256:6f869f9ea2823bda165e06076fd0de4366dead2c0e8d2dbbad277d4f15c373f5!bar"
-                                .parse()
-                                .unwrap(),
+                        UnkeyedRealisation {
                             out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar".parse().unwrap(),
                             signatures: Default::default(),
-                            dependent_realisations: Default::default(),
                         },
                     ),
                     (
                         "foo".parse::<OutputName>().unwrap(),
-                        Realisation {
-                            id: "sha256:6f869f9ea2823bda165e06076fd0de4366dead2c0e8d2dbbad277d4f15c373f5!foo"
-                                .parse()
-                                .unwrap(),
+                        UnkeyedRealisation {
                             out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
                             signatures: Default::default(),
-                            dependent_realisations: Default::default(),
                         },
                     ),
                 ]
@@ -58,7 +50,7 @@ test_upstream_json!(
         BuildResult {
             inner: BuildResultInner::Failure(BuildResultFailure {
                 status: FailureStatus::OutputRejected,
-                error_msg: "no idea why".into(),
+                error_msg: b"no idea why".to_vec(),
                 is_non_deterministic: false,
             }),
             times_built: 3,
@@ -77,7 +69,7 @@ test_upstream_json!(
         BuildResult {
             inner: BuildResultInner::Failure(BuildResultFailure {
                 status: FailureStatus::NotDeterministic,
-                error_msg: "no idea why".into(),
+                error_msg: b"no idea why".to_vec(),
                 is_non_deterministic: false,
             }),
             times_built: 1,

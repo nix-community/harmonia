@@ -9,8 +9,8 @@ use std::task::{Context, Poll, ready};
 
 use async_stream::stream;
 use bytes::Bytes;
-use futures::Stream;
-use futures::stream::{Empty, empty};
+use futures_core::Stream;
+use futures_util::stream::{Empty, empty};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt as _};
@@ -593,7 +593,7 @@ pub trait FutureResultExt: Future {
     /// ```rust
     /// # use std::future::{ready, Future};
     /// # use std::pin::pin;
-    /// # use futures::stream::StreamExt as _;
+    /// # use futures_util::stream::StreamExt as _;
     /// use harmonia_protocol::daemon::FutureResultExt as _;
     /// # tokio_test::block_on(async {
     /// let result = ready(12).empty_logs();
@@ -617,7 +617,7 @@ pub trait FutureResultExt: Future {
     /// ```rust
     /// # use std::future::{ready, Future};
     /// # use std::pin::pin;
-    /// # use futures::stream::StreamExt as _;
+    /// # use futures_util::stream::StreamExt as _;
     /// # use harmonia_protocol::daemon::DaemonResult;
     /// use harmonia_protocol::daemon::FutureResultExt as _;
     /// # tokio_test::block_on(async {

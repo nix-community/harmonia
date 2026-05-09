@@ -24,12 +24,6 @@ pub enum CacheError {
     #[error("Fingerprint error: {0}")]
     Fingerprint(#[from] harmonia_store_core::signature::FingerprintError),
 
-    #[error("NARInfo error: {0}")]
-    NarInfo(#[from] NarInfoError),
-
-    #[error("Build log error: {0}")]
-    BuildLog(#[from] BuildLogError),
-
     #[error("File serving error: {0}")]
     Serve(#[from] ServeError),
 }
@@ -67,26 +61,8 @@ pub enum StoreError {
     #[error("failed to query store path '{hash}': {reason}")]
     PathQuery { hash: String, reason: String },
 
-    #[error("Daemon communication error: {0}")]
-    Remote(#[from] harmonia_store_remote::DaemonError),
-}
-
-#[derive(Error, Debug)]
-pub enum NarInfoError {
-    #[error("Failed to query path info: {reason}")]
-    QueryFailed { reason: String },
-
-    #[error("Invalid UTF-8 in store directory: {0}")]
-    InvalidUtf8(#[from] std::str::Utf8Error),
-
-    #[error("Invalid store directory: {0}")]
-    InvalidStoreDir(String),
-}
-
-#[derive(Error, Debug)]
-pub enum BuildLogError {
-    #[error("Failed to query derivation path: {reason}")]
-    QueryFailed { reason: String },
+    #[error("nix database error ({path}): {reason}")]
+    Db { path: String, reason: String },
 }
 
 #[derive(Error, Debug)]

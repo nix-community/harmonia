@@ -23,17 +23,23 @@ async fn test_query_missing_opaque_classification() {
 
     // Register one path as present
     let present = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-present").unwrap();
-    let present_full = format!("{}/{}", ts.store_dir, present);
     let disk = ts.store_path().join(present.to_string());
     std::fs::write(&disk, "content").unwrap();
     {
         let mut db = ts.db.lock().await;
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: present_full,
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000001".into(),
-            ..Default::default()
-        })
-        .unwrap();
+        let nar_hash = harmonia_store_path_info::NarHash::new(&[0u8; 32]);
+        let info = harmonia_store_path_info::UnkeyedValidPathInfo {
+            deriver: None,
+            nar_hash,
+            references: std::collections::BTreeSet::new(),
+            registration_time: None,
+            nar_size: 0,
+            ultimate: false,
+            signatures: std::collections::BTreeSet::new(),
+            ca: None,
+            store_dir: ts.store_dir.clone(),
+        };
+        db.register_valid_path(&ts.store_dir, &present, &info).unwrap();
     }
 
     let missing = StorePath::from_base_path("mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm-gone").unwrap();
@@ -68,17 +74,23 @@ async fn test_query_missing_built_classification() {
     // actual .drv contents)
     let known_drv =
         StorePath::from_base_path("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk-known.drv").unwrap();
-    let known_full = format!("{}/{}", ts.store_dir, known_drv);
     let disk = ts.store_path().join(known_drv.to_string());
     std::fs::write(&disk, "Derive(...)").unwrap();
     {
         let mut db = ts.db.lock().await;
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: known_full,
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000002".into(),
-            ..Default::default()
-        })
-        .unwrap();
+        let nar_hash = harmonia_store_path_info::NarHash::new(&[0u8; 32]);
+        let info = harmonia_store_path_info::UnkeyedValidPathInfo {
+            deriver: None,
+            nar_hash,
+            references: std::collections::BTreeSet::new(),
+            registration_time: None,
+            nar_size: 0,
+            ultimate: false,
+            signatures: std::collections::BTreeSet::new(),
+            ca: None,
+            store_dir: ts.store_dir.clone(),
+        };
+        db.register_valid_path(&ts.store_dir, &known_drv, &info).unwrap();
     }
 
     let unknown_drv =

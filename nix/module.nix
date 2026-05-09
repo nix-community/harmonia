@@ -16,7 +16,7 @@ let
   signKeyPaths =
     cacheCfg.signKeyPaths ++ (if cacheCfg.signKeyPath != null then [ cacheCfg.signKeyPath ] else [ ]);
   credentials = lib.imap0 (i: signKeyPath: {
-    id = "sign-key-${builtins.toString i}";
+    id = "sign-key-${toString i}";
     path = signKeyPath;
   }) signKeyPaths;
 in
@@ -52,7 +52,7 @@ in
       };
 
       cache = {
-        enable = lib.mkEnableOption ("Harmonia: Nix binary cache written in Rust");
+        enable = lib.mkEnableOption "Harmonia: Nix binary cache written in Rust";
 
         signKeyPath = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
@@ -74,7 +74,7 @@ in
       };
 
       daemon = {
-        enable = lib.mkEnableOption ("Harmonia daemon: Nix daemon protocol implementation");
+        enable = lib.mkEnableOption "Harmonia daemon: Nix daemon protocol implementation";
 
         socketPath = lib.mkOption {
           type = lib.types.str;
@@ -133,43 +133,45 @@ in
         else
           [ ];
 
-      services.harmonia-dev.cache.settings = builtins.mapAttrs (_: v: lib.mkDefault v) (
-        {
-          bind = "[::]:5000";
-          workers = 4;
-          max_connection_rate = 256;
-          priority = 50;
-        }
-        // lib.optionalAttrs daemonCfg.enable {
-          daemon_socket = daemonCfg.socketPath;
-        }
-      );
+      services.harmonia-dev.cache.settings = builtins.mapAttrs (_: v: lib.mkDefault v) {
+        bind = "[::]:5000";
+        workers = 4;
+        max_connection_rate = 256;
+        priority = 50;
+      };
+
+      # Socket activation lets the service run with PrivateNetwork; the
+      # inherited fd keeps referring to the host netns.
+      systemd.sockets.harmonia-dev = {
+        description = "harmonia binary cache socket";
+        wantedBy = [ "sockets.target" ];
+        socketConfig.ListenStream =
+          let
+            b = cacheCfg.settings.bind;
+          in
+          if lib.hasPrefix "unix:" b then lib.removePrefix "//" (lib.removePrefix "unix:" b) else b;
+      };
 
       systemd.services.harmonia-dev = {
         description = "harmonia binary cache service";
 
-        requires = if daemonCfg.enable then [ "harmonia-daemon.service" ] else [ "nix-daemon.socket" ];
-        after = [ "network.target" ] ++ lib.optional daemonCfg.enable "harmonia-daemon.service";
-        wantedBy = [ "multi-user.target" ];
+        requires = [ "harmonia-dev.socket" ];
+        after = [ "harmonia-dev.socket" ];
 
         environment = {
-          NIX_REMOTE = "daemon";
-          LIBEV_FLAGS = "4"; # go ahead and mandate epoll(2)
           CONFIG_FILE = lib.mkIf (configFile != null) configFile;
           SIGN_KEY_PATHS = lib.strings.concatMapStringsSep " " (
             credential: "%d/${credential.id}"
           ) credentials;
           # print stack traces
-          RUST_LOG = "actix_web=debug";
+          RUST_LOG = "info,actix_web=debug";
           RUST_BACKTRACE = "1";
         };
 
-        # Note: it's important to set this for nix-store, because it wants to use
-        # $HOME in order to use a temporary cache dir. bizarre failures will occur
-        # otherwise
-        environment.HOME = "/run/harmonia";
-
         serviceConfig = {
+          Type = "notify";
+          WatchdogSec = 15;
+          Restart = "on-failure";
           ExecStart = "${cfg.package}/bin/harmonia-cache";
 
           User = "harmonia";
@@ -201,7 +203,11 @@ in
           RestrictNamespaces = true;
           SystemCallArchitectures = "native";
 
-          PrivateNetwork = false;
+          # accept(2) on the inherited fd is exempt from both restrictions.
+          PrivateNetwork = true;
+          RestrictAddressFamilies = [ "AF_UNIX" ];
+          IPAddressDeny = "any";
+
           PrivateTmp = true;
           PrivateDevices = true;
           PrivateMounts = true;
@@ -209,7 +215,6 @@ in
           ProtectSystem = "strict";
           ProtectHome = true;
           LockPersonality = true;
-          RestrictAddressFamilies = "AF_UNIX AF_INET AF_INET6";
 
           LimitNOFILE = 65536;
         };

@@ -1,34 +1,49 @@
 {
   pkgs,
   lib,
+  stdenv,
   crane,
   makeWrapper,
   nix,
   curl,
+  jq,
+  cargo-llvm-cov,
+  cargo-nextest,
+  llvmPackages,
   nix-src,
 }:
 let
-  craneLib = crane.mkLib pkgs;
+  craneLib = (crane.mkLib pkgs).overrideScope (
+    _: _prev: {
+      # Use mold linker for faster builds on ELF platforms
+      stdenvSelector =
+        p: if p.stdenv.hostPlatform.isElf then p.stdenvAdapters.useMoldLinker p.stdenv else p.stdenv;
+    }
+  );
 
   # Extract version from Cargo.toml
-  cargoToml = lib.importTOML ./Cargo.toml;
+  cargoToml = lib.importTOML ../Cargo.toml;
   version = cargoToml.workspace.package.version;
 
-  # Filter source to include only rust-related files
-  src = lib.cleanSourceWith {
-    src = craneLib.path ./.;
-    filter =
-      path: type:
-      (lib.hasSuffix "\.toml" path)
-      || (lib.hasSuffix "\.lock" path)
-      || (lib.hasSuffix "\.rs" path)
-      || (lib.hasInfix "/harmonia-" path)
-      ||
-        # Include test keys
-        (lib.hasSuffix ".pk" path)
-      || (lib.hasSuffix ".sk" path)
-      || (lib.hasSuffix ".pem" path)
-      || (craneLib.filterCargoSources path type);
+  # Filter source to include only files that affect the cargo build.
+  # Avoid path-substring matching (e.g. "/harmonia-") so docs and other
+  # unrelated files do not trigger rebuilds.
+  fs = lib.fileset;
+  root = ../.;
+  crateDirs = lib.filter (p: lib.hasPrefix "harmonia-" p) (
+    lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir root))
+  );
+  src = fs.toSource {
+    inherit root;
+    fileset = fs.difference (fs.unions (
+      [
+        ../Cargo.toml
+        ../Cargo.lock
+        # test fixtures referenced via include_str! from harmonia-cache/tests
+        (fs.fileFilter (f: f.hasExt "pk" || f.hasExt "sk" || f.hasExt "pem") ../tests)
+      ]
+      ++ map (d: root + "/${d}") crateDirs
+    )) (fs.fileFilter (f: f.hasExt "md") root);
   };
 
   commonArgs = {
@@ -106,9 +121,9 @@ let
       nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
         nix
         curl
-        pkgs.cargo-llvm-cov
-        pkgs.cargo-nextest
-        pkgs.jq
+        cargo-llvm-cov
+        cargo-nextest
+        jq
       ];
 
       # Custom build command following nomad pattern:
@@ -117,9 +132,9 @@ let
       # 3. Generate report separately with --codecov
       buildPhaseCargoCommand = ''
         export NIX_UPSTREAM_SRC=${nix-src}
-        export LLVM_COV=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-cov
-        export LLVM_PROFDATA=${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-profdata
-        ${lib.optionalString pkgs.stdenv.isDarwin ''
+        export LLVM_COV=${llvmPackages.bintools-unwrapped}/bin/llvm-cov
+        export LLVM_PROFDATA=${llvmPackages.bintools-unwrapped}/bin/llvm-profdata
+        ${lib.optionalString stdenv.isDarwin ''
           export _NIX_TEST_NO_SANDBOX="1"
         ''}
 
@@ -133,7 +148,6 @@ let
         cargo build --workspace
 
         # Point integration tests to instrumented binaries for coverage
-        export HARMONIA_DAEMON_BIN="$PWD/target/debug/harmonia-daemon"
         export HARMONIA_CACHE_BIN="$PWD/target/debug/harmonia-cache"
 
         # Run tests with nextest (they will use the instrumented binaries and write profraw data)
@@ -155,7 +169,7 @@ let
             # Finally keep only harmonia-* paths (our crates)
             | with_entries(select(.key | startswith("harmonia-")))
           )
-        ' coverage-raw.json > $out/${pkgs.stdenv.hostPlatform.system}.json
+        ' coverage-raw.json > $out/${stdenv.hostPlatform.system}.json
       '';
 
       installPhaseCommand = "";
@@ -172,6 +186,10 @@ let
   );
 in
 {
-  inherit harmonia clippy tests;
-  default = harmonia;
+  inherit
+    src
+    harmonia
+    clippy
+    tests
+    ;
 }

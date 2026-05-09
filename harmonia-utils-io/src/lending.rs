@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
 use bytes::Bytes;
-use futures::FutureExt;
+use futures_util::FutureExt;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 use tokio::sync::oneshot;

@@ -318,288 +318,149 @@ impl FromStoreDirStr for LegacyDerivedPath {
 
 #[cfg(test)]
 mod unittests {
+    use proptest::prelude::*;
     use rstest::rstest;
 
     use super::*;
     use crate::store_path::{StoreDir, StorePathError};
 
-    #[rstest]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv", Ok(DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "out".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^*", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "*".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^bin,lib", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "bin,lib".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin,lib", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-            output: "out".parse().unwrap(),
-        }),
-        outputs: "bin,lib".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Built {
-                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-                output: "out".parse().unwrap(),
-            }),
-            output: "bin".parse().unwrap(),
-        }),
-        outputs: "lib".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!out", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv!out".into(),
-        error: StorePathError::Symbol(41, b'!'),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!out^bin", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv!out^bin".into(),
-        error: StorePathError::Symbol(41, b'!'),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin!out^lib", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv^out^bin!out^lib".into(),
-        error: StorePathError::Symbol(3, b'!'),
-    }))]
-    fn parse_path(#[case] input: &str, #[case] expected: Result<DerivedPath, ParseStorePathError>) {
-        let store_dir = StoreDir::default();
-        let actual: Result<DerivedPath, _> = store_dir.parse(input);
-        assert_eq!(actual, expected);
+    fn drv() -> Arc<SingleDerivedPath> {
+        Arc::new(SingleDerivedPath::Opaque(
+            "00000000000000000000000000000000-test.drv".parse().unwrap(),
+        ))
+    }
+    fn nest(inner: Arc<SingleDerivedPath>, out: &str) -> Arc<SingleDerivedPath> {
+        Arc::new(SingleDerivedPath::Built {
+            drv_path: inner,
+            output: out.parse().unwrap(),
+        })
+    }
+    fn built(drv_path: Arc<SingleDerivedPath>, outputs: &str) -> DerivedPath {
+        DerivedPath::Built {
+            drv_path,
+            outputs: outputs.parse().unwrap(),
+        }
     }
 
+    /// Asserts both `display(value) == carrot` and `parse(carrot) == value` for the
+    /// `^`-separated format, then derives the legacy `!`-separated string and checks
+    /// the same roundtrip via `LegacyDerivedPath` / `to_legacy_format()`.
     #[rstest]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv", Ok(DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!out", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "out".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!*", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "*".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!bin,lib", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "bin,lib".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!out!bin,lib", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-            output: "out".parse().unwrap(),
-        }),
-        outputs: "bin,lib".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!out!bin!lib", Ok(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Built {
-                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-                output: "out".parse().unwrap(),
-            }),
-            output: "bin".parse().unwrap(),
-        }),
-        outputs: "lib".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv^out".into(),
-        error: StorePathError::Symbol(41, b'^'),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out!bin", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv^out!bin".into(),
-        error: StorePathError::Symbol(41, b'^'),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!out!bin^out!lib", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv!out!bin^out!lib".into(),
-        error: StorePathError::Symbol(3, b'^'),
-    }))]
-    fn parse_legacy_path(
-        #[case] input: &str,
-        #[case] expected: Result<DerivedPath, ParseStorePathError>,
-    ) {
+    #[case::opaque("/nix/store/00000000000000000000000000000000-test.drv",
+        DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()))]
+    #[case::out(
+        "/nix/store/00000000000000000000000000000000-test.drv^out",
+        built(drv(), "out")
+    )]
+    #[case::all(
+        "/nix/store/00000000000000000000000000000000-test.drv^*",
+        built(drv(), "*")
+    )]
+    #[case::multi(
+        "/nix/store/00000000000000000000000000000000-test.drv^bin,lib",
+        built(drv(), "bin,lib")
+    )]
+    #[case::nested(
+        "/nix/store/00000000000000000000000000000000-test.drv^out^bin,lib",
+        built(nest(drv(), "out"), "bin,lib")
+    )]
+    #[case::deep(
+        "/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib",
+        built(nest(nest(drv(), "out"), "bin"), "lib")
+    )]
+    fn derived_path_roundtrip(#[case] carrot: &str, #[case] value: DerivedPath) {
         let store_dir = StoreDir::default();
-        let actual: Result<LegacyDerivedPath, _> = store_dir.parse(input);
-        assert_eq!(actual.map(|p| p.0), expected);
-    }
-
-    #[rstest]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv", Ok(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^bin", Ok(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        output: "bin".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin", Ok(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-            output: "out".parse().unwrap(),
-        }),
-        output: "bin".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib", Ok(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Built {
-                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-                output: "out".parse().unwrap(),
-            }),
-            output: "bin".parse().unwrap(),
-        }),
-        output: "lib".parse().unwrap(),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!out", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv!out".into(),
-        error: StorePathError::Symbol(41, b'!'),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv!out^bin", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv!out^bin".into(),
-        error: StorePathError::Symbol(41, b'!'),
-    }))]
-    #[case("/nix/store/00000000000000000000000000000000-test.drv^out^bin!out^lib", Err(ParseStorePathError {
-        path: "/nix/store/00000000000000000000000000000000-test.drv^out^bin!out^lib".into(),
-        error: StorePathError::Symbol(3, b'!'),
-    }))]
-    fn parse_single_path(
-        #[case] input: &str,
-        #[case] expected: Result<SingleDerivedPath, ParseStorePathError>,
-    ) {
-        let store_dir = StoreDir::default();
-        let actual: Result<SingleDerivedPath, _> = store_dir.parse(input);
-        assert_eq!(actual, expected);
-    }
-
-    #[rstest]
-    #[case(DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()), "/nix/store/00000000000000000000000000000000-test.drv")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "out".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv^out")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "*".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv^*")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "bin,lib".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv^bin,lib")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-            output: "out".parse().unwrap(),
-        }),
-        outputs: "bin,lib".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv^out^bin,lib")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Built {
-                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-                output: "out".parse().unwrap(),
-            }),
-            output: "bin".parse().unwrap(),
-        }),
-        outputs: "lib".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib")]
-    fn display_path(#[case] value: DerivedPath, #[case] expected: &str) {
-        let store_dir = StoreDir::default();
-        assert_eq!(store_dir.display(&value).to_string(), expected);
-    }
-
-    #[rstest]
-    #[case(DerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()), "/nix/store/00000000000000000000000000000000-test.drv")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "out".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv!out")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "*".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv!*")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        outputs: "bin,lib".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv!bin,lib")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-            output: "out".parse().unwrap(),
-        }),
-        outputs: "bin,lib".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv!out!bin,lib")]
-    #[case(DerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Built {
-                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-                output: "out".parse().unwrap(),
-            }),
-            output: "bin".parse().unwrap(),
-        }),
-        outputs: "lib".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv!out!bin!lib")]
-    fn display_legacy_path(#[case] value: DerivedPath, #[case] expected: &str) {
-        let store_dir = StoreDir::default();
+        // ^ format
+        assert_eq!(store_dir.display(&value).to_string(), carrot);
+        assert_eq!(store_dir.parse::<DerivedPath>(carrot).unwrap(), value);
+        // ! (legacy) format — only the separator differs
+        let legacy = carrot.replace('^', "!");
         assert_eq!(
             store_dir.display(&value.to_legacy_format()).to_string(),
-            expected
+            legacy
+        );
+        assert_eq!(
+            store_dir.parse::<LegacyDerivedPath>(&legacy).unwrap().0,
+            value
         );
     }
 
     #[rstest]
-    #[case(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()), "/nix/store/00000000000000000000000000000000-test.drv")]
-    #[case(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        output: "bin".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv^bin")]
-    #[case(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-            output: "out".parse().unwrap(),
-        }),
-        output: "bin".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv^out^bin")]
-    #[case(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Built {
-                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-                output: "out".parse().unwrap(),
-            }),
-            output: "bin".parse().unwrap(),
-        }),
-        output: "lib".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib")]
-    fn display_single_path(#[case] value: SingleDerivedPath, #[case] expected: &str) {
+    #[case::opaque("/nix/store/00000000000000000000000000000000-test.drv",
+        SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()))]
+    #[case::built("/nix/store/00000000000000000000000000000000-test.drv^bin",
+        Arc::into_inner(nest(drv(), "bin")).unwrap())]
+    #[case::nested("/nix/store/00000000000000000000000000000000-test.drv^out^bin",
+        Arc::into_inner(nest(nest(drv(), "out"), "bin")).unwrap())]
+    #[case::deep("/nix/store/00000000000000000000000000000000-test.drv^out^bin^lib",
+        Arc::into_inner(nest(nest(nest(drv(), "out"), "bin"), "lib")).unwrap())]
+    fn single_derived_path_roundtrip(#[case] carrot: &str, #[case] value: SingleDerivedPath) {
         let store_dir = StoreDir::default();
-        assert_eq!(store_dir.display(&value).to_string(), expected);
-    }
-
-    #[rstest]
-    #[case(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap()), "/nix/store/00000000000000000000000000000000-test.drv")]
-    #[case(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-        output: "bin".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv!bin")]
-    #[case(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-            output: "out".parse().unwrap(),
-        }),
-        output: "bin".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv!out!bin")]
-    #[case(SingleDerivedPath::Built {
-        drv_path: Arc::new(SingleDerivedPath::Built {
-            drv_path: Arc::new(SingleDerivedPath::Built {
-                drv_path: Arc::new(SingleDerivedPath::Opaque("00000000000000000000000000000000-test.drv".parse().unwrap())),
-                output: "out".parse().unwrap(),
-            }),
-            output: "bin".parse().unwrap(),
-        }),
-        output: "lib".parse().unwrap(),
-    }, "/nix/store/00000000000000000000000000000000-test.drv!out!bin!lib")]
-    fn display_single_legacy_path(#[case] value: SingleDerivedPath, #[case] expected: &str) {
-        let store_dir = StoreDir::default();
+        assert_eq!(store_dir.display(&value).to_string(), carrot);
+        assert_eq!(store_dir.parse::<SingleDerivedPath>(carrot).unwrap(), value);
+        let legacy = carrot.replace('^', "!");
         assert_eq!(
             store_dir.display(&value.to_legacy_format()).to_string(),
-            expected
+            legacy
         );
+    }
+
+    /// The opposite separator (or a mix) must be rejected. Each case is given in
+    /// the `^` form along with the expected error position; the `!` form is
+    /// derived by substitution and the assertion swaps the rejected byte.
+    #[rstest]
+    #[case("/nix/store/00000000000000000000000000000000-test.drv^out", 41)]
+    #[case("/nix/store/00000000000000000000000000000000-test.drv^out!bin", 41)]
+    #[case(
+        "/nix/store/00000000000000000000000000000000-test.drv!out!bin^out!lib",
+        3
+    )]
+    fn parse_wrong_separator(#[case] input: &str, #[case] err_pos: u8) {
+        let store_dir = StoreDir::default();
+        let swapped: String = input
+            .chars()
+            .map(|c| match c {
+                '^' => '!',
+                '!' => '^',
+                c => c,
+            })
+            .collect();
+        let err = |path: &str, sym: u8| ParseStorePathError {
+            path: path.into(),
+            error: StorePathError::Symbol(err_pos, sym),
+        };
+        // ^ parsers reject `swapped` (which has ! in the offending spot)
+        assert_eq!(
+            store_dir.parse::<DerivedPath>(&swapped),
+            Err(err(&swapped, b'!'))
+        );
+        assert_eq!(
+            store_dir.parse::<SingleDerivedPath>(&swapped),
+            Err(err(&swapped, b'!'))
+        );
+        // ! parser rejects `input` (which has ^ in the offending spot)
+        assert_eq!(
+            store_dir.parse::<LegacyDerivedPath>(input).map(|p| p.0),
+            Err(err(input, b'^'))
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_derived_path_display_parse(dp in any::<DerivedPath>()) {
+            let store_dir = StoreDir::default();
+            let s = store_dir.display(&dp).to_string();
+            prop_assert_eq!(store_dir.parse::<DerivedPath>(&s).unwrap(), dp.clone());
+            let legacy = store_dir.display(&dp.to_legacy_format()).to_string();
+            prop_assert_eq!(store_dir.parse::<LegacyDerivedPath>(&legacy).unwrap().0, dp);
+        }
+
+        #[test]
+        fn proptest_single_derived_path_display_parse(dp in any::<SingleDerivedPath>()) {
+            let store_dir = StoreDir::default();
+            let s = store_dir.display(&dp).to_string();
+            prop_assert_eq!(store_dir.parse::<SingleDerivedPath>(&s).unwrap(), dp);
+        }
     }
 
     #[test]

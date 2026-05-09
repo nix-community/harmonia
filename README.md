@@ -149,6 +149,11 @@ enable_compression = true
 # Default: empty
 # Example: if you use `nix copy --store /guest` to populate a store than configure:
 # real_nix_store = "/guest/nix/store"
+
+# Path to the nix SQLite database. Harmonia reads store metadata directly from
+# this file (no nix-daemon connection is used). Derived from the store layout
+# by default; override only for non-standard state directories.
+# nix_db_path = "/nix/var/nix/db/db.sqlite"
 ```
 
 Per default we wont sign any narinfo because we don't have a secret key, to
@@ -190,11 +195,13 @@ Note: When TLS is enabled, harmonia will only accept HTTPS connections on the co
 
 ### Logging Configuration
 
-Logging can be configured with
-[env_logger](https://docs.rs/env_logger/latest/env_logger/). The default value
-is `info,actix_web=debug`. To only log errors use the following
-`RUST_LOG=error` and to only disable access logging, use
-`RUST_LOG=info,actix_web::middleware=error`
+Logging is handled by [tracing](https://docs.rs/tracing) and configured via the
+`RUST_LOG` environment variable using
+[EnvFilter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)
+syntax (compatible with the familiar `env_logger` directives). The default
+filter is `info`. To only log errors use `RUST_LOG=error`, and to keep info
+messages while disabling actix access logging use
+`RUST_LOG=info,actix_web::middleware=error`.
 
 ## Build
 
@@ -217,50 +224,9 @@ nix flake check -L
 ```
 
 
-## Harmonia Daemon
-
-This feature is currently only available when using the flake version of the NixOS module.
-Harmonia includes an experimental Nix daemon implementation (`harmonia-daemon`) that can serve as a replacement for the standard `nix-daemon`.
-This daemon implements the Nix daemon protocol and allows Harmonia to operate independently of the system's Nix daemon.
-
-The daemon provides several benefits:
-- **Enhanced security**: Isolates Harmonia's operations from the system Nix daemon, reducing attack surface
-- **Dedicated resource allocation**: Run with separate resource limits without affecting system Nix operations
-
-To use this feature, you need to import the harmonia flake in your NixOS configuration:
-
-```nix
-# flake.nix
-{
-  inputs.harmonia.url = "github:nix-community/harmonia";
-  # ... other inputs
-}
-
-# configuration.nix or your NixOS module
-{ inputs, ... }:
-{
-  imports = [ inputs.harmonia.nixosModules.harmonia ];
-  
-  services.harmonia-dev.daemon.enable = true;
-
-  # Optional: Configure the daemon
-  #services.harmonia-dev.daemon = {
-  #  socketPath = "/run/harmonia-daemon/socket";  # Default
-  #  storeDir = "/nix/store";                      # Default
-  #  dbPath = "/nix/var/nix/db/db.sqlite";        # Default
-  #  logLevel = "info";                            # Default
-  #};
-
-  # The cache will automatically use the daemon when enabled
-  services.harmonia-dev.cache.enable = true;
-}
-```
-
-When the daemon is enabled, the Harmonia cache service will automatically use it instead of connecting to the system's `nix-daemon`.
-
 ## Prometheus Monitoring
 
-Harmonia exposes Prometheus metrics at the `/metrics` endpoint for monitoring and observability. The metrics provide insights into HTTP request performance and Nix daemon connection pool statistics.
+Harmonia exposes Prometheus metrics at the `/metrics` endpoint for monitoring and observability.
 
 ### Available Metrics
 
@@ -268,19 +234,11 @@ Harmonia exposes Prometheus metrics at the `/metrics` endpoint for monitoring an
 - `harmonia_http_requests_total` - Total number of HTTP requests (labeled by method, path, and status code)
 - `harmonia_http_request_duration_seconds` - Request latency histogram with buckets ranging from 0.0001s to 1.0s
 
-**Connection Pool Metrics:**
-- `harmonia_daemon_active_connections` - Number of active connections to the Nix daemon
-- `harmonia_daemon_idle_connections` - Number of idle connections in the pool
-- `harmonia_daemon_connections_created_total` - Total connections created over time
-- `harmonia_daemon_connection_acquire_duration_seconds` - Time to acquire a connection from the pool
-- `harmonia_daemon_connection_errors_total` - Total number of connection errors
-
 ### Grafana Dashboard
 
 A pre-configured Grafana dashboard is available in the repository at `harmonia-cache/harmonia-grafana-dashboard.json`. This dashboard visualizes:
 - Request rate and latency patterns
 - HTTP status code distribution
-- Connection pool health and utilization
 - Error rates and performance trends
 
 You can import this dashboard into your Grafana instance to monitor your Harmonia deployment.

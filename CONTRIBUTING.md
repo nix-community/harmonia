@@ -113,7 +113,7 @@ This runs treefmt which handles:
 cargo clippy --all-targets --all-features -- -D warnings
 
 # Or via Nix (same as CI)
-nix build .#clippy -L
+nix build .#checks.$(nix config show system).clippy -L
 ```
 
 ### Code Guidelines
@@ -157,7 +157,7 @@ All checks must pass before merging.
 
 ## NixOS Module Development
 
-The NixOS module is in `module.nix`. To test changes:
+The NixOS module is in `nix/module.nix`. To test changes:
 
 ```bash
 # Test with nix-daemon backend

@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use harmonia_protocol::build_result::{BuildResultInner, FailureStatus, SuccessStatus};
+use harmonia_store_build_result::{BuildResultInner, FailureStatus, SuccessStatus};
 use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
 use harmonia_protocol::daemon_wire::types2::BuildMode;
 use harmonia_store_core::derivation::{

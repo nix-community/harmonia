@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use bstr::ByteSlice as _;
 use bytes::Bytes;
 use derive_more::Display;
-use futures::Stream;
+use futures_core::Stream;
 use thiserror::Error;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt as _, AsyncWriteExt as _};
 use tracing::{debug, trace};
@@ -201,8 +201,8 @@ impl NarRestorer {
         U: Into<Result<NarEvent<R>, NarWriteError>>,
         R: AsyncBufRead + Send + Unpin,
     {
-        use futures::StreamExt as _;
-        futures::pin_mut!(stream);
+        use futures_util::StreamExt as _;
+        futures_util::pin_mut!(stream);
         while let Some(item) = stream.next().await {
             let event = item.into()?;
             self.process_event(event).await?;
@@ -325,11 +325,11 @@ where
 mod unittests {
     use super::*;
     use crate::archive::{NarEvent, dump, test_data};
-    use futures::stream::{StreamExt as _, TryStreamExt as _, iter};
+    use futures_util::stream::{StreamExt as _, TryStreamExt as _, iter};
     use rstest::rstest;
     use tempfile::Builder;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     #[rstest]
     #[case::text_file(test_data::text_file())]
     #[case::exec_file(test_data::exec_file())]
@@ -359,8 +359,8 @@ mod unittests {
 
 #[cfg(test)]
 mod proptests {
-    use futures::stream::iter;
-    use futures::{StreamExt as _, TryStreamExt as _};
+    use futures_util::stream::iter;
+    use futures_util::{StreamExt as _, TryStreamExt as _};
     use proptest::proptest;
     use tempfile::tempdir;
 

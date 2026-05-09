@@ -64,8 +64,8 @@ pub use metrics::PoolMetrics;
 pub use pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 
 // Re-export commonly used types from harmonia-protocol
-pub use harmonia_protocol::ProtocolVersion;
 pub use harmonia_protocol::types::{
     DaemonError, DaemonErrorKind, DaemonResult, DaemonStore, HandshakeDaemonStore, TrustLevel,
 };
 pub use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
+pub use harmonia_protocol::{FEATURE_REALISATION_WITH_PATH, ProtocolVersion};

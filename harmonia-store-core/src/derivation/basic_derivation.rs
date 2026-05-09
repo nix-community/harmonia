@@ -122,10 +122,10 @@ pub mod arbitrary {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DerivationHelper {
+struct DerivationHelperT<Inputs> {
     name: String,
     outputs: DerivationOutputs,
-    inputs: DerivationInputs,
+    inputs: Inputs,
     #[serde(rename = "system")]
     platform: String,
     builder: String,
@@ -137,59 +137,127 @@ struct DerivationHelper {
     version: u32,
 }
 
+/// Trait for converting between the in-memory input representation and
+/// the JSON-serializable form.
+trait SerdeInputs: Sized {
+    type Helper: Serialize + for<'de> Deserialize<'de>;
+    fn to_helper(&self) -> Self::Helper;
+    fn from_helper(h: Self::Helper) -> Self;
+}
+
+impl SerdeInputs for StorePathSet {
+    type Helper = StorePathSet;
+    fn to_helper(&self) -> StorePathSet {
+        self.clone()
+    }
+    fn from_helper(h: StorePathSet) -> Self {
+        h
+    }
+}
+
+impl SerdeInputs for BTreeSet<SingleDerivedPath> {
+    type Helper = DerivationInputs;
+    fn to_helper(&self) -> DerivationInputs {
+        DerivationInputs::from(self)
+    }
+    fn from_helper(h: DerivationInputs) -> Self {
+        BTreeSet::from(&h)
+    }
+}
+
+fn derivation_to_helper<Inputs: SerdeInputs>(
+    drv: &DerivationT<Inputs>,
+) -> Result<DerivationHelperT<Inputs::Helper>, std::str::Utf8Error> {
+    let platform_str = std::str::from_utf8(&drv.platform)?;
+    let builder_str = std::str::from_utf8(&drv.builder)?;
+    let args_strs: Result<Vec<String>, _> = drv
+        .args
+        .iter()
+        .map(|b| std::str::from_utf8(b).map(|s| s.to_string()))
+        .collect();
+    let args_strs = args_strs?;
+    let env_map: Result<BTreeMap<String, String>, _> = drv
+        .env
+        .iter()
+        .map(|(k, v)| {
+            Ok((
+                std::str::from_utf8(k)?.to_string(),
+                std::str::from_utf8(v)?.to_string(),
+            ))
+        })
+        .collect();
+    let env_map = env_map?;
+
+    Ok(DerivationHelperT {
+        name: drv.name.to_string(),
+        version: default_version(),
+        outputs: drv.outputs.clone(),
+        inputs: drv.inputs.to_helper(),
+        platform: platform_str.to_string(),
+        builder: builder_str.to_string(),
+        args: args_strs,
+        env: env_map,
+        structured_attrs: drv.structured_attrs.clone(),
+    })
+}
+
+fn helper_to_derivation<'de, Inputs: SerdeInputs, D: Deserializer<'de>>(
+    helper: DerivationHelperT<Inputs::Helper>,
+) -> Result<DerivationT<Inputs>, D::Error> {
+    if helper.version != 4 {
+        return Err(serde::de::Error::custom(format!(
+            "unsupported derivation version: {}, expected 4",
+            helper.version
+        )));
+    }
+    Ok(DerivationT {
+        name: helper
+            .name
+            .parse()
+            .map_err(|e| serde::de::Error::custom(format!("invalid derivation name: {}", e)))?,
+        outputs: helper.outputs,
+        inputs: Inputs::from_helper(helper.inputs),
+        platform: ByteString::from(helper.platform),
+        builder: ByteString::from(helper.builder),
+        args: helper.args.into_iter().map(ByteString::from).collect(),
+        env: helper
+            .env
+            .into_iter()
+            .map(|(k, v)| (ByteString::from(k), ByteString::from(v)))
+            .collect(),
+        structured_attrs: helper.structured_attrs,
+    })
+}
+
+impl Serialize for BasicDerivation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        derivation_to_helper(self)
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BasicDerivation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let helper = DerivationHelperT::<StorePathSet>::deserialize(deserializer)?;
+        helper_to_derivation::<StorePathSet, D>(helper)
+    }
+}
+
 impl Serialize for Derivation {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // Convert BTreeSet<SingleDerivedPath> to DerivationInputs for serialization
-        let inputs = DerivationInputs::from(&self.inputs);
-
-        // Serialize ByteString fields as strings
-        let platform_str = std::str::from_utf8(&self.platform)
-            .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in platform: {}", e)))?;
-
-        let builder_str = std::str::from_utf8(&self.builder)
-            .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in builder: {}", e)))?;
-
-        let args_strs: Result<Vec<String>, _> = self
-            .args
-            .iter()
-            .map(|b| {
-                std::str::from_utf8(b)
-                    .map(|s| s.to_string())
-                    .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in args: {}", e)))
-            })
-            .collect();
-        let args_strs = args_strs?;
-
-        // Serialize env map
-        let env_map: Result<BTreeMap<String, String>, _> = self
-            .env
-            .iter()
-            .map(|(k, v)| {
-                Ok((
-                    std::str::from_utf8(k)?.to_string(),
-                    std::str::from_utf8(v)?.to_string(),
-                ))
-            })
-            .collect::<Result<_, std::str::Utf8Error>>()
-            .map_err(|e| serde::ser::Error::custom(format!("invalid UTF-8 in env: {}", e)));
-        let env_map = env_map?;
-
-        let helper = DerivationHelper {
-            name: self.name.to_string(),
-            outputs: self.outputs.clone(),
-            inputs,
-            platform: platform_str.to_string(),
-            builder: builder_str.to_string(),
-            args: args_strs,
-            env: env_map,
-            structured_attrs: self.structured_attrs.clone(),
-            version: default_version(),
-        };
-
-        helper.serialize(serializer)
+        derivation_to_helper(self)
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
     }
 }
 
@@ -198,36 +266,73 @@ impl<'de> Deserialize<'de> for Derivation {
     where
         D: Deserializer<'de>,
     {
-        let helper = DerivationHelper::deserialize(deserializer)?;
+        let helper = DerivationHelperT::<DerivationInputs>::deserialize(deserializer)?;
+        helper_to_derivation::<BTreeSet<SingleDerivedPath>, D>(helper)
+    }
+}
 
-        // Assert version is 4
-        if helper.version != 4 {
-            return Err(serde::de::Error::custom(format!(
-                "unsupported derivation version: {}, expected 4",
-                helper.version
-            )));
+impl<Inputs> DerivationT<Inputs> {
+    /// Transform inputs, keeping everything else the same.
+    pub fn map_inputs<T>(self, f: impl FnOnce(Inputs) -> T) -> DerivationT<T> {
+        DerivationT {
+            name: self.name,
+            outputs: self.outputs,
+            inputs: f(self.inputs),
+            platform: self.platform,
+            builder: self.builder,
+            args: self.args,
+            env: self.env,
+            structured_attrs: self.structured_attrs,
+        }
+    }
+
+    /// Replace all occurrences of each rewrite's key with its value in builder,
+    /// args, env (keys and values), and structured_attrs.
+    ///
+    /// This is used during derivation resolution to substitute CA output
+    /// placeholders with their actual store paths.
+    pub fn apply_rewrites(&mut self, rewrites: &BTreeMap<ByteString, ByteString>) {
+        if rewrites.is_empty() {
+            return;
         }
 
-        // Convert DerivationInputs to BTreeSet<SingleDerivedPath>
-        let inputs = BTreeSet::from(&helper.inputs);
+        fn rewrite(s: &ByteString, rewrites: &BTreeMap<ByteString, ByteString>) -> ByteString {
+            let mut buf = Vec::from(s.as_ref());
+            for (from, to) in rewrites {
+                // Repeatedly scan for the pattern and replace all occurrences.
+                // TODO: after https://github.com/tokio-rs/bytes/issues/824 is resolved, use the replace method on BytesMut.
+                let mut i = 0;
+                while i + from.len() <= buf.len() {
+                    if buf[i..i + from.len()] == **from {
+                        buf.splice(i..i + from.len(), to.iter().copied());
+                        i += to.len();
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            ByteString::from(buf)
+        }
 
-        Ok(Derivation {
-            name: helper
-                .name
-                .parse()
-                .map_err(|e| serde::de::Error::custom(format!("invalid derivation name: {}", e)))?,
-            outputs: helper.outputs,
-            inputs,
-            platform: ByteString::from(helper.platform),
-            builder: ByteString::from(helper.builder),
-            args: helper.args.into_iter().map(ByteString::from).collect(),
-            env: helper
-                .env
-                .into_iter()
-                .map(|(k, v)| (ByteString::from(k), ByteString::from(v)))
-                .collect(),
-            structured_attrs: helper.structured_attrs,
-        })
+        self.builder = rewrite(&self.builder, rewrites);
+
+        for arg in &mut self.args {
+            *arg = rewrite(arg, rewrites);
+        }
+
+        let old_env = std::mem::take(&mut self.env);
+        for (k, v) in old_env {
+            self.env
+                .insert(rewrite(&k, rewrites), rewrite(&v, rewrites));
+        }
+
+        if let Some(ref mut sa) = self.structured_attrs {
+            let json_bytes = ByteString::from(serde_json::to_string(&sa.attrs).unwrap());
+            let rewritten = rewrite(&json_bytes, rewrites);
+            if let Ok(attrs) = serde_json::from_slice(&rewritten) {
+                sa.attrs = attrs;
+            }
+        }
     }
 }
 

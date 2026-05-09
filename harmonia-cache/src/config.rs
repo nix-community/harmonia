@@ -1,11 +1,10 @@
 use crate::error::{CacheError, ConfigError, Result};
 use crate::store::Store;
 use harmonia_store_core::signature::SecretKey;
-use harmonia_store_remote::{PoolMetrics, pool::PoolConfig};
+use harmonia_store_core::store_path::StoreDir;
 use serde::Deserialize;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 fn default_bind() -> String {
     "[::]:5000".into()
@@ -19,6 +18,10 @@ fn default_connection_rate() -> usize {
     256
 }
 
+fn default_max_connections() -> usize {
+    2048
+}
+
 fn default_priority() -> usize {
     30
 }
@@ -27,12 +30,64 @@ fn default_enable_compression() -> bool {
     false
 }
 
+/// zstd parameters applied to on-the-fly NAR encoding when the client sends
+/// `Accept-Encoding: zstd`. Defaults are tuned for a substitution cache:
+/// level 1 with long-distance matching beats the libzstd default (level 3)
+/// on both ratio and throughput for typical NARs, and the window cap keeps
+/// per-stream decoder memory bounded under parallel `nix copy`.
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub(crate) struct ZstdConfig {
+    #[serde(default = "ZstdConfig::default_level")]
+    pub(crate) level: i32,
+    #[serde(default = "ZstdConfig::default_long_distance")]
+    pub(crate) long_distance_matching: bool,
+    /// log2 of the match window. 0 = auto: with LDM, cap at 25 (32 MiB) so
+    /// decoder memory stays bounded; without LDM, use the level default so
+    /// the encoder doesn't allocate a large window it can't fill.
+    #[serde(default)]
+    pub(crate) window_log: u32,
+    /// Per-worker cap on concurrent LDM encoders for large bodies (>= 4 MiB).
+    /// An LDM encoder grows to ~35 MiB; overflow falls back to no-LDM
+    /// (~0.75 MiB, lower ratio). 0 = unbounded. Ignored if LDM is disabled.
+    #[serde(default = "ZstdConfig::default_max_ldm_encoders_per_worker")]
+    pub(crate) max_ldm_encoders_per_worker: usize,
+}
+
+impl ZstdConfig {
+    fn default_level() -> i32 {
+        1
+    }
+    fn default_long_distance() -> bool {
+        true
+    }
+    fn default_max_ldm_encoders_per_worker() -> usize {
+        16
+    }
+}
+
+impl Default for ZstdConfig {
+    fn default() -> Self {
+        Self {
+            level: Self::default_level(),
+            long_distance_matching: Self::default_long_distance(),
+            window_log: 0,
+            max_ldm_encoders_per_worker: Self::default_max_ldm_encoders_per_worker(),
+        }
+    }
+}
+
 fn default_virtual_store() -> PathBuf {
     PathBuf::from("/nix/store")
 }
 
-fn default_daemon_socket() -> PathBuf {
-    PathBuf::from("/nix/var/nix/daemon-socket/socket")
+/// Derive the location of `db.sqlite` from the on-disk store directory.
+///
+/// Nix lays out a store root as `<root>/store` and `<root>/var/nix/db/db.sqlite`,
+/// so for both the default `/nix/store` and chroot stores we can find the
+/// database by replacing the trailing `store` component.
+fn derive_db_path(real_store: &Path) -> Option<PathBuf> {
+    let root = real_store.parent()?;
+    Some(root.join("var/nix/db/db.sqlite"))
 }
 
 // TODO(conni2461): users to restrict access
@@ -45,6 +100,10 @@ pub(crate) struct Config {
     pub(crate) workers: usize,
     #[serde(default = "default_connection_rate")]
     pub(crate) max_connection_rate: usize,
+    /// Per-worker cap on concurrent connections. Together with the LDM
+    /// semaphore this bounds compression memory. 0 keeps the actix default.
+    #[serde(default = "default_max_connections")]
+    pub(crate) max_connections: usize,
     #[serde(default = "default_priority")]
     pub(crate) priority: usize,
 
@@ -58,6 +117,9 @@ pub(crate) struct Config {
     pub(crate) enable_compression: bool,
 
     #[serde(default)]
+    pub(crate) zstd: ZstdConfig,
+
+    #[serde(default)]
     pub(crate) sign_key_path: Option<String>,
     #[serde(default)]
     pub(crate) sign_key_paths: Vec<PathBuf>,
@@ -66,8 +128,9 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) tls_key_path: Option<String>,
 
-    #[serde(default = "default_daemon_socket")]
-    pub(crate) daemon_socket: PathBuf,
+    /// Path to the nix SQLite database. Derived from the store layout when unset.
+    #[serde(default)]
+    pub(crate) nix_db_path: Option<PathBuf>,
 
     #[serde(skip, default)]
     pub(crate) secret_keys: Vec<SecretKey>,
@@ -85,13 +148,13 @@ impl Config {
     }
 }
 
-pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
+pub(crate) fn load() -> Result<Config> {
     let mut settings = match std::env::var("CONFIG_FILE") {
         Err(_) => {
             if Path::new("settings.toml").exists() {
                 Config::load(Path::new("settings.toml"))?
             } else {
-                return Ok(Config::default());
+                Config::default()
             }
         }
         Ok(settings_file) => Config::load(Path::new(&settings_file))?,
@@ -105,13 +168,13 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
     }
 
     if let Some(sign_key_path) = &settings.sign_key_path {
-        log::warn!(
+        tracing::warn!(
             "The sign_key_path configuration option is deprecated. Use sign_key_paths instead."
         );
         settings.sign_key_paths.push(PathBuf::from(sign_key_path));
     }
     if let Ok(sign_key_path) = std::env::var("SIGN_KEY_PATH") {
-        log::warn!(
+        tracing::warn!(
             "The SIGN_KEY_PATH environment variable is deprecated. Use SIGN_KEY_PATHS instead."
         );
         settings.sign_key_paths.push(PathBuf::from(sign_key_path));
@@ -122,6 +185,7 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
         }
     }
     for sign_key_path in &settings.sign_key_paths {
+        crate::tls::warn_insecure_permissions(sign_key_path);
         let key_content =
             read_to_string(sign_key_path).map_err(|e| ConfigError::InvalidSigningKey {
                 reason: format!(
@@ -143,33 +207,39 @@ pub(crate) fn load(pool_metrics: Option<Arc<PoolMetrics>>) -> Result<Config> {
                 })?;
         settings.secret_keys.push(key);
     }
-    let virtual_store_dir = std::env::var_os("NIX_STORE_DIR")
-        .map(|s| s.into_encoded_bytes())
-        .unwrap_or_else(|| {
-            settings
-                .virtual_nix_store
-                .as_os_str()
-                .as_encoded_bytes()
-                .to_vec()
-        });
-    // For daemon communication, always use the virtual store path.
-    // The daemon's database stores paths with the virtual prefix (e.g., /nix/store),
-    // even when files are physically located elsewhere (chroot mode).
-    // The real_nix_store is only used for mapping file access to actual locations.
-    let daemon_store_dir = virtual_store_dir.clone();
-    settings.store = Store::new(
-        virtual_store_dir,
-        daemon_store_dir,
+    let virtual_store_str = std::env::var("NIX_STORE_DIR").unwrap_or_else(|_| {
         settings
-            .real_nix_store
-            .clone()
-            .map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
-        settings.daemon_socket.clone(),
-        PoolConfig {
-            max_size: settings.workers + 1,
-            metrics: pool_metrics,
-            ..Default::default()
-        },
-    );
+            .virtual_nix_store
+            .to_str()
+            .unwrap_or("/nix/store")
+            .to_owned()
+    });
+    let store_dir = StoreDir::new(&virtual_store_str).map_err(|_| ConfigError::Invalid {
+        reason: format!("invalid store dir: {virtual_store_str}"),
+    })?;
+    let real_store_path = settings
+        .real_nix_store
+        .clone()
+        .unwrap_or_else(|| AsRef::<Path>::as_ref(&store_dir).to_path_buf());
+    let db_path = settings
+        .nix_db_path
+        .clone()
+        .or_else(|| derive_db_path(&real_store_path))
+        .ok_or_else(|| ConfigError::Invalid {
+            reason: format!(
+                "could not derive nix_db_path from store dir {}; set nix_db_path explicitly",
+                real_store_path.display()
+            ),
+        })?;
+    if !db_path.exists() {
+        return Err(ConfigError::Invalid {
+            reason: format!(
+                "nix database {} not found; set nix_db_path to the store's db.sqlite",
+                db_path.display()
+            ),
+        }
+        .into());
+    }
+    settings.store = Store::new(store_dir, settings.real_nix_store.clone(), db_path);
     Ok(settings)
 }

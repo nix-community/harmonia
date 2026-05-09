@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: MIT
 
 [package]
-name = "harmonia-ssh-store"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
+name                 = "harmonia-ssh-store"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
 repository.workspace = true
-description = "SSH remote store implementation (optional - pending Phase 3 assessment)"
-readme = "README.md"
+description          = "SSH remote store implementation (optional - pending Phase 3 assessment)"
+readme               = "README.md"
 
 [dependencies]
 # SSH dependencies (will be added if imported)

@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use harmonia_protocol::daemon::DaemonError as ProtocolError;
 use harmonia_protocol::daemon::DaemonResult;
 use harmonia_store_core::derivation::BasicDerivation;
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_core::store_path::{StoreDir, StorePath};
 
 use crate::build::BuiltOutput;
 
@@ -57,18 +57,21 @@ pub(crate) async fn write_export_references_graph(
 
     let db = db.clone();
     let build_dir = build_dir.to_path_buf();
+    let store_dir = store_dir.clone();
 
     tokio::task::spawn_blocking(move || {
         let db = db.blocking_lock();
         for (filename, store_paths) in &exports {
             // Compute the transitive closure of all specified paths
             let mut closure = BTreeSet::new();
-            for path in store_paths {
-                compute_fs_closure(&db, path, &mut closure)?;
+            for path_str in store_paths {
+                if let Ok(sp) = store_dir.parse(path_str) {
+                    compute_fs_closure(&db, &store_dir, &sp, &mut closure)?;
+                }
             }
 
             // Write validity registration format
-            let content = make_validity_registration(&db, &closure)?;
+            let content = make_validity_registration(&db, &store_dir, &closure)?;
             let file_path = build_dir.join(filename);
             std::fs::write(&file_path, content).map_err(|e| {
                 ProtocolError::custom(format!(
@@ -151,15 +154,16 @@ pub(crate) fn flatten_json_to_strings(value: &serde_json::Value) -> Result<Vec<S
 /// Compute the transitive closure of a store path (the path + all references, recursively).
 pub(crate) fn compute_fs_closure(
     db: &harmonia_store_db::StoreDb,
-    path: &str,
-    closure: &mut BTreeSet<String>,
+    store_dir: &StoreDir,
+    path: &StorePath,
+    closure: &mut BTreeSet<StorePath>,
 ) -> DaemonResult<()> {
     if closure.contains(path) {
         return Ok(());
     }
     // Only include paths that are registered in the DB
     if !db
-        .is_valid_path(path)
+        .is_valid_path(store_dir, path)
         .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?
     {
         // Path not in DB — skip (matches Nix's behavior for paths that
@@ -167,13 +171,13 @@ pub(crate) fn compute_fs_closure(
         return Ok(());
     }
 
-    closure.insert(path.to_string());
+    closure.insert(path.clone());
 
     let refs = db
-        .query_references(path)
+        .query_references(store_dir, path)
         .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
-    for ref_path in refs {
-        compute_fs_closure(db, &ref_path, closure)?;
+    for ref_path in &refs {
+        compute_fs_closure(db, store_dir, ref_path, closure)?;
     }
     Ok(())
 }
@@ -192,15 +196,16 @@ pub(crate) fn compute_fs_closure(
 /// ```
 pub(crate) fn make_validity_registration(
     db: &harmonia_store_db::StoreDb,
-    paths: &BTreeSet<String>,
+    store_dir: &StoreDir,
+    paths: &BTreeSet<StorePath>,
 ) -> DaemonResult<String> {
     let mut s = String::new();
     for path in paths {
-        s.push_str(path);
+        s.push_str(&store_dir.display(path).to_string());
         s.push('\n');
 
         let info = db
-            .query_path_info(path)
+            .query_path_info(store_dir, path)
             .map_err(|e| ProtocolError::custom(format!("Database error: {e}")))?;
 
         if let Some(info) = info {
@@ -208,12 +213,12 @@ pub(crate) fn make_validity_registration(
             s.push('\n');
 
             // Number of references
-            s.push_str(&info.references.len().to_string());
+            s.push_str(&info.info.references.len().to_string());
             s.push('\n');
 
             // References
-            for ref_path in &info.references {
-                s.push_str(ref_path);
+            for ref_path in &info.info.references {
+                s.push_str(&store_dir.display(ref_path).to_string());
                 s.push('\n');
             }
         } else {
@@ -254,33 +259,17 @@ pub(crate) async fn check_output_constraints(
     // Collect all output paths for "self" references (outputs can reference each other)
     let output_paths: BTreeSet<String> = built_outputs
         .iter()
-        .map(|o| {
-            store_dir
-                .to_path()
-                .join(o.path.to_string())
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|o| store_dir.display(&o.path).to_string())
         .collect();
 
     for output in built_outputs {
-        let output_full = store_dir
-            .to_path()
-            .join(output.path.to_string())
-            .to_string_lossy()
-            .to_string();
+        let output_full = store_dir.display(&output.path).to_string();
 
         // Convert references to full path strings for comparison
         let ref_paths: BTreeSet<String> = output
             .references
             .iter()
-            .map(|r| {
-                store_dir
-                    .to_path()
-                    .join(r.to_string())
-                    .to_string_lossy()
-                    .to_string()
-            })
+            .map(|r| store_dir.display(r).to_string())
             .collect();
 
         // Check disallowedReferences
@@ -313,13 +302,15 @@ pub(crate) async fn check_output_constraints(
         if !disallowed_requisites.is_empty() || allowed_requisites.is_some() {
             let mut closure = BTreeSet::new();
             // Start with the output's direct references
-            for ref_path in &ref_paths {
+            for ref_sp in &output.references {
                 let db = db.clone();
-                let ref_path = ref_path.clone();
+                let ref_sp = ref_sp.clone();
+                let sd = store_dir.clone();
                 let mut local_closure = BTreeSet::new();
                 tokio::task::spawn_blocking(move || {
                     let db = db.blocking_lock();
-                    compute_fs_closure(&db, &ref_path, &mut local_closure).map(|_| local_closure)
+                    compute_fs_closure(&db, &sd, &ref_sp, &mut local_closure)
+                        .map(|_| local_closure)
                 })
                 .await
                 .map_err(|e| format!("Task join error: {e}"))?
@@ -330,11 +321,17 @@ pub(crate) async fn check_output_constraints(
                 });
             }
             // Also include direct references themselves
-            closure.extend(ref_paths.iter().cloned());
+            closure.extend(output.references.iter().cloned());
+
+            // Convert closure to full path strings for constraint checking
+            let closure_strs: BTreeSet<String> = closure
+                .iter()
+                .map(|p| store_dir.display(p).to_string())
+                .collect();
 
             // Check disallowedRequisites
             for disallowed in &disallowed_requisites {
-                if closure.contains(disallowed) {
+                if closure_strs.contains(disallowed) {
                     return Err(format!(
                         "output '{}' is not allowed to refer to path '{}' (via transitive closure)",
                         output.path, disallowed
@@ -348,7 +345,7 @@ pub(crate) async fn check_output_constraints(
                 full_allowed.extend(output_paths.iter().cloned());
                 full_allowed.insert(output_full.clone());
 
-                for req_path in &closure {
+                for req_path in &closure_strs {
                     if !full_allowed.contains(req_path) {
                         return Err(format!(
                             "output '{}' is not allowed to refer to path '{}' (via transitive closure)",
@@ -398,6 +395,30 @@ mod tests {
     use harmonia_store_core::derivation::{DerivationOutput, DerivationT, StructuredAttrs};
     use harmonia_store_core::derived_path::OutputName;
     use harmonia_store_core::store_path::StorePath;
+    use harmonia_store_path_info::NarHash;
+
+    /// Helper to register a path using the new API.
+    fn register_path(
+        db: &mut harmonia_store_db::StoreDb,
+        store_dir: &StoreDir,
+        path: &StorePath,
+        references: &BTreeSet<StorePath>,
+    ) {
+        let hash_bytes = [0u8; 32];
+        let nar_hash = NarHash::new(&hash_bytes);
+        let info = harmonia_store_path_info::UnkeyedValidPathInfo {
+            deriver: None,
+            nar_hash,
+            references: references.clone(),
+            registration_time: None,
+            nar_size: 0,
+            ultimate: false,
+            signatures: BTreeSet::new(),
+            ca: None,
+            store_dir: store_dir.clone(),
+        };
+        db.register_valid_path(store_dir, path, &info).unwrap();
+    }
 
     /// Helper: create a minimal derivation with no outputs.
     fn minimal_drv() -> BasicDerivation {
@@ -560,32 +581,28 @@ mod tests {
     #[test]
     fn make_validity_registration_empty() {
         let db = harmonia_store_db::StoreDb::open_memory().unwrap();
+        let sd = StoreDir::default();
 
         let paths = BTreeSet::new();
-        let result = make_validity_registration(&db, &paths).unwrap();
+        let result = make_validity_registration(&db, &sd, &paths).unwrap();
         assert!(result.is_empty());
     }
 
     #[test]
     fn make_validity_registration_single_path() {
         let mut db = harmonia_store_db::StoreDb::open_memory().unwrap();
+        let sd = StoreDir::default();
 
-        let path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg";
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: path.to_string(),
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000001"
-                .to_string(),
-            references: BTreeSet::new(),
-            ..Default::default()
-        })
-        .unwrap();
+        let sp = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg").unwrap();
+        register_path(&mut db, &sd, &sp, &BTreeSet::new());
 
         let mut paths = BTreeSet::new();
-        paths.insert(path.to_string());
+        paths.insert(sp.clone());
 
-        let result = make_validity_registration(&db, &paths).unwrap();
+        let result = make_validity_registration(&db, &sd, &paths).unwrap();
         let lines: Vec<&str> = result.lines().collect();
-        assert_eq!(lines[0], path);
+        let full = sd.display(&sp).to_string();
+        assert_eq!(lines[0], full);
         assert_eq!(lines[1], ""); // empty deriver
         assert_eq!(lines[2], "0"); // 0 references
     }
@@ -593,147 +610,105 @@ mod tests {
     #[test]
     fn make_validity_registration_with_references() {
         let mut db = harmonia_store_db::StoreDb::open_memory().unwrap();
+        let sd = StoreDir::default();
 
-        let dep_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep";
-        let pkg_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg";
+        let dep_sp = StorePath::from_base_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep").unwrap();
+        let pkg_sp = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg").unwrap();
 
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: dep_path.to_string(),
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000001"
-                .to_string(),
-            references: BTreeSet::new(),
-            ..Default::default()
-        })
-        .unwrap();
+        register_path(&mut db, &sd, &dep_sp, &BTreeSet::new());
 
         let mut refs = BTreeSet::new();
-        refs.insert(dep_path.to_string());
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: pkg_path.to_string(),
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000002"
-                .to_string(),
-            references: refs,
-            ..Default::default()
-        })
-        .unwrap();
+        refs.insert(dep_sp.clone());
+        register_path(&mut db, &sd, &pkg_sp, &refs);
 
         let mut paths = BTreeSet::new();
-        paths.insert(pkg_path.to_string());
-        paths.insert(dep_path.to_string());
+        paths.insert(pkg_sp.clone());
+        paths.insert(dep_sp.clone());
 
-        let result = make_validity_registration(&db, &paths).unwrap();
+        let result = make_validity_registration(&db, &sd, &paths).unwrap();
+
+        let dep_full = sd.display(&dep_sp).to_string();
+        let pkg_full = sd.display(&pkg_sp).to_string();
 
         // Both paths should appear (BTreeSet is sorted)
-        assert!(result.contains(pkg_path));
-        assert!(result.contains(dep_path));
+        assert!(result.contains(&pkg_full));
+        assert!(result.contains(&dep_full));
 
         // pkg_path should list dep_path as a reference
-        // Parse the result to verify
         let lines: Vec<&str> = result.lines().collect();
         // First entry is pkg_path (alphabetical: 'a' < 'b')
-        assert_eq!(lines[0], pkg_path);
+        assert_eq!(lines[0], pkg_full);
         assert_eq!(lines[1], ""); // empty deriver
         assert_eq!(lines[2], "1"); // 1 reference
-        assert_eq!(lines[3], dep_path);
+        assert_eq!(lines[3], dep_full);
     }
 
     #[test]
     fn compute_fs_closure_single_path() {
         let mut db = harmonia_store_db::StoreDb::open_memory().unwrap();
+        let sd = StoreDir::default();
 
-        let path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg";
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: path.to_string(),
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000001"
-                .to_string(),
-            references: BTreeSet::new(),
-            ..Default::default()
-        })
-        .unwrap();
+        let sp = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg").unwrap();
+        register_path(&mut db, &sd, &sp, &BTreeSet::new());
 
         let mut closure = BTreeSet::new();
-        compute_fs_closure(&db, path, &mut closure).unwrap();
+        compute_fs_closure(&db, &sd, &sp, &mut closure).unwrap();
         assert_eq!(closure.len(), 1);
-        assert!(closure.contains(path));
+        assert!(closure.contains(&sp));
     }
 
     #[test]
     fn compute_fs_closure_transitive() {
         let mut db = harmonia_store_db::StoreDb::open_memory().unwrap();
+        let sd = StoreDir::default();
 
-        let leaf = "/nix/store/cccccccccccccccccccccccccccccccc-leaf";
-        let mid = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-mid";
-        let root = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-root";
+        let leaf = StorePath::from_base_path("cccccccccccccccccccccccccccccccc-leaf").unwrap();
+        let mid = StorePath::from_base_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-mid").unwrap();
+        let root = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-root").unwrap();
 
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: leaf.to_string(),
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000001"
-                .to_string(),
-            references: BTreeSet::new(),
-            ..Default::default()
-        })
-        .unwrap();
+        register_path(&mut db, &sd, &leaf, &BTreeSet::new());
 
         let mut mid_refs = BTreeSet::new();
-        mid_refs.insert(leaf.to_string());
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: mid.to_string(),
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000002"
-                .to_string(),
-            references: mid_refs,
-            ..Default::default()
-        })
-        .unwrap();
+        mid_refs.insert(leaf.clone());
+        register_path(&mut db, &sd, &mid, &mid_refs);
 
         let mut root_refs = BTreeSet::new();
-        root_refs.insert(mid.to_string());
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: root.to_string(),
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000003"
-                .to_string(),
-            references: root_refs,
-            ..Default::default()
-        })
-        .unwrap();
+        root_refs.insert(mid.clone());
+        register_path(&mut db, &sd, &root, &root_refs);
 
         let mut closure = BTreeSet::new();
-        compute_fs_closure(&db, root, &mut closure).unwrap();
+        compute_fs_closure(&db, &sd, &root, &mut closure).unwrap();
         assert_eq!(closure.len(), 3);
-        assert!(closure.contains(root));
-        assert!(closure.contains(mid));
-        assert!(closure.contains(leaf));
+        assert!(closure.contains(&root));
+        assert!(closure.contains(&mid));
+        assert!(closure.contains(&leaf));
     }
 
     #[test]
     fn compute_fs_closure_skips_unregistered() {
         let db = harmonia_store_db::StoreDb::open_memory().unwrap();
+        let sd = StoreDir::default();
 
-        let path = "/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-missing";
+        let sp = StorePath::from_base_path("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-missing").unwrap();
         let mut closure = BTreeSet::new();
-        compute_fs_closure(&db, path, &mut closure).unwrap();
+        compute_fs_closure(&db, &sd, &sp, &mut closure).unwrap();
         assert!(closure.is_empty());
     }
 
     #[test]
     fn compute_fs_closure_handles_cycles() {
         let mut db = harmonia_store_db::StoreDb::open_memory().unwrap();
+        let sd = StoreDir::default();
 
         // Create a self-referencing path (common in glibc etc.)
-        let path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-self";
+        let sp = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-self").unwrap();
         let mut self_refs = BTreeSet::new();
-        self_refs.insert(path.to_string());
-        db.register_valid_path(&harmonia_store_db::RegisterPathParams {
-            path: path.to_string(),
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000001"
-                .to_string(),
-            references: self_refs,
-            ..Default::default()
-        })
-        .unwrap();
+        self_refs.insert(sp.clone());
+        register_path(&mut db, &sd, &sp, &self_refs);
 
         let mut closure = BTreeSet::new();
-        compute_fs_closure(&db, path, &mut closure).unwrap();
+        compute_fs_closure(&db, &sd, &sp, &mut closure).unwrap();
         assert_eq!(closure.len(), 1);
-        assert!(closure.contains(path));
+        assert!(closure.contains(&sp));
     }
 }

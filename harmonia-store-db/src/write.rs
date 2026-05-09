@@ -5,88 +5,70 @@
 //!
 //! These are primarily used for testing and local store management.
 
-use std::collections::BTreeSet;
-use std::time::SystemTime;
-
 use rusqlite::params;
+
+use harmonia_store_core::store_path::{StoreDir, StorePath};
 
 use crate::connection::StoreDb;
 use crate::error::Result;
-use crate::types::system_time_to_unix;
-
-/// Parameters for registering a new valid path.
-#[derive(Debug, Clone)]
-pub struct RegisterPathParams {
-    /// Full store path
-    pub path: String,
-    /// Base16-encoded content hash
-    pub hash: String,
-    /// When this path was registered
-    pub registration_time: SystemTime,
-    /// Derivation that produced this (if any)
-    pub deriver: Option<String>,
-    /// NAR size in bytes
-    pub nar_size: Option<u64>,
-    /// Whether built locally (not substituted)
-    pub ultimate: bool,
-    /// Space-separated signatures
-    pub sigs: Option<String>,
-    /// Content address (if content-addressed)
-    pub ca: Option<String>,
-    /// Paths this references
-    pub references: BTreeSet<String>,
-}
-
-impl Default for RegisterPathParams {
-    fn default() -> Self {
-        Self {
-            path: String::new(),
-            hash: String::new(),
-            registration_time: SystemTime::now(),
-            deriver: None,
-            nar_size: None,
-            ultimate: false,
-            sigs: None,
-            ca: None,
-            references: BTreeSet::new(),
-        }
-    }
-}
 
 impl StoreDb {
     /// Register a new valid path.
     ///
     /// Returns the database ID of the new path.
-    pub fn register_valid_path(&mut self, params: &RegisterPathParams) -> Result<i64> {
+    pub fn register_valid_path(
+        &mut self,
+        store_dir: &StoreDir,
+        path: &StorePath,
+        info: &harmonia_store_path_info::UnkeyedValidPathInfo,
+    ) -> Result<i64> {
+        let full_path = store_dir.display(path).to_string();
+        let hash_str = format!("sha256:{:x}", info.nar_hash);
+        let deriver_str = info
+            .deriver
+            .as_ref()
+            .map(|d| store_dir.display(d).to_string());
+        let sigs_str = if info.signatures.is_empty() {
+            None
+        } else {
+            Some(
+                info.signatures
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        };
+        let ca_str = info.ca.as_ref().map(ToString::to_string);
+        let reg_time = info.registration_time.map(|t| t.get()).unwrap_or(0);
+
         let tx = self.conn.transaction()?;
 
-        // Insert the path
         tx.execute(
             r#"
             INSERT INTO ValidPaths (path, hash, registrationTime, deriver, narSize, ultimate, sigs, ca)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
-                params.path,
-                params.hash,
-                system_time_to_unix(params.registration_time),
-                params.deriver,
-                params.nar_size.map(|n| n as i64),
-                if params.ultimate { 1 } else { 0 },
-                params.sigs,
-                params.ca,
+                full_path,
+                hash_str,
+                reg_time,
+                deriver_str,
+                info.nar_size as i64,
+                if info.ultimate { 1 } else { 0 },
+                sigs_str,
+                ca_str,
             ],
         )?;
 
         let id = tx.last_insert_rowid();
 
-        // Add references
-        for reference in &params.references {
-            // Get or skip if reference doesn't exist
+        for reference in &info.references {
+            let ref_full = store_dir.display(reference).to_string();
             let ref_id: Option<i64> = tx
                 .query_row(
                     "SELECT id FROM ValidPaths WHERE path = ?1",
-                    params![reference],
+                    params![ref_full],
                     |row| row.get(0),
                 )
                 .ok();
@@ -106,7 +88,14 @@ impl StoreDb {
     /// Add a reference from one path to another.
     ///
     /// Both paths must already exist in the database.
-    pub fn add_reference(&self, referrer_path: &str, reference_path: &str) -> Result<()> {
+    pub fn add_reference(
+        &self,
+        store_dir: &StoreDir,
+        referrer: &StorePath,
+        reference: &StorePath,
+    ) -> Result<()> {
+        let referrer_full = store_dir.display(referrer).to_string();
+        let reference_full = store_dir.display(reference).to_string();
         self.conn.execute(
             r#"
             INSERT OR REPLACE INTO Refs (referrer, reference)
@@ -114,20 +103,27 @@ impl StoreDb {
             FROM ValidPaths r, ValidPaths f
             WHERE r.path = ?1 AND f.path = ?2
             "#,
-            params![referrer_path, reference_path],
+            params![referrer_full, reference_full],
         )?;
         Ok(())
     }
 
     /// Remove a reference between paths.
-    pub fn remove_reference(&self, referrer_path: &str, reference_path: &str) -> Result<()> {
+    pub fn remove_reference(
+        &self,
+        store_dir: &StoreDir,
+        referrer: &StorePath,
+        reference: &StorePath,
+    ) -> Result<()> {
+        let referrer_full = store_dir.display(referrer).to_string();
+        let reference_full = store_dir.display(reference).to_string();
         self.conn.execute(
             r#"
             DELETE FROM Refs
             WHERE referrer = (SELECT id FROM ValidPaths WHERE path = ?1)
               AND reference = (SELECT id FROM ValidPaths WHERE path = ?2)
             "#,
-            params![referrer_path, reference_path],
+            params![referrer_full, reference_full],
         )?;
         Ok(())
     }
@@ -135,10 +131,14 @@ impl StoreDb {
     /// Register a derivation output.
     pub fn register_derivation_output(
         &self,
-        drv_path: &str,
-        output_id: &str,
-        output_path: &str,
+        store_dir: &StoreDir,
+        drv_path: &StorePath,
+        output_id: &harmonia_store_core::derived_path::OutputName,
+        output_path: &StorePath,
     ) -> Result<()> {
+        let drv_full = store_dir.display(drv_path).to_string();
+        let out_full = store_dir.display(output_path).to_string();
+        let output_id_str: &str = output_id.as_ref();
         self.conn.execute(
             r#"
             INSERT OR REPLACE INTO DerivationOutputs (drv, id, path)
@@ -146,7 +146,7 @@ impl StoreDb {
             FROM ValidPaths v
             WHERE v.path = ?1
             "#,
-            params![drv_path, output_id, output_path],
+            params![drv_full, output_id_str, out_full],
         )?;
         Ok(())
     }
@@ -154,46 +154,61 @@ impl StoreDb {
     /// Delete a valid path from the database.
     ///
     /// This will cascade-delete associated refs and derivation outputs.
-    pub fn invalidate_path(&self, path: &str) -> Result<bool> {
+    pub fn invalidate_path(&self, store_dir: &StoreDir, path: &StorePath) -> Result<bool> {
+        let full = store_dir.display(path).to_string();
         let rows = self
             .conn
-            .execute("DELETE FROM ValidPaths WHERE path = ?1", params![path])?;
+            .execute("DELETE FROM ValidPaths WHERE path = ?1", params![full])?;
         Ok(rows > 0)
     }
 
     /// Update signatures for a path.
-    pub fn update_signatures(&self, path: &str, sigs: &str) -> Result<()> {
+    pub fn update_signatures(
+        &self,
+        store_dir: &StoreDir,
+        path: &StorePath,
+        sigs: &str,
+    ) -> Result<()> {
+        let full = store_dir.display(path).to_string();
         self.conn.execute(
             "UPDATE ValidPaths SET sigs = ?2 WHERE path = ?1",
-            params![path, sigs],
+            params![full, sigs],
         )?;
         Ok(())
     }
 
     /// Register a realisation (for CA derivations).
+    ///
+    /// `drvPath` is stored as a base path (matching Nix's format), while
+    /// `outputPath` uses the full store dir prefix.
     pub fn register_realisation(
         &self,
-        drv_path: &str,
-        output_name: &str,
-        output_path_id: i64,
-        signatures: Option<&str>,
+        store_dir: &StoreDir,
+        realisation: &harmonia_store_core::realisation::Realisation,
     ) -> Result<i64> {
+        let drv_path = realisation.key.drv_path.to_string();
+        let output_name: &str = realisation.key.output_name.as_ref();
+        let output_path = store_dir.display(&realisation.value.out_path).to_string();
+        let signatures = if realisation.value.signatures.is_empty() {
+            None
+        } else {
+            Some(
+                realisation
+                    .value
+                    .signatures
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        };
         self.conn.execute(
             r#"
-            INSERT INTO Realisations (drvPath, outputName, outputPath, signatures)
+            INSERT INTO BuildTraceV3 (drvPath, outputName, outputPath, signatures)
             VALUES (?1, ?2, ?3, ?4)
             "#,
-            params![drv_path, output_name, output_path_id, signatures],
+            params![drv_path, output_name, output_path, signatures],
         )?;
         Ok(self.conn.last_insert_rowid())
-    }
-
-    /// Add a reference between realisations.
-    pub fn add_realisation_reference(&self, referrer_id: i64, reference_id: i64) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO RealisationsRefs (referrer, realisationReference) VALUES (?1, ?2)",
-            params![referrer_id, reference_id],
-        )?;
-        Ok(())
     }
 }
