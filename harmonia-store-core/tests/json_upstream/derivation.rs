@@ -14,7 +14,7 @@ use harmonia_utils_hash::Algorithm;
 use std::collections::{BTreeMap, BTreeSet};
 
 fn ca_floating_output() -> DerivationOutput {
-    DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256))
+    DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256))
 }
 
 test_upstream_json!(

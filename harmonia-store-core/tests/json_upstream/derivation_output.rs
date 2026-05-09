@@ -34,7 +34,7 @@ test_upstream_json!(
     test_derivation_output_ca_fixed_nar,
     libstore_test_data_path("derivation/output-caFixedNAR.json"),
     {
-        DerivationOutput::CAFixed(ContentAddress::Recursive(Hash::new(
+        DerivationOutput::CAFixed(ContentAddress::NixArchive(Hash::new(
             Algorithm::SHA256,
             &hex!("894517c9163c896ec31a2adbd33c0681fd5f45b2c0ef08a64c92a03fb97f390f"),
         )))
@@ -59,7 +59,7 @@ test_upstream_json!(
 test_upstream_json!(
     test_derivation_output_ca_floating,
     libstore_test_data_path("derivation/output-caFloating.json"),
-    { DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256)) }
+    { DerivationOutput::CAFloating(ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256)) }
 );
 
 test_upstream_json!(
@@ -71,5 +71,5 @@ test_upstream_json!(
 test_upstream_json!(
     test_derivation_output_impure,
     libstore_test_data_path("derivation/output-impure.json"),
-    { DerivationOutput::Impure(ContentAddressMethodAlgorithm::Recursive(Algorithm::SHA256)) }
+    { DerivationOutput::Impure(ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256)) }
 );

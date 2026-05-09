@@ -249,14 +249,14 @@ mod unittests {
         "aidi01pgcl6i79fkw737qzx06kjl930m-konsole-18.12.3"
     )]
     #[case::source(
-        ContentAddress::Recursive("sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1".parse::<Any<Hash>>().unwrap().into()),
+        ContentAddress::NixArchive("sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1".parse::<Any<Hash>>().unwrap().into()),
         "konsole-18.12.3",
         None,
         "source:sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1:/nix/store:konsole-18.12.3",
         "1w01xxn8f7s9s4n65ry6rwd7x9awf04s-konsole-18.12.3"
     )]
     #[case::output(
-        ContentAddress::Recursive("sha1:84983e441c3bd26ebaae4aa1f95129e5e54670f1".parse::<Any<Hash>>().unwrap().into()),
+        ContentAddress::NixArchive("sha1:84983e441c3bd26ebaae4aa1f95129e5e54670f1".parse::<Any<Hash>>().unwrap().into()),
         "konsole-18.12.3",
         Some("fixed:out:r:sha1:84983e441c3bd26ebaae4aa1f95129e5e54670f1:"),
         "output:out:sha256:5341f5afdd0fb724c8f7eae0e346de5bb151a00422d47ae683aed85cd78f7120:/nix/store:konsole-18.12.3",

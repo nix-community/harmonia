@@ -50,7 +50,7 @@ fn pure_info() -> UnkeyedValidPathInfo {
         nar_size: 34878,
         ultimate: false,
         signatures: BTreeSet::new(),
-        ca: Some(ContentAddress::Recursive(TEST_CA_HASH.into())),
+        ca: Some(ContentAddress::NixArchive(TEST_CA_HASH.into())),
         store_dir: StoreDir::default(),
     }
 }
@@ -74,7 +74,7 @@ fn impure_info() -> UnkeyedValidPathInfo {
         ]
         .into_iter()
         .collect(),
-        ca: Some(ContentAddress::Recursive(TEST_CA_HASH.into())),
+        ca: Some(ContentAddress::NixArchive(TEST_CA_HASH.into())),
         store_dir: StoreDir::default(),
     }
 }

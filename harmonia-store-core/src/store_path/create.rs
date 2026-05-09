@@ -71,7 +71,7 @@ impl From<ContentAddress> for PathType {
                 references: StorePathSet::new(),
                 digest,
             },
-            ContentAddress::Recursive(hash) if hash.algorithm() == Algorithm::SHA256 => {
+            ContentAddress::NixArchive(hash) if hash.algorithm() == Algorithm::SHA256 => {
                 let digest = hash.try_into().unwrap();
                 PathType::Source {
                     references: StorePathSet::new(),
@@ -79,7 +79,7 @@ impl From<ContentAddress> for PathType {
                     digest,
                 }
             }
-            ContentAddress::Recursive(hash) => PathType::Output { hash },
+            ContentAddress::NixArchive(hash) => PathType::Output { hash },
             ContentAddress::Flat(hash) => PathType::FlatOutput { hash },
         }
     }
