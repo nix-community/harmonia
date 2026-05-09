@@ -170,6 +170,11 @@ impl ConnectionPool {
         pool
     }
 
+    /// Get the store directory for this pool.
+    pub fn store_dir(&self) -> &StoreDir {
+        &self.store_dir
+    }
+
     /// Acquire a connection from the pool.
     ///
     /// Returns an RAII guard that automatically returns the connection
