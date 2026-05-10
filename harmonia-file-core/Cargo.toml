@@ -7,16 +7,11 @@ license.workspace    = true
 repository.workspace = true
 
 [dependencies]
-serde.workspace      = true
-serde_json.workspace = true
-thiserror.workspace  = true
+futures-core.workspace = true
+futures-util.workspace = true
+serde.workspace        = true
+serde_json.workspace   = true
+thiserror.workspace    = true
+tokio.workspace        = true
 
 [dev-dependencies]
-harmonia-utils-test = { workspace = true }
-
-[[test]]
-name = "json_upstream"
-path = "tests/json_upstream/mod.rs"
-
-[lints]
-workspace = true

@@ -22,8 +22,8 @@ composed.
 ┌────────────────────────────┬─────────────────────────┐
 │  Format / File             │  Database               │
 │  harmonia-file-nar         │  harmonia-store-db      │
-│  harmonia-file-core        │                         │
-│  NAR pack/unpack, types    │  SQLite store metadata  │
+│  harmonia-file-core/fd     │                         │
+│  NAR pack/unpack, file I/O │  SQLite store metadata  │
 └────────────────────────────┴─────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────┐
@@ -49,7 +49,8 @@ composed.
 | [harmonia-store-aterm](../../harmonia-store-aterm/) | ATerm derivation parser |
 | [harmonia-store-path-info](../../harmonia-store-path-info/) | ValidPathInfo types (pure) |
 | [harmonia-store-db](../../harmonia-store-db/README.md) | SQLite store metadata |
-| [harmonia-file-core](../../harmonia-file-core/) | File tree types and serde (pure) |
+| [harmonia-file-core](../../harmonia-file-core/) | File tree types, traits, listing (pure) |
+| [harmonia-file-fd](../../harmonia-file-fd/) | Filesystem source via cap-std |
 | [harmonia-file-nar](../../harmonia-file-nar/README.md) | NAR archive format |
 | [harmonia-protocol](../../harmonia-protocol/README.md) | Daemon wire protocol |
 | [harmonia-protocol-derive](../../harmonia-protocol-derive/README.md) | Derive macros for protocol types |
@@ -86,14 +87,17 @@ graph BT
     end
     subgraph File
         file-core
+        file-fd
         file-nar
     end
     bench
     client
     ssh-store
-    file-nar --> file-core
-    file-nar --> utils-io
+    file-fd --> file-core
     utils-hash --> utils-base-encoding
+    file-nar --> file-core
+    file-nar --> file-fd
+    file-nar --> utils-io
     store-core --> utils-base-encoding
     store-core --> utils-hash
     store-aterm --> store-core
@@ -115,6 +119,7 @@ graph BT
     store-nar-info --> store-path-info
     store-nar-info --> utils-hash
     cache --> file-core
+    cache --> file-fd
     cache --> file-nar
     cache --> store-core
     cache --> store-db
@@ -145,14 +150,16 @@ graph BT
     end
     subgraph File
         file-core
+        file-fd
         file-nar
     end
     bench
     client
     ssh-store
-    file-nar --> file-core
-    file-nar --> utils-io
+    file-fd --> file-core
     utils-hash --> utils-base-encoding
+    file-nar --> file-fd
+    file-nar --> utils-io
     store-core --> utils-hash
     store-aterm --> store-core
     store-build-result --> store-core
@@ -190,8 +197,9 @@ intra-workspace dependencies.
 - `harmonia-store-aterm` and `harmonia-store-path-info` would typically be part of `harmonia-store-core`.
   However, since these data types / formats both have issues, they are instead placed in separate libraries to make sure they don't "infect" the rest of `harmonia-store-core`.
 
-**File** (`harmonia-file-core`, `harmonia-file-nar`)
-- `harmonia-file-core`: pure file tree types and serde matching nix's JSON format.
+**File** (`harmonia-file-core`, `harmonia-file-fd`, `harmonia-file-nar`)
+- `harmonia-file-core`: pure file tree types, `FileSystemSource`/`FileSystemSink` traits, serde matching nix's JSON format.
+- `harmonia-file-fd`: real filesystem source via `cap-std` (openat, no symlink following).
 - `harmonia-file-nar`: NAR pack/unpack against generic `AsyncRead`/`AsyncWrite`. Streaming; never requires the full input in memory. Knows nothing about derivations or signatures.
 
 **Database** (`harmonia-store-db`)

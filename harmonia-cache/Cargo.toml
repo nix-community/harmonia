@@ -40,9 +40,11 @@ zstd = "0.13"
 zstd-safe = "7"
 # Nix.rs-based crates
 bytes                    = { workspace = true }
+cap-tokio                = { workspace = true }
 futures-core             = { workspace = true }
 futures-util             = { workspace = true }
 harmonia-file-core       = { workspace = true }
+harmonia-file-fd         = { workspace = true }
 harmonia-file-nar        = { workspace = true }
 harmonia-store-core      = { workspace = true }
 harmonia-store-db        = { workspace = true }

@@ -28,7 +28,7 @@ where
     let mut parser = NarParser::new(reader);
 
     // Stack of (name, entries) for directories being built.
-    let mut stack: Vec<DirFrame> = Vec::new();
+    let mut stack: Vec<(Option<String>, BTreeMap<String, Box<FileTree<NarFileInfo>>>)> = Vec::new();
     let mut result: Option<FileTree<NarFileInfo>> = None;
 
     while let Some(event) = parser.next().await {
@@ -79,11 +79,8 @@ where
     result.ok_or_else(|| std::io::Error::other("empty NAR"))
 }
 
-type DirFrame = (Option<String>, BTreeMap<String, Box<FileTree<NarFileInfo>>>);
-
-#[allow(clippy::ptr_arg)]
 fn insert_node(
-    stack: &mut Vec<DirFrame>,
+    stack: &mut Vec<(Option<String>, BTreeMap<String, Box<FileTree<NarFileInfo>>>)>,
     result: &mut Option<FileTree<NarFileInfo>>,
     name: String,
     node: FileTree<NarFileInfo>,
