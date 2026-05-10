@@ -13,14 +13,14 @@ repository.workspace = true
 readme               = "README.md"
 
 [dependencies]
-harmonia-store-core  = { version = "0.0.0-alpha.0" }
-harmonia-utils-hash  = { version = "0.0.0-alpha.0" }
+harmonia-store-core  = { workspace = true }
+harmonia-utils-hash  = { workspace = true }
 memchr.workspace     = true
 serde_json.workspace = true
 thiserror.workspace  = true
 
 [dev-dependencies]
-harmonia-utils-test = { version = "0.0.0-alpha.0" }
+harmonia-utils-test = { workspace = true }
 rstest.workspace    = true
 
 [lints]

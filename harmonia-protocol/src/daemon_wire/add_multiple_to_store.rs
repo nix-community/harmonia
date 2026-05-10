@@ -11,7 +11,7 @@ use crate::de::NixRead;
 use crate::ser::NixWrite;
 use crate::types::{AddToStoreItem, DaemonError, DaemonResult};
 use crate::valid_path_info::ValidPathInfo;
-use harmonia_nar::archive::NarBytesReader;
+use harmonia_file_nar::archive::NarBytesReader;
 use harmonia_utils_io::{AsyncBufReadCompat, AsyncBytesRead, Lending};
 
 #[instrument(level = "trace", skip_all)]
@@ -141,7 +141,7 @@ mod unittests {
     use crate::ser::NixWriter;
     use crate::types::DaemonResult;
     use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
-    use harmonia_nar::archive::{test_data, write_nar};
+    use harmonia_file_nar::archive::{test_data, write_nar};
     use harmonia_store_core::btree_set;
     use harmonia_utils_io::DEFAULT_BUF_SIZE;
 
@@ -253,7 +253,7 @@ mod unittests {
         use futures_util::FutureExt as _;
         use tokio::io::simplex;
 
-        use harmonia_nar::archive::read_nar;
+        use harmonia_file_nar::archive::read_nar;
         use harmonia_utils_io::BytesReader;
 
         let stream = info_stream(infos.clone());

@@ -22,14 +22,18 @@ def short(name: str) -> str:
     return name.removeprefix(PREFIX)
 
 
-def get_workspace_edges(manifest_path: str | None = None) -> list[tuple[str, str]]:
-    """Return (from, to) pairs for intra-workspace normal dependencies."""
+def get_workspace_info(
+    manifest_path: str | None = None,
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Return (all member names, edge pairs) for intra-workspace deps."""
     cmd = ["cargo", "metadata", "--format-version=1", "--no-deps"]
     if manifest_path:
         cmd += ["--manifest-path", manifest_path]
     raw = subprocess.check_output(cmd, text=True)
     meta = json.loads(raw)
     members = {p["name"] for p in meta["packages"]}
+
+    all_members = sorted(short(name) for name in members)
 
     edges: list[tuple[str, str]] = []
     for pkg in meta["packages"]:
@@ -46,7 +50,7 @@ def get_workspace_edges(manifest_path: str | None = None) -> list[tuple[str, str
                 continue
             edges.append((short(pkg["name"]), short(dep["name"])))
 
-    return sorted(set(edges))
+    return all_members, sorted(set(edges))
 
 
 def transitive_reduction(
@@ -122,18 +126,23 @@ def topo_order(edges: list[tuple[str, str]]) -> dict[str, int]:
 
 
 def generate_mermaid(
+    all_members: list[str],
     edges: list[tuple[str, str]],
     title: str | None = None,
 ) -> str:
-    nodes: set[str] = set()
+    nodes: set[str] = set(all_members)
     for src, dst in edges:
         nodes.add(src)
         nodes.add(dst)
 
     order = topo_order(edges)
 
-    # Group utils crates so Mermaid places them at the top.
-    utils = sorted(n for n in nodes if n.startswith("utils-"))
+    # Group crates by prefix so Mermaid clusters them.
+    groups = {
+        "Utilities": sorted(n for n in nodes if n.startswith("utils-")),
+        "File": sorted(n for n in nodes if n.startswith("file-")),
+    }
+    grouped = {n for members in groups.values() for n in members}
 
     lines = ["```mermaid"]
     if title:
@@ -141,13 +150,22 @@ def generate_mermaid(
         lines.append(f"title: {title}")
         lines.append("---")
     lines.append("graph BT")
-    if utils:
-        lines.append("    subgraph Utilities")
-        for n in utils:
-            lines.append(f"        {n}")
-        lines.append("    end")
+    for label, members in groups.items():
+        if members:
+            lines.append(f"    subgraph {label}")
+            for n in members:
+                lines.append(f"        {n}")
+            lines.append("    end")
 
-    sorted_edges = sorted(edges, key=lambda e: (order[e[0]], e[0], e[1]))
+    # Emit isolated nodes (no edges) that aren't in a subgraph.
+    connected = set()
+    for src, dst in edges:
+        connected.add(src)
+        connected.add(dst)
+    for n in sorted(nodes - connected - grouped):
+        lines.append(f"    {n}")
+
+    sorted_edges = sorted(edges, key=lambda e: (order.get(e[0], 0), e[0], e[1]))
     for src, dst in sorted_edges:
         lines.append(f"    {src} --> {dst}")
     lines.append("```")
@@ -160,11 +178,11 @@ def main() -> None:
         idx = sys.argv.index("--manifest-path")
         manifest_path = sys.argv[idx + 1]
 
-    edges = get_workspace_edges(manifest_path)
+    all_members, edges = get_workspace_info(manifest_path)
     reduced = transitive_reduction(edges)
 
-    full_mermaid = generate_mermaid(edges, title="Full dependency graph")
-    reduced_mermaid = generate_mermaid(reduced, title="Transitive reduction")
+    full_mermaid = generate_mermaid(all_members, edges, title="Full dependency graph")
+    reduced_mermaid = generate_mermaid(all_members, reduced, title="Transitive reduction")
 
     # --doc PATH: specify the doc file (default: auto-detected from script location).
     if "--doc" in sys.argv:

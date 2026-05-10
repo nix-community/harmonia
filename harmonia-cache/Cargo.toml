@@ -42,17 +42,18 @@ zstd-safe = "7"
 bytes                    = { workspace = true }
 futures-core             = { workspace = true }
 futures-util             = { workspace = true }
-harmonia-nar             = { version = "3.0.0" }
-harmonia-store-core      = { version = "0.0.0-alpha.0" }
-harmonia-store-db        = { version = "3.0.0" }
-harmonia-store-nar-info  = { path = "../harmonia-store-nar-info" }
-harmonia-store-path-info = { path = "../harmonia-store-path-info" }
-harmonia-utils-hash      = { version = "0.0.0-alpha.0" }
+harmonia-file-core       = { workspace = true }
+harmonia-file-nar        = { workspace = true }
+harmonia-store-core      = { workspace = true }
+harmonia-store-db        = { workspace = true }
+harmonia-store-nar-info  = { workspace = true }
+harmonia-store-path-info = { workspace = true }
+harmonia-utils-hash      = { workspace = true }
 nix                      = { workspace = true, features = [ "socket", "fs" ] }
 prometheus               = { workspace = true }
 
 [dev-dependencies]
-harmonia-utils-test = { version = "0.0.0-alpha.0" }
+harmonia-utils-test = { workspace = true }
 nix                 = { workspace = true }
 tempfile            = { workspace = true }
 tokio               = { workspace = true, features = [ "process" ] }

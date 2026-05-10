@@ -771,7 +771,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -983,7 +983,8 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "harmonia-nar",
+ "harmonia-file-core",
+ "harmonia-file-nar",
  "harmonia-store-core",
  "harmonia-store-db",
  "harmonia-store-nar-info",
@@ -1037,7 +1038,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "harmonia-nar"
+name = "harmonia-file-core"
+version = "3.1.0"
+dependencies = [
+ "harmonia-utils-test",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "harmonia-file-nar"
 version = "3.1.0"
 dependencies = [
  "bstr",
@@ -1046,12 +1057,15 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
+ "harmonia-file-core",
  "harmonia-utils-io",
  "harmonia-utils-test",
  "nix",
  "pin-project-lite",
  "proptest",
  "rstest",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
@@ -1071,7 +1085,7 @@ dependencies = [
  "derive_more",
  "futures-core",
  "futures-util",
- "harmonia-nar",
+ "harmonia-file-nar",
  "harmonia-protocol-derive",
  "harmonia-store-build-result",
  "harmonia-store-core",
@@ -1210,7 +1224,7 @@ dependencies = [
  "async-stream",
  "futures-core",
  "futures-util",
- "harmonia-nar",
+ "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-core",
  "harmonia-utils-io",
@@ -2142,7 +2156,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2454,7 +2468,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2961,7 +2975,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

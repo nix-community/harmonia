@@ -19,9 +19,9 @@ data-encoding                = { workspace = true }
 derive_more                  = { workspace = true }
 ed25519-dalek                = { workspace = true }
 getrandom                    = { workspace = true }
-harmonia-utils-base-encoding = { version = "0.0.0-alpha.0" }
-harmonia-utils-hash          = { version = "0.0.0-alpha.0" }
-harmonia-utils-test          = { version = "0.0.0-alpha.0", optional = true }
+harmonia-utils-base-encoding = { workspace = true }
+harmonia-utils-hash          = { workspace = true }
+harmonia-utils-test          = { workspace = true, optional = true }
 proptest                     = { workspace = true, optional = true }
 proptest-derive              = { workspace = true, optional = true }
 serde                        = { workspace = true }

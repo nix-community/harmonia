@@ -55,8 +55,8 @@ use harmonia_store_core::store_path::{
 };
 use harmonia_utils_io::{AsyncBufReadCompat, BytesReader, Lending};
 
-// From harmonia-nar
-use harmonia_nar::archive::{NarBytesReader, NarReader};
+// From harmonia-file-nar
+use harmonia_file_nar::archive::{NarBytesReader, NarReader};
 
 pub struct DaemonClientBuilder {
     store_dir: StoreDir,

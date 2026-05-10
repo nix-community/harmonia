@@ -10,6 +10,6 @@ fuzz_target!(|data: &[u8]| {
         .expect("build runtime");
     rt.block_on(async {
         // Must not panic; errors are fine.
-        let _ = harmonia_nar::archive::read_nar(Cursor::new(data)).await;
+        let _ = harmonia_file_nar::archive::read_nar(Cursor::new(data)).await;
     });
 });
