@@ -986,6 +986,7 @@ dependencies = [
  "harmonia-nar",
  "harmonia-store-core",
  "harmonia-store-db",
+ "harmonia-store-nar-info",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-test",
@@ -1172,6 +1173,19 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "harmonia-store-nar-info"
+version = "3.1.0"
+dependencies = [
+ "harmonia-store-core",
+ "harmonia-store-path-info",
+ "harmonia-utils-hash",
+ "harmonia-utils-test",
+ "hex-literal",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

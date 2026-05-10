@@ -100,9 +100,13 @@ graph BT
     store-db --> store-core
     store-db --> store-path-info
     store-db --> utils-hash
+    store-nar-info --> store-core
+    store-nar-info --> store-path-info
+    store-nar-info --> utils-hash
     cache --> nar
     cache --> store-core
     cache --> store-db
+    cache --> store-nar-info
     cache --> store-path-info
     cache --> utils-hash
     daemon --> protocol
@@ -137,8 +141,10 @@ graph BT
     protocol --> store-build-result
     protocol --> store-path-info
     store-db --> store-path-info
+    store-nar-info --> store-path-info
     cache --> nar
     cache --> store-db
+    cache --> store-nar-info
     daemon --> protocol
     daemon --> store-db
     store-remote --> protocol

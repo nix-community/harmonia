@@ -44,12 +44,16 @@ pub struct UnkeyedValidPathInfo {
     pub store_dir: StoreDir,
 }
 
+/// Pairs a `StorePath` key with some unkeyed payload.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
-pub struct ValidPathInfo {
+pub struct StorePathKeyed<T> {
     pub path: StorePath,
-    pub info: UnkeyedValidPathInfo,
+    pub info: T,
 }
+
+/// A valid store path with its metadata.
+pub type ValidPathInfo = StorePathKeyed<UnkeyedValidPathInfo>;
 
 // -- JSON serialization (version 3) ------------------------------------------
 
