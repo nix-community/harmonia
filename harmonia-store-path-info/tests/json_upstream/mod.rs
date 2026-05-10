@@ -37,22 +37,7 @@ fn empty_info() -> UnkeyedValidPathInfo {
 }
 
 fn pure_info() -> UnkeyedValidPathInfo {
-    UnkeyedValidPathInfo {
-        deriver: None,
-        nar_hash: TEST_NAR_HASH,
-        references: [
-            "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar".parse().unwrap(),
-            "n5wkd9frr45pa74if5gpz9j7mifg27fh-foo".parse().unwrap(),
-        ]
-        .into_iter()
-        .collect(),
-        registration_time: None,
-        nar_size: 34878,
-        ultimate: false,
-        signatures: BTreeSet::new(),
-        ca: Some(ContentAddress::NixArchive(TEST_CA_HASH.into())),
-        store_dir: StoreDir::default(),
-    }
+    impure_info().into_pure()
 }
 
 fn impure_info() -> UnkeyedValidPathInfo {
