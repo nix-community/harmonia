@@ -44,6 +44,17 @@ pub struct UnkeyedValidPathInfo {
     pub store_dir: StoreDir,
 }
 
+impl UnkeyedValidPathInfo {
+    /// Clear impure-only fields, keeping only the content-addressed metadata.
+    pub fn into_pure(mut self) -> Self {
+        self.deriver = None;
+        self.registration_time = None;
+        self.ultimate = false;
+        self.signatures = BTreeSet::new();
+        self
+    }
+}
+
 /// Pairs a `StorePath` key with some unkeyed payload.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
