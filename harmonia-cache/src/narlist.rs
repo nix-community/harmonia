@@ -1,139 +1,43 @@
 use crate::ServerResult;
-use crate::error::{CacheError, IoErrorContext, Result, ServeError};
+use crate::error::{CacheError, ServeError};
 use actix_web::{HttpResponse, http, web};
-use harmonia_file_core::{Directory, FileSystemObject, FileTree, Regular, Symlink};
-use harmonia_file_nar::NarFileInfo;
+use cap_tokio::ambient_authority;
+use cap_tokio::fs::Dir;
+use harmonia_file_core::FileTree;
+use harmonia_file_fd::DirSource;
+use harmonia_file_io_pure::{Stat, list_deep};
 use serde::Serialize;
-use std::fs::Metadata;
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
 
 use crate::config::Config;
 use crate::{cache_control_max_age_1y, nixhash, some_or_404};
 
 use std::path::PathBuf;
-use tokio::fs::symlink_metadata;
 
 #[derive(Debug, Serialize)]
 struct NarList {
     version: u16,
-    root: FileTree<NarFileInfo>,
+    root: FileTree<Stat>,
 }
 
-fn file_entry(metadata: Metadata) -> FileTree<NarFileInfo> {
-    FileTree(FileSystemObject::Regular(Regular {
-        executable: metadata.permissions().mode() & 0o111 != 0,
-        contents: NarFileInfo {
-            size: metadata.len(),
-            nar_offset: None,
-        },
-    }))
-}
-
-async fn symlink_entry(path: &Path) -> Result<FileTree<NarFileInfo>> {
-    let target = tokio::fs::read_link(&path)
+async fn get_nar_list(path: PathBuf) -> crate::error::Result<NarList> {
+    let dir = Dir::open_ambient_dir(&path, ambient_authority())
         .await
-        .io_context(format!("Failed to read link {}", path.display()))?;
-    Ok(FileTree(FileSystemObject::Symlink(Symlink {
-        target: target.to_string_lossy().into_owned(),
-    })))
-}
-
-struct Frame {
-    path: PathBuf,
-    entries: std::collections::BTreeMap<String, Box<FileTree<NarFileInfo>>>,
-    dir_entry: tokio::fs::ReadDir,
-}
-
-async fn get_nar_list(path: PathBuf) -> Result<NarList> {
-    let st = symlink_metadata(&path).await.io_context(format!(
-        "Failed to get symlink metadata for {}",
-        path.display()
-    ))?;
-
-    let file_type = st.file_type();
-    let root = if file_type.is_file() {
-        file_entry(st)
-    } else if file_type.is_symlink() {
-        symlink_entry(&path).await?
-    } else if file_type.is_dir() {
-        let dir_entry = tokio::fs::read_dir(&path)
-            .await
-            .io_context(format!("Failed to read directory {}", path.display()))?;
-        let mut stack = vec![Frame {
-            path,
-            entries: std::collections::BTreeMap::new(),
-            dir_entry,
-        }];
-
-        let mut root: Option<FileTree<NarFileInfo>> = None;
-
-        while let Some(frame) = stack.last_mut() {
-            if let Some(entry) = frame
-                .dir_entry
-                .next_entry()
-                .await
-                .io_context("Failed to read next directory entry")?
-            {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let entry_path = entry.path();
-                let entry_st = symlink_metadata(&entry_path).await.io_context(format!(
-                    "Failed to get metadata for {}",
-                    entry_path.display()
-                ))?;
-                let entry_file_type = entry_st.file_type();
-
-                if entry_file_type.is_file() {
-                    frame.entries.insert(name, Box::new(file_entry(entry_st)));
-                } else if entry_file_type.is_symlink() {
-                    frame
-                        .entries
-                        .insert(name, Box::new(symlink_entry(&entry_path).await?));
-                } else if entry_file_type.is_dir() {
-                    let dir_entry = tokio::fs::read_dir(&entry_path)
-                        .await
-                        .io_context(format!("Failed to read directory {}", entry_path.display()))?;
-                    stack.push(Frame {
-                        path: entry_path,
-                        entries: std::collections::BTreeMap::new(),
-                        dir_entry,
-                    });
-                }
-            } else {
-                let frame = stack
-                    .pop()
-                    .expect("stack should not be empty inside loop iteration");
-                let dir_tree = FileTree(FileSystemObject::Directory(Directory {
-                    entries: frame.entries,
-                }));
-                if let Some(parent) = stack.last_mut() {
-                    let name = match frame.path.file_name() {
-                        Some(name) => name.to_string_lossy().into_owned(),
-                        None => {
-                            return Err(ServeError::AccessDenied {
-                                path: frame.path.display().to_string(),
-                            }
-                            .into());
-                        }
-                    };
-                    parent.entries.insert(name, Box::new(dir_tree));
-                } else {
-                    root = Some(dir_tree);
-                }
-            }
-        }
-
-        root.expect("root should be set after processing directory stack")
-    } else {
-        return Err(ServeError::ServeFailed {
+        .map_err(|e| ServeError::ServeFailed {
             source: std::io::Error::other(format!(
-                "Unsupported file type for path: {}",
+                "Failed to open directory {}: {e}",
                 path.display()
             )),
-        }
-        .into());
-    };
-
+        })?;
+    let source = DirSource::open(dir)
+        .await
+        .map_err(|e| ServeError::ServeFailed {
+            source: std::io::Error::other(e),
+        })?;
+    let root = list_deep(&source)
+        .await
+        .map_err(|e| ServeError::ServeFailed {
+            source: std::io::Error::other(e.to_string()),
+        })?;
     Ok(NarList { version: 1, root })
 }
 
@@ -154,7 +58,9 @@ pub(crate) async fn get(hash: web::Path<String>, settings: web::Data<Config>) ->
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::error::{IoErrorContext, Result};
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
     #[tokio::test]
