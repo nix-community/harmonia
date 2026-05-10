@@ -8,12 +8,11 @@
 
 use std::io;
 use std::os::fd::AsFd;
-use std::path::Path;
 
 /// A read-only memory-mapped file region.
 /// POSIX guarantees that mmap adds its own reference to the underlying file
 /// object, so the fd can be closed immediately after mapping (IEEE Std 1003.1).
-pub(crate) struct MappedFile {
+pub struct MappedFile {
     ptr: *mut std::ffi::c_void,
     len: usize,
 }
@@ -30,9 +29,13 @@ pub(crate) struct MappedFile {
 unsafe impl Send for MappedFile {}
 unsafe impl Sync for MappedFile {}
 
+/// Files up to this size are read into a heap buffer; larger files are
+/// memory-mapped for zero-copy reads.
+pub const MMAP_THRESHOLD: u64 = 256 * 1024;
+
 impl MappedFile {
-    /// Memory-map a file for reading. Returns an empty mapping for zero-length files.
-    pub fn open(path: &Path, size: u64) -> io::Result<Self> {
+    /// Memory-map a file for reading from an open file descriptor.
+    pub fn from_fd(fd: &impl AsFd, size: u64) -> io::Result<Self> {
         if size == 0 {
             return Ok(Self {
                 ptr: std::ptr::null_mut(),
@@ -40,7 +43,6 @@ impl MappedFile {
             });
         }
 
-        let file = std::fs::File::open(path)?;
         let len = usize::try_from(size)
             .map_err(|_| io::Error::other("file too large to mmap on this platform"))?;
 
@@ -53,7 +55,7 @@ impl MappedFile {
                     .ok_or_else(|| io::Error::other("file size is 0"))?,
                 nix::sys::mman::ProtFlags::PROT_READ,
                 nix::sys::mman::MapFlags::MAP_PRIVATE,
-                file.as_fd(),
+                fd.as_fd(),
                 0,
             )
         }
@@ -78,6 +80,14 @@ impl MappedFile {
         // SAFETY: ptr is valid for len bytes (from mmap), read-only, and lives until drop.
         unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) }
     }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 }
 
 // Allow `Bytes::from_owner(MappedFile)` so the mapping can be handed out as a
@@ -92,7 +102,6 @@ impl AsRef<[u8]> for MappedFile {
 impl Drop for MappedFile {
     fn drop(&mut self) {
         if self.len > 0 {
-            // SAFETY: ptr and len come from a successful mmap call.
             let _ = unsafe {
                 nix::sys::mman::munmap(
                     std::ptr::NonNull::new(self.ptr).expect("mmap returned null"),
