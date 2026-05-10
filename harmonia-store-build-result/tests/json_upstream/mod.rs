@@ -1,6 +1,83 @@
 //! Tests that verify JSON serialization matches upstream Nix format
 
-pub use harmonia_utils_test::json_upstream::libstore_test_data_path;
-pub use harmonia_utils_test::test_upstream_json;
+use harmonia_store_build_result::{
+    BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, FailureStatus,
+    Microseconds, SuccessStatus,
+};
+use harmonia_store_core::derived_path::OutputName;
+use harmonia_store_core::realisation::UnkeyedRealisation;
+use harmonia_utils_test::json_upstream::libstore_test_data_path;
+use harmonia_utils_test::test_upstream_json;
 
-mod build_result;
+test_upstream_json!(
+    test_build_result_success,
+    libstore_test_data_path("build-result/success.json"),
+    {
+        BuildResult {
+            inner: BuildResultInner::Success(BuildResultSuccess {
+                status: SuccessStatus::Built,
+                built_outputs: [
+                    (
+                        "bar".parse::<OutputName>().unwrap(),
+                        UnkeyedRealisation {
+                            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar".parse().unwrap(),
+                            signatures: Default::default(),
+                        },
+                    ),
+                    (
+                        "foo".parse::<OutputName>().unwrap(),
+                        UnkeyedRealisation {
+                            out_path: "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap(),
+                            signatures: Default::default(),
+                        },
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            }),
+            times_built: 3,
+            start_time: 30,
+            stop_time: 50,
+            cpu_user: Some(Microseconds(500000000)),
+            cpu_system: Some(Microseconds(604000000)),
+        }
+    }
+);
+
+test_upstream_json!(
+    test_build_result_output_rejected,
+    libstore_test_data_path("build-result/output-rejected.json"),
+    {
+        BuildResult {
+            inner: BuildResultInner::Failure(BuildResultFailure {
+                status: FailureStatus::OutputRejected,
+                error_msg: b"no idea why".to_vec(),
+                is_non_deterministic: false,
+            }),
+            times_built: 3,
+            start_time: 30,
+            stop_time: 50,
+            cpu_user: None,
+            cpu_system: None,
+        }
+    }
+);
+
+test_upstream_json!(
+    test_build_result_not_deterministic,
+    libstore_test_data_path("build-result/not-deterministic.json"),
+    {
+        BuildResult {
+            inner: BuildResultInner::Failure(BuildResultFailure {
+                status: FailureStatus::NotDeterministic,
+                error_msg: b"no idea why".to_vec(),
+                is_non_deterministic: false,
+            }),
+            times_built: 1,
+            start_time: 0,
+            stop_time: 0,
+            cpu_user: None,
+            cpu_system: None,
+        }
+    }
+);
