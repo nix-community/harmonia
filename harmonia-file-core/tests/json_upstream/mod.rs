@@ -140,29 +140,14 @@ fn complex_tree() -> FileTree<StringContents> {
     }))
 }
 
-// memory-source-accessor JSON includes `"executable": false` for
-// non-executable files. Our serde currently skips false values
-// (matching `nix nar ls` behavior pre-NixOS/nix#15834).
-// Once that PR lands, remove `skip_serializing_if` and use
-// `test_upstream_json!` for full round-trip here too.
-mod memory_source_accessor_simple {
-    use super::*;
-    #[test]
-    fn from_json() {
-        harmonia_utils_test::json_upstream::test_upstream_json_from_json(
-            &libutil_test_data_path("memory-source-accessor/simple.json"),
-            &simple_tree(),
-        );
-    }
-}
+test_upstream_json!(
+    memory_source_accessor_simple,
+    libutil_test_data_path("memory-source-accessor/simple.json"),
+    simple_tree()
+);
 
-mod memory_source_accessor_complex {
-    use super::*;
-    #[test]
-    fn from_json() {
-        harmonia_utils_test::json_upstream::test_upstream_json_from_json(
-            &libutil_test_data_path("memory-source-accessor/complex.json"),
-            &complex_tree(),
-        );
-    }
-}
+test_upstream_json!(
+    memory_source_accessor_complex,
+    libutil_test_data_path("memory-source-accessor/complex.json"),
+    complex_tree()
+);

@@ -212,23 +212,30 @@ mod test {
         let reference: serde_json::Value = serde_json::from_slice(&res2.stdout).unwrap();
         let ours: serde_json::Value = serde_json::to_value(&json.root).unwrap();
 
-        // nix's output may include narOffset; strip for comparison
-        fn strip_nar_offset(v: &mut serde_json::Value) {
+        // Strip fields that may differ between nix versions:
+        // - narOffset: present in NAR listings but not filesystem listings
+        // - executable: false may be absent in older nix (pre-NixOS/nix#15834)
+        fn normalize(v: &mut serde_json::Value) {
             if let Some(obj) = v.as_object_mut() {
                 obj.remove("narOffset");
+                if obj.get("executable") == Some(&serde_json::Value::Bool(false)) {
+                    obj.remove("executable");
+                }
                 if let Some(entries) = obj.get_mut("entries")
                     && let Some(map) = entries.as_object_mut()
                 {
                     for (_, child) in map.iter_mut() {
-                        strip_nar_offset(child);
+                        normalize(child);
                     }
                 }
             }
         }
-        let mut reference_stripped = reference;
-        strip_nar_offset(&mut reference_stripped);
+        let mut ours_normalized = ours;
+        normalize(&mut ours_normalized);
+        let mut reference_normalized = reference;
+        normalize(&mut reference_normalized);
 
-        assert_eq!(ours, reference_stripped);
+        assert_eq!(ours_normalized, reference_normalized);
 
         Ok(())
     }
