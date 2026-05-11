@@ -1,0 +1,22 @@
+[package]
+name                 = "harmonia-file-core"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace      = true
+serde_json.workspace = true
+thiserror.workspace  = true
+
+[dev-dependencies]
+harmonia-utils-test = { workspace = true }
+
+[[test]]
+name = "json_upstream"
+path = "tests/json_upstream/mod.rs"
+
+[lints]
+workspace = true

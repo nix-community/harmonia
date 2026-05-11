@@ -1,7 +1,9 @@
 use crate::ServerResult;
 use crate::error::{CacheError, IoErrorContext, Result, ServeError};
 use actix_web::{HttpResponse, http, web};
-use serde::{Deserialize, Serialize};
+use harmonia_file_core::{Directory, FileSystemObject, FileTree, Regular, Symlink};
+use harmonia_file_nar::NarFileInfo;
+use serde::Serialize;
 use std::fs::Metadata;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -9,59 +11,38 @@ use std::path::Path;
 use crate::config::Config;
 use crate::{cache_control_max_age_1y, nixhash, some_or_404};
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs::symlink_metadata;
 
-fn is_false(b: &bool) -> bool {
-    !b
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
-#[serde(tag = "type")]
-enum NarEntry {
-    #[serde(rename = "directory")]
-    Directory { entries: HashMap<String, NarEntry> },
-    #[serde(rename = "regular")]
-    Regular {
-        #[serde(rename = "narOffset")]
-        nar_offset: Option<u64>,
-        size: u64,
-
-        #[serde(default, skip_serializing_if = "is_false")]
-        executable: bool,
-    },
-    #[serde(rename = "symlink")]
-    Symlink { target: String },
-}
-
-#[derive(Debug, Serialize, Eq, PartialEq)]
+#[derive(Debug, Serialize)]
 struct NarList {
     version: u16,
-    root: NarEntry,
+    root: FileTree<NarFileInfo>,
+}
+
+fn file_entry(metadata: Metadata) -> FileTree<NarFileInfo> {
+    FileTree(FileSystemObject::Regular(Regular {
+        executable: metadata.permissions().mode() & 0o111 != 0,
+        contents: NarFileInfo {
+            size: metadata.len(),
+            nar_offset: None,
+        },
+    }))
+}
+
+async fn symlink_entry(path: &Path) -> Result<FileTree<NarFileInfo>> {
+    let target = tokio::fs::read_link(&path)
+        .await
+        .io_context(format!("Failed to read link {}", path.display()))?;
+    Ok(FileTree(FileSystemObject::Symlink(Symlink {
+        target: target.to_string_lossy().into_owned(),
+    })))
 }
 
 struct Frame {
     path: PathBuf,
-    nar_entry: NarEntry,
+    entries: std::collections::BTreeMap<String, Box<FileTree<NarFileInfo>>>,
     dir_entry: tokio::fs::ReadDir,
-}
-
-fn file_entry(metadata: Metadata) -> NarEntry {
-    NarEntry::Regular {
-        size: metadata.len(),
-        executable: metadata.permissions().mode() & 0o111 != 0,
-        nar_offset: None,
-    }
-}
-
-async fn symlink_entry(path: &Path) -> Result<NarEntry> {
-    let target = tokio::fs::read_link(&path)
-        .await
-        .io_context(format!("Failed to read link {}", path.display()))?;
-    Ok(NarEntry::Symlink {
-        target: target.to_string_lossy().into_owned(),
-    })
 }
 
 async fn get_nar_list(path: PathBuf) -> Result<NarList> {
@@ -81,13 +62,11 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
             .io_context(format!("Failed to read directory {}", path.display()))?;
         let mut stack = vec![Frame {
             path,
+            entries: std::collections::BTreeMap::new(),
             dir_entry,
-            nar_entry: NarEntry::Directory {
-                entries: HashMap::new(),
-            },
         }];
 
-        let mut root: Option<NarEntry> = None;
+        let mut root: Option<FileTree<NarFileInfo>> = None;
 
         while let Some(frame) = stack.last_mut() {
             if let Some(entry) = frame
@@ -104,47 +83,42 @@ async fn get_nar_list(path: PathBuf) -> Result<NarList> {
                 ))?;
                 let entry_file_type = entry_st.file_type();
 
-                let entries = match &mut frame.nar_entry {
-                    NarEntry::Directory { entries, .. } => entries,
-                    _ => unreachable!(),
-                };
                 if entry_file_type.is_file() {
-                    entries.insert(name, file_entry(entry_st));
+                    frame.entries.insert(name, Box::new(file_entry(entry_st)));
                 } else if entry_file_type.is_symlink() {
-                    entries.insert(name, symlink_entry(&entry_path).await?);
+                    frame
+                        .entries
+                        .insert(name, Box::new(symlink_entry(&entry_path).await?));
                 } else if entry_file_type.is_dir() {
                     let dir_entry = tokio::fs::read_dir(&entry_path)
                         .await
                         .io_context(format!("Failed to read directory {}", entry_path.display()))?;
                     stack.push(Frame {
                         path: entry_path,
+                        entries: std::collections::BTreeMap::new(),
                         dir_entry,
-                        nar_entry: NarEntry::Directory {
-                            entries: HashMap::new(),
-                        },
                     });
                 }
             } else {
-                let entry = stack
+                let frame = stack
                     .pop()
                     .expect("stack should not be empty inside loop iteration");
-                if let Some(frame) = stack.last_mut() {
-                    let name = match entry.path.file_name() {
+                let dir_tree = FileTree(FileSystemObject::Directory(Directory {
+                    entries: frame.entries,
+                }));
+                if let Some(parent) = stack.last_mut() {
+                    let name = match frame.path.file_name() {
                         Some(name) => name.to_string_lossy().into_owned(),
                         None => {
                             return Err(ServeError::AccessDenied {
-                                path: entry.path.display().to_string(),
+                                path: frame.path.display().to_string(),
                             }
                             .into());
                         }
                     };
-                    let entries = match &mut frame.nar_entry {
-                        NarEntry::Directory { entries, .. } => entries,
-                        _ => unreachable!(),
-                    };
-                    entries.insert(name, entry.nar_entry);
+                    parent.entries.insert(name, Box::new(dir_tree));
                 } else {
-                    root = Some(entry.nar_entry);
+                    root = Some(dir_tree);
                 }
             }
         }
@@ -183,20 +157,6 @@ mod test {
     use std::fs;
     use std::process::Command;
 
-    pub fn unset_nar_offset(entry: &mut NarEntry) {
-        match entry {
-            NarEntry::Regular { nar_offset, .. } => {
-                *nar_offset = None;
-            }
-            NarEntry::Directory { entries } => {
-                for (_, entry) in entries.iter_mut() {
-                    unset_nar_offset(entry);
-                }
-            }
-            _ => {}
-        }
-    }
-
     #[tokio::test]
     async fn test_get_nar_list() -> Result<()> {
         let temp_dir = harmonia_utils_test::CanonicalTempDir::new()
@@ -220,11 +180,11 @@ mod test {
 
         let json = get_nar_list(dir.to_owned()).await.unwrap();
 
-        //let nar_dump = dump_to_vec(dir.to_str().unwrap().to_owned()).await?;
+        // Compare against nix's own listing
         let nar_file = temp_dir.path().join("store.nar");
         let res = Command::new("nix-store")
             .arg("--dump")
-            .arg(dir)
+            .arg(&dir)
             .stdout(
                 fs::File::create(&nar_file)
                     .io_context("Failed to create nar file")
@@ -234,7 +194,7 @@ mod test {
             .io_context("Failed to run nix-store --dump")
             .unwrap();
         assert!(res.success());
-        // nix nar ls --json --recursive
+
         let res2 = Command::new("nix")
             .arg("--extra-experimental-features")
             .arg("nix-command")
@@ -247,19 +207,28 @@ mod test {
             .output()
             .io_context("Failed to run nix nar ls --json --recursive")
             .unwrap();
-        let parsed_json: serde_json::Value = serde_json::from_slice(&res2.stdout).unwrap();
-        let pretty_string = serde_json::to_string_pretty(&parsed_json).unwrap();
         assert!(res2.status.success());
-        let mut reference_json: NarEntry = serde_json::from_str(&pretty_string).unwrap();
 
-        // our posix implementation does not support narOffset
-        unset_nar_offset(&mut reference_json);
+        let reference: serde_json::Value = serde_json::from_slice(&res2.stdout).unwrap();
+        let ours: serde_json::Value = serde_json::to_value(&json.root).unwrap();
 
-        println!("get_nar_list:");
-        println!("{}", serde_json::to_string_pretty(&json.root).unwrap());
-        println!("nix nar ls --json --recursive:");
-        println!("{pretty_string}");
-        assert_eq!(json.root, reference_json);
+        // nix's output may include narOffset; strip for comparison
+        fn strip_nar_offset(v: &mut serde_json::Value) {
+            if let Some(obj) = v.as_object_mut() {
+                obj.remove("narOffset");
+                if let Some(entries) = obj.get_mut("entries")
+                    && let Some(map) = entries.as_object_mut()
+                {
+                    for (_, child) in map.iter_mut() {
+                        strip_nar_offset(child);
+                    }
+                }
+            }
+        }
+        let mut reference_stripped = reference;
+        strip_nar_offset(&mut reference_stripped);
+
+        assert_eq!(ours, reference_stripped);
 
         Ok(())
     }

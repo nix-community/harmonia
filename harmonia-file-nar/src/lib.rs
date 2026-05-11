@@ -10,15 +10,12 @@
 //! This crate provides functionality for packing and unpacking NAR archives,
 //! the archive format used by Nix for representing store paths as byte streams.
 //!
-//! **Architecture**: This is the Format Layer in Harmonia's store architecture.
-//! See `docs/architecture/harmonia-store-structure.md` for details.
-//!
 //! # Key Features
 //!
 //! - Streaming NAR pack/unpack (bounded memory usage)
 //! - Async/await support via tokio
 //! - Works with any `AsyncRead`/`AsyncWrite` source/sink
-//! - NAR hash computation during streaming
+//! - NAR listing via [`parse_nar_listing`] producing [`FileTree<NarFileInfo>`]
 //!
 //! # Design Principles
 //!
@@ -33,6 +30,7 @@ pub type ByteString = bytes::Bytes;
 /// Wire protocol utilities for NAR format.
 pub use harmonia_utils_io::wire;
 
+pub mod listing;
 pub mod padded_reader;
 
 pub mod archive;
@@ -42,6 +40,7 @@ pub use archive::{
     CASE_HACK_SUFFIX, DumpOptions, DumpedFile, NarByteStream, NarDumper, NarEvent, NarParser,
     NarReader, NarRestorer, NarWriteError, NarWriter, RestoreOptions, dump, parse_nar, restore,
 };
+pub use listing::{NarFileInfo, parse_nar_listing};
 
 #[cfg(test)]
 pub mod test;

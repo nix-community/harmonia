@@ -11,11 +11,11 @@ readme               = "README.md"
 [dependencies]
 futures-core        = { workspace = true }
 futures-util        = { workspace = true }
-harmonia-protocol   = { version = "3.0.0" }
-harmonia-store-core = { version = "0.0.0-alpha.0" }
-harmonia-store-db   = { version = "3.0.0" }
-harmonia-utils-hash = { version = "0.0.0-alpha.0" }
-harmonia-utils-io   = { version = "0.0.0-alpha.0" }
+harmonia-protocol   = { workspace = true }
+harmonia-store-core = { workspace = true }
+harmonia-store-db   = { workspace = true }
+harmonia-utils-hash = { workspace = true }
+harmonia-utils-io   = { workspace = true }
 serde               = { workspace = true }
 thiserror           = { workspace = true }
 tokio               = { workspace = true }
@@ -24,7 +24,7 @@ tracing             = { workspace = true }
 tracing-subscriber  = { workspace = true }
 
 [dev-dependencies]
-harmonia-utils-test = { version = "0.0.0-alpha.0" }
+harmonia-utils-test = { workspace = true }
 tempfile            = { workspace = true }
 
 [lints]

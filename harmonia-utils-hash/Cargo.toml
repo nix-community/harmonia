@@ -16,7 +16,7 @@ readme               = "README.md"
 [dependencies]
 data-encoding                = { workspace = true }
 derive_more                  = { workspace = true }
-harmonia-utils-base-encoding = { version = "0.0.0-alpha.0" }
+harmonia-utils-base-encoding = { workspace = true }
 md5                          = { workspace = true }
 proptest                     = { workspace = true, optional = true }
 proptest-derive              = { workspace = true, optional = true }
