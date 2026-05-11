@@ -41,9 +41,9 @@ struct RawOutput {
 }
 
 impl<'a> Parser<'a> {
-    pub(crate) fn new(input: &'a str, store_dir: &'a StoreDir) -> Self {
+    pub(crate) fn new(input: &'a [u8], store_dir: &'a StoreDir) -> Self {
         Self {
-            bytes: input.as_bytes(),
+            bytes: input,
             pos: 0,
             store_dir,
         }
@@ -481,6 +481,9 @@ mod tests {
     #[case::bad_char("Derive(x")]
     fn parse_error_cases(#[case] input: &str) {
         let store_dir = StoreDir::default();
-        assert!(crate::parse_derivation_aterm(&store_dir, input, "test".parse().unwrap()).is_err());
+        assert!(
+            crate::parse_derivation_aterm(&store_dir, input.as_bytes(), "test".parse().unwrap())
+                .is_err()
+        );
     }
 }

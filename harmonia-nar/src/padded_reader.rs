@@ -45,10 +45,15 @@ impl<R> PaddedReader<R> {
         match this.state {
             State::Content(rem) => (
                 (*rem).try_into().unwrap_or(usize::MAX),
-                (*rem + *this.trailer_size as u64)
+                // `rem` is attacker-controlled (NAR header). Saturate instead
+                // of overflowing on add; the result is only used as a
+                // capacity hint, so clamping is safe.
+                rem.saturating_add(*this.trailer_size as u64)
                     .try_into()
                     .unwrap_or(usize::MAX),
-                (*rem + aligned as u64).try_into().unwrap_or(usize::MAX),
+                rem.saturating_add(aligned as u64)
+                    .try_into()
+                    .unwrap_or(usize::MAX),
             ),
             State::ReadPadding(start, _) => (
                 0,
@@ -353,6 +358,20 @@ mod unittests {
         let padded_reader = PaddedReader::new(&mut reader, 22);
         let mut padded = pin!(padded_reader);
         padded.as_mut().consume(23);
+    }
+
+    /// `len` comes from an untrusted NAR header. `remaining_usize` must not
+    /// overflow when `len` is near `u64::MAX`. Found by fuzzing.
+    #[tokio::test]
+    async fn test_huge_len_does_not_overflow() {
+        let input = Bytes::from_static(b"abc");
+        let mut reader = io::Cursor::new(input);
+        let padded_reader = PaddedReader::new(&mut reader, u64::MAX);
+        let mut padded = pin!(padded_reader);
+        // Must not panic with "attempt to add with overflow".
+        let (_content, total, aligned) = padded.as_mut().remaining_usize();
+        assert_eq!(total, usize::MAX);
+        assert_eq!(aligned, usize::MAX);
     }
 
     // Read to end

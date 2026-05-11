@@ -28,8 +28,23 @@ use rstest::rstest;
 )]
 fn aterm_roundtrips(#[case] input: &str, #[case] name: &str) {
     let store_dir = StoreDir::default();
-    let drv = parse_derivation_aterm(&store_dir, input, name.parse().unwrap()).unwrap();
-    assert_eq!(print_derivation_aterm(&store_dir, &drv), input);
+    let drv = parse_derivation_aterm(&store_dir, input.as_bytes(), name.parse().unwrap()).unwrap();
+    assert_eq!(print_derivation_aterm(&store_dir, &drv), input.as_bytes());
+}
+
+/// ATerm strings are byte sequences, not UTF-8. The printer must emit non-ASCII
+/// bytes verbatim, otherwise printing and re-parsing changes the derivation.
+/// Found by fuzzing.
+#[test]
+fn roundtrip_non_utf8_bytes() {
+    let store_dir = StoreDir::default();
+    // \xc8\x82 in an arg: not the byte the printer would emit if it treated
+    // each byte as a Unicode codepoint.
+    let input: &[u8] = b"Derive([(\"out\",\"\",\"\",\"\")],[],[],\"x86_64-linux\",\"/bin/sh\",[\"a\xc8\x82b\"],[(\"name\",\"test\")])";
+    let drv = parse_derivation_aterm(&store_dir, input, "test".parse().unwrap()).unwrap();
+    assert_eq!(drv.args, vec![b"a\xc8\x82b".to_vec()]);
+    let printed = print_derivation_aterm(&store_dir, &drv);
+    assert_eq!(printed, input);
 }
 
 /// CA fixed is special: the parser accepts any path but the printer recomputes
@@ -40,8 +55,12 @@ fn roundtrip_ca_fixed() {
     let store_dir = StoreDir::default();
     let input = r#"Derive([("out","/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-linux-6.16.tar.xz","sha256","1a4be2fe6b5246aa4ac8987a8a4af34c42a8dd7d08b46ab48516bcc1befbcd83")],[],[],"builtin","builtin:fetchurl",[],[("name","linux-6.16.tar.xz")])"#;
 
-    let drv =
-        parse_derivation_aterm(&store_dir, input, "linux-6.16.tar.xz".parse().unwrap()).unwrap();
+    let drv = parse_derivation_aterm(
+        &store_dir,
+        input.as_bytes(),
+        "linux-6.16.tar.xz".parse().unwrap(),
+    )
+    .unwrap();
     let output = print_derivation_aterm(&store_dir, &drv);
 
     // Re-parse the printed output and verify structural equality
@@ -51,6 +70,9 @@ fn roundtrip_ca_fixed() {
     assert_eq!(drv.env, drv2.env);
 
     // Verify the output has a real computed path and preserves the hash
-    assert!(output.contains("/nix/store/"));
-    assert!(output.contains("1a4be2fe6b5246aa4ac8987a8a4af34c42a8dd7d08b46ab48516bcc1befbcd83"));
+    let output_str = str::from_utf8(&output).expect("this derivation prints as ASCII");
+    assert!(output_str.contains("/nix/store/"));
+    assert!(
+        output_str.contains("1a4be2fe6b5246aa4ac8987a8a4af34c42a8dd7d08b46ab48516bcc1befbcd83")
+    );
 }

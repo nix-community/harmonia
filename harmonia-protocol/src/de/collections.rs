@@ -3,6 +3,12 @@ use std::future::Future;
 
 use super::{NixDeserialize, NixRead};
 
+/// Cap initial `Vec` preallocation when deserializing length-prefixed
+/// collections. The length comes from an untrusted peer, so a huge value would
+/// otherwise trigger an unbounded allocation and abort the process. The Vec
+/// still grows beyond this if the peer actually sends that many elements.
+const MAX_PREALLOC_ELEMS: usize = 64 * 1024;
+
 impl<T> NixDeserialize for Vec<T>
 where
     T: NixDeserialize + Send,
@@ -16,7 +22,7 @@ where
     {
         async move {
             if let Some(len) = reader.try_read_value::<usize>().await? {
-                let mut ret = Vec::with_capacity(len);
+                let mut ret = Vec::with_capacity(len.min(MAX_PREALLOC_ELEMS));
                 for _ in 0..len {
                     ret.push(reader.read_value().await?);
                 }
@@ -127,5 +133,17 @@ mod unittests {
         let mut reader = NixReader::new(mock);
         let actual: E = reader.read_value().await.unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// A malicious peer can send a huge length prefix for a Vec. We must not
+    /// preallocate based on the untrusted length, otherwise this aborts the
+    /// process with an allocation failure (DoS). Found by fuzzing.
+    #[tokio::test]
+    async fn test_huge_vec_len_does_not_abort() {
+        // len = u64::MAX, then EOF.
+        let mock = Builder::new().read(&hex!("FFFF FFFF FFFF FFFF")).build();
+        let mut reader = NixReader::new(mock);
+        let result: Result<Vec<u64>, _> = reader.read_value().await;
+        assert!(result.is_err());
     }
 }

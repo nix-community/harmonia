@@ -1,0 +1,58 @@
+[package]
+name    = "harmonia-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+bytes         = "1"
+futures-util  = "0.3"
+libfuzzer-sys = "0.4"
+tokio         = { version = "1", features = [ "rt", "io-util" ] }
+
+harmonia-nar         = { path = "../harmonia-nar", features = [ "test" ] }
+harmonia-protocol    = { path = "../harmonia-protocol" }
+harmonia-store-aterm = { path = "../harmonia-store-aterm" }
+harmonia-store-core  = { path = "../harmonia-store-core" }
+
+[[bin]]
+bench = false
+doc   = false
+name  = "aterm_parse"
+path  = "fuzz_targets/aterm_parse.rs"
+test  = false
+
+[[bin]]
+bench = false
+doc   = false
+name  = "nar_parse"
+path  = "fuzz_targets/nar_parse.rs"
+test  = false
+
+[[bin]]
+bench = false
+doc   = false
+name  = "protocol_request"
+path  = "fuzz_targets/protocol_request.rs"
+test  = false
+
+[profile.release]
+debug = 1
+
+[workspace]
+members = [ "." ]
+
+[patch.crates-io]
+harmonia-nar                 = { path = "../harmonia-nar" }
+harmonia-protocol            = { path = "../harmonia-protocol" }
+harmonia-protocol-derive     = { path = "../harmonia-protocol-derive" }
+harmonia-store-aterm         = { path = "../harmonia-store-aterm" }
+harmonia-store-build-result  = { path = "../harmonia-store-build-result" }
+harmonia-store-core          = { path = "../harmonia-store-core" }
+harmonia-store-path-info     = { path = "../harmonia-store-path-info" }
+harmonia-utils-base-encoding = { path = "../harmonia-utils-base-encoding" }
+harmonia-utils-hash          = { path = "../harmonia-utils-hash" }
+harmonia-utils-io            = { path = "../harmonia-utils-io" }

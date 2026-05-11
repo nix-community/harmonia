@@ -18,7 +18,7 @@ use harmonia_store_core::store_path::{StoreDir, StorePathName};
 /// (e.g. `/nix/store/hash-name`) into [`StorePath`](harmonia_store_core::store_path::StorePath) values.
 pub fn parse_derivation_aterm(
     store_dir: &StoreDir,
-    input: &str,
+    input: &[u8],
     name: StorePathName,
 ) -> Result<Derivation, ParseError> {
     parser::Parser::new(input, store_dir).parse_derivation(name)

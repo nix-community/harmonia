@@ -45,14 +45,14 @@ fn drv_matches_json_and_roundtrips(#[case] base_path: &str) {
         .unwrap_or_else(|e| panic!("failed to parse JSON {}: {e}", json_path.display()));
 
     // Use the name from JSON since ATerm doesn't encode it
-    let from_aterm = parse_derivation_aterm(&store_dir, &drv_str, from_json.name.clone())
+    let from_aterm = parse_derivation_aterm(&store_dir, drv_str.as_bytes(), from_json.name.clone())
         .unwrap_or_else(|e| panic!("failed to parse ATerm {}: {e}", drv_path.display()));
 
     assert_eq!(from_aterm, from_json);
 
     // Print back to ATerm and verify roundtrip
     let printed = print_derivation_aterm(&store_dir, &from_aterm);
-    assert_eq!(printed, drv_str);
+    assert_eq!(printed, drv_str.as_bytes());
 }
 
 #[rstest]
@@ -64,7 +64,7 @@ fn drv_parse_error(#[case] relative_path: &str) {
     let drv_str = std::fs::read_to_string(&drv_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", drv_path.display()));
     assert!(
-        parse_derivation_aterm(&store_dir, &drv_str, "test".parse().unwrap()).is_err(),
+        parse_derivation_aterm(&store_dir, drv_str.as_bytes(), "test".parse().unwrap()).is_err(),
         "{relative_path} should fail to parse"
     );
 }
