@@ -17,16 +17,10 @@ use std::collections::BTreeMap;
 // File-system object types
 // ---------------------------------------------------------------------------
 
-fn is_false(b: &bool) -> bool {
-    !b
-}
-
 /// A regular file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Regular<C> {
-    // TODO: remove `skip_serializing_if` once NixOS/nix#15834 lands —
-    // then always serialize `executable` to match upstream.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default)]
     pub executable: bool,
     #[serde(flatten)]
     pub contents: C,
