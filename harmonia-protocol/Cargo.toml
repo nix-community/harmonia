@@ -66,5 +66,9 @@ test = [
 name = "json_upstream"
 path = "tests/json_upstream/mod.rs"
 
+[[test]]
+name = "wire_upstream"
+path = "tests/wire_upstream/mod.rs"
+
 [lints]
 workspace = true

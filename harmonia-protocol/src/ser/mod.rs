@@ -11,6 +11,7 @@ mod collections;
 mod int;
 #[cfg(any(test, feature = "test"))]
 pub mod mock;
+mod tuple;
 mod writer;
 
 pub use writer::{NixWriter, NixWriterBuilder};

@@ -15,6 +15,7 @@ mod int;
 #[cfg(any(test, feature = "test"))]
 pub mod mock;
 mod reader;
+mod tuple;
 
 pub use reader::{NixReader, NixReaderBuilder};
 

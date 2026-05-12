@@ -79,8 +79,11 @@ pub enum FileIngestionMethod {
     IntoPrimitive,
     NixDeserialize,
     NixSerialize,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[nix(try_from = "u16", into = "u16")]
+#[serde(into = "u16", try_from = "u16")]
 #[repr(u16)]
 pub enum BuildMode {
     Normal = 0,

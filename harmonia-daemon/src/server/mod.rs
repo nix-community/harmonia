@@ -85,7 +85,7 @@ where
 
 /// Builder for daemon server connections.
 pub struct Builder {
-    store_trust: TrustLevel,
+    store_trust: Option<TrustLevel>,
     store_dir: harmonia_store_core::store_path::StoreDir,
     min_version: ProtocolVersion,
     max_version: ProtocolVersion,
@@ -166,7 +166,7 @@ impl Builder {
 impl Default for Builder {
     fn default() -> Self {
         Self {
-            store_trust: TrustLevel::NotTrusted,
+            store_trust: Some(TrustLevel::NotTrusted),
             store_dir: Default::default(),
             min_version: ProtocolVersion::min(),
             max_version: ProtocolVersion::max(),
@@ -238,7 +238,7 @@ impl<S> DaemonStore for BoxedStore<S>
 where
     S: DaemonStore,
 {
-    fn trust_level(&self) -> TrustLevel {
+    fn trust_level(&self) -> Option<TrustLevel> {
         self.0.trust_level()
     }
 
@@ -575,7 +575,7 @@ where
 }
 
 pub struct DaemonConnection<R, W> {
-    store_trust: TrustLevel,
+    store_trust: Option<TrustLevel>,
     reader: NixReader<BytesReader<R>>,
     writer: NixWriter<W>,
 }

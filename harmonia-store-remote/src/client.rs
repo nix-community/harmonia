@@ -215,7 +215,7 @@ where
             let mut reader = self.reader;
             let mut writer = self.writer;
             let mut daemon_nix_version = None;
-            let mut remote_trusts_us = TrustLevel::Unknown;
+            let mut remote_trusts_us: Option<TrustLevel> = None;
 
             // Send the magic greeting, check for the reply.
             writer
@@ -322,7 +322,7 @@ pub struct DaemonClient<R, W> {
     writer: NixWriter<W>,
     features: FeatureSet,
     daemon_nix_version: Option<String>,
-    remote_trusts_us: TrustLevel,
+    remote_trusts_us: Option<TrustLevel>,
 }
 
 impl DaemonClient<Cursor<Vec<u8>>, Cursor<Vec<u8>>> {
@@ -384,7 +384,7 @@ where
     R: AsyncRead + fmt::Debug + Unpin + Send + 'static,
     W: AsyncWrite + fmt::Debug + Unpin + Send + 'static,
 {
-    fn trust_level(&self) -> TrustLevel {
+    fn trust_level(&self) -> Option<TrustLevel> {
         self.remote_trusts_us
     }
 
