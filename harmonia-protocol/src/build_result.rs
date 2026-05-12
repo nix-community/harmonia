@@ -59,11 +59,35 @@ impl NixDeserializeTrait for BuildResult {
             if reader.has_feature(crate::version::FEATURE_REALISATION_WITH_PATH) {
                 reader.read_value().await?
             } else {
-                // Legacy peers send a StringMap of JSON realisations. We don't
-                // implement the back-compat parsing; just drain the map and
-                // discard, since harmonia never builds.
-                let _ignored: BTreeMap<String, String> = reader.read_value().await?;
-                BTreeMap::new()
+                // Legacy peers send a StringMap of JSON realisations keyed by
+                // `sha256:<hex>!<outputname>`. The values are JSON objects with
+                // at least an `outPath` field. We parse them to extract the
+                // output name and store path.
+                let legacy: BTreeMap<String, String> = reader.read_value().await?;
+                let mut map = BTreeMap::new();
+                for (key, json_str) in legacy {
+                    // Key format: "sha256:<hash>!<outputname>"
+                    let output_name = match key.rfind('!') {
+                        Some(pos) => &key[pos + 1..],
+                        None => continue,
+                    };
+                    // Value is JSON: {"outPath": "/nix/store/...", ...}
+                    let out_path = (|| -> Option<harmonia_store_core::store_path::StorePath> {
+                        let obj: serde_json::Value = serde_json::from_str(&json_str).ok()?;
+                        let path_str = obj.get("outPath")?.as_str()?;
+                        path_str.parse().ok()
+                    })();
+                    if let (Ok(name), Some(path)) = (output_name.parse(), out_path) {
+                        map.insert(
+                            name,
+                            UnkeyedRealisation {
+                                out_path: path,
+                                signatures: Default::default(),
+                            },
+                        );
+                    }
+                }
+                map
             };
 
         let inner = if let Ok(status) = SuccessStatus::try_from(status_raw) {
@@ -195,11 +219,10 @@ mod tests {
         r.read_value().await.unwrap()
     }
 
-    /// Without the feature, the writer must emit the legacy StringMap form
-    /// (so an old peer keeps decoding), and our reader must be able to drain
-    /// it without desyncing the stream — built_outputs are simply dropped.
+    /// Without the feature, the writer emits the legacy StringMap form
+    /// and the reader parses `outPath` from the JSON values.
     #[tokio::test]
-    async fn wire_roundtrip_without_feature_degrades_gracefully() {
+    async fn wire_roundtrip_without_feature_preserves_outputs() {
         let v = sample_success();
         let buf = write(Default::default(), &v).await;
         assert!(buf.windows(4).any(|w| w == b"!out"));
@@ -207,7 +230,13 @@ mod tests {
         let BuildResultInner::Success(s) = &back.inner else {
             panic!("expected success")
         };
-        assert!(s.built_outputs.is_empty());
+        // Legacy roundtrip should preserve output names and paths
+        assert_eq!(s.built_outputs.len(), 1);
+        let realisation = s.built_outputs.get(&"out".parse().unwrap()).unwrap();
+        assert_eq!(
+            realisation.out_path,
+            "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap()
+        );
         assert_eq!(back.times_built, v.times_built);
         assert_eq!(back.start_time, v.start_time);
     }
