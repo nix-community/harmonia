@@ -54,8 +54,8 @@ impl HandshakeDaemonStore for LocalStoreHandler {
 }
 
 impl DaemonStore for LocalStoreHandler {
-    fn trust_level(&self) -> TrustLevel {
-        TrustLevel::Trusted
+    fn trust_level(&self) -> Option<TrustLevel> {
+        Some(TrustLevel::Trusted)
     }
 
     fn is_valid_path<'a>(

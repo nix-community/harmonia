@@ -6,7 +6,6 @@ use std::pin::Pin;
 use bstr::ByteSlice;
 use bytes::Bytes;
 use futures_core::Stream;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::io::AsyncBufRead;
 
@@ -17,7 +16,9 @@ use crate::daemon_wire::types2::{
     BuildMode, BuildResult, CollectGarbageResponse, GCAction, KeyedBuildResult, QueryMissingResult,
 };
 use crate::daemon_wire::{IgnoredTrue, IgnoredZero};
+use crate::de::{NixDeserialize as NixDeserializeTrait, NixRead};
 use crate::log::Verbosity;
+use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
 use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
@@ -70,26 +71,69 @@ impl Default for ClientOptions {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    TryFromPrimitive,
-    IntoPrimitive,
-    NixDeserialize,
-    NixSerialize,
-)]
-#[nix(try_from = "u64", into = "u64")]
-#[repr(u64)]
+/// Whether the remote side trusts us.
+///
+/// Matches upstream Nix's `TrustLevel`. On the wire an
+/// `Option<TrustLevel>` is encoded as a single `u64`:
+/// 0 = unknown (`None`), 1 = `Trusted`, 2 = `NotTrusted`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TrustLevel {
-    Unknown = 0,
-    Trusted = 1,
-    NotTrusted = 2,
+    Trusted,
+    NotTrusted,
+}
+
+/// Serializes as `true` (Trusted) or `false` (NotTrusted), matching
+/// upstream Nix's `TrustedFlag` JSON representation.
+impl serde::Serialize for TrustLevel {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bool(*self == TrustLevel::Trusted)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TrustLevel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let b = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(if b {
+            TrustLevel::Trusted
+        } else {
+            TrustLevel::NotTrusted
+        })
+    }
+}
+
+impl NixDeserializeTrait for Option<TrustLevel> {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + NixRead + Send,
+    {
+        use crate::de::Error;
+        if let Some(raw) = reader.try_read_value::<u64>().await? {
+            match raw {
+                0 => Ok(Some(None)),
+                1 => Ok(Some(Some(TrustLevel::Trusted))),
+                2 => Ok(Some(Some(TrustLevel::NotTrusted))),
+                _ => Err(R::Error::invalid_data(format!(
+                    "invalid trusted flag: {raw}"
+                ))),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl NixSerializeTrait for Option<TrustLevel> {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: NixWrite,
+    {
+        let raw: u64 = match self {
+            None => 0,
+            Some(TrustLevel::Trusted) => 1,
+            Some(TrustLevel::NotTrusted) => 2,
+        };
+        writer.write_value(&raw).await
+    }
 }
 
 pub type DaemonResult<T> = Result<T, DaemonError>;
@@ -296,7 +340,9 @@ pub trait HandshakeDaemonStore {
 
 #[allow(unused_variables)]
 pub trait DaemonStore: Send {
-    fn trust_level(&self) -> TrustLevel;
+    /// Whether the remote side trusts us. `None` means the trust level
+    /// is unknown (e.g. the daemon didn't report it).
+    fn trust_level(&self) -> Option<TrustLevel>;
 
     /// Sets options on server.
     /// This is usually called by the client just after the handshake to set
@@ -590,7 +636,7 @@ impl<'os, S> DaemonStore for &'os mut S
 where
     S: DaemonStore,
 {
-    fn trust_level(&self) -> TrustLevel {
+    fn trust_level(&self) -> Option<TrustLevel> {
         (**self).trust_level()
     }
 
