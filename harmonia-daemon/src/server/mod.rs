@@ -582,6 +582,21 @@ where
         trace!("SubmitOutput Size {}", size_of_val(&ret));
         ret
     }
+
+    fn add_to_store_scanning<'a, 'source, Source>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: Source,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'source>>
+    where
+        Source: AsyncBufRead + Send + Unpin + 'source,
+        'a: 'source,
+    {
+        let ret = Box::pin(self.0.add_to_store_scanning(name, cam, source));
+        trace!("AddToStoreScanning Size {}", size_of_val(ret.deref()));
+        ret
+    }
 }
 
 pub struct DaemonConnection<R, W> {
@@ -1080,6 +1095,18 @@ where
             SubmitOutput(req) => {
                 let logs = store.submit_output(&req.path, &req.output);
                 self.process_logs(logs).await?;
+            }
+            AddToStoreScanning(req) => {
+                // Treated as unknown when not supported in the upstream nix daemon, but returning Unimplemented is
+                // close enough.
+                let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
+                let mut framed = FramedReader::new(buf_reader);
+                let logs = store.add_to_store_scanning(&req.name, req.cam, &mut framed);
+                let res = process_logs(&mut self.writer, logs).await;
+                framed.drain_all().await?;
+                let value = res?;
+                self.writer.write_value(&RawLogMessage::Last).await?;
+                self.writer.write_value(&value).await?;
             }
         }
         Ok(())

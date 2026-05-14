@@ -189,6 +189,7 @@ pub enum Request {
     BuildPathsWithResults(BuildPathsRequest),
     AddPermRoot(AddPermRootRequest),
     SubmitOutput(SubmitOutputRequest),
+    AddToStoreScanning(AddToStoreScanningRequest),
 }
 
 impl Request {
@@ -225,6 +226,7 @@ impl Request {
             Request::BuildPathsWithResults(_) => Operation::BuildPathsWithResults,
             Request::AddPermRoot(_) => Operation::AddPermRoot,
             Request::SubmitOutput(_) => Operation::SubmitOutput,
+            Request::AddToStoreScanning(_) => Operation::AddToStoreScanning,
         }
     }
 
@@ -323,6 +325,9 @@ impl Request {
             }
             Request::SubmitOutput(req) => {
                 debug_span!("SubmitOutput", path=?req.path, output=?req.output)
+            }
+            Request::AddToStoreScanning(req) => {
+                debug_span!("AddToStoreScanning", name=?req.name, cam=?req.cam)
             }
         }
     }
@@ -439,6 +444,12 @@ pub struct AddPermRootRequest {
 pub struct SubmitOutputRequest {
     pub path: SingleDerivedPath,
     pub output: OutputName,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
+pub struct AddToStoreScanningRequest {
+    pub name: String,
+    pub cam: ContentAddressMethodAlgorithm,
 }
 
 macro_rules! optional_info {
