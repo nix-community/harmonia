@@ -981,6 +981,39 @@ where
         .fill_operation(Operation::SubmitOutput)
     }
 
+    fn add_to_store_scanning<'a, 'source, Source>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: Source,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'source>>
+    where
+        Source: AsyncBufRead + Send + Unpin + 'source,
+        'a: 'source,
+    {
+        async move {
+            self.writer
+                .write_value(&Operation::AddToStoreScanning)
+                .await?;
+            self.writer.write_value(name).await?;
+            self.writer.write_value(&cam).await?;
+            self.writer.flush().await?;
+            Ok(ProcessStderr::new(&mut self.reader)
+                .stream()
+                .drive_result(async {
+                    let mut source = source;
+                    let mut framed = FramedWriter::new(&mut self.writer);
+                    copy_buf(&mut source, &mut framed).await?;
+                    framed.shutdown().await?;
+                    self.writer.flush().await?;
+                    Ok(()) as DaemonResult<()>
+                }))
+        }
+        .future_result()
+        .fill_operation(Operation::AddToStoreScanning)
+        .boxed_result()
+    }
+
     fn add_ca_to_store<'a, 'r, S>(
         &'a mut self,
         name: &'a str,
