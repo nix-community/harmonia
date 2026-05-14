@@ -13,6 +13,7 @@ members = [
     "harmonia-store-remote",
     "harmonia-store-aterm",
     "harmonia-file-core",
+    "harmonia-file-fd",
     "harmonia-file-nar",
     "harmonia-protocol",
     "harmonia-protocol-derive",
@@ -38,8 +39,11 @@ version = "3.1.0"
 
 [workspace.dependencies]
 async-stream = "0.3"
-bstr = "1.11"
-bytes = "1.11"
+bstr         = "1.11"
+bytes        = "1.11"
+cap-std      = "3"
+# https://github.com/bytecodealliance/cap-std/pull/414
+cap-tokio = { git = "https://github.com/Ericson2314/cap-std.git", branch = "cap-tokio" }
 data-encoding = "2.11"
 derive_more = { version = "2.1", features = [ "display" ] }
 ed25519-dalek = "2"
@@ -92,6 +96,7 @@ tokio-test      = "0.4"
 
 # Internal crates
 harmonia-file-core           = { path = "harmonia-file-core" }
+harmonia-file-fd             = { path = "harmonia-file-fd" }
 harmonia-file-nar            = { path = "harmonia-file-nar" }
 harmonia-protocol            = { path = "harmonia-protocol" }
 harmonia-protocol-derive     = { path = "harmonia-protocol-derive" }

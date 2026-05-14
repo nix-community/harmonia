@@ -1,14 +1,50 @@
-//! Generic file tree types and serde.
+//! Generic file tree types, async traits, and listing functions.
 //!
-//! The core types are [`FileSystemObject`] (tagged enum of regular file,
-//! directory, or symlink) and [`FileTree`] (recursive newtype wrapper).
+//! # Read side
 //!
-//! Serde produces JSON matching `nix nar ls --json`:
-//! ```json
-//! { "type": "directory", "entries": { "foo": { "type": "regular", "size": 15 } } }
-//! ```
+//! [`FileSystemSource`] represents a node in a file tree. You navigate
+//! to children with [`open`](FileSystemSource::open) and iterate them
+//! with [`entries`](FileSystemSource::entries). The entries stream
+//! yields `(name, ChildThunk)` pairs where the thunk is a future that
+//! produces the opened child — so directory handles are only opened on
+//! demand.
+//!
+//! # Write side
+//!
+//! [`FileSystemSink`] creates a single node (file, dir, or symlink).
+//! For directories, it returns a [`DirectorySink`] whose
+//! [`create_child`](DirectorySink::create_child) method yields a
+//! sub-sink for each child — one level at a time, matching the NAR
+//! format's depth-first structure. [`RegularFileSink`] implements
+//! [`AsyncWrite`](tokio::io::AsyncWrite) for streaming file contents.
+//!
+//! # In-memory implementation
+//!
+//! [`MemoryTreeSource`] and [`MemoryTreeBuilder`] provide a pure
+//! in-memory implementation useful for testing and for building
+//! trees programmatically (e.g. from parsed NARs).
+//!
+//! # Serde
+//!
+//! [`FileSystemObject`] and [`FileTree`] derive
+//! `Serialize`/`Deserialize` with `#[serde(tag = "type")]`, producing
+//! JSON that matches `nix nar ls --json`.
+//!
+//! [NixOS/nix#15392]: https://github.com/NixOS/nix/pull/15392
 
+mod canon_path;
+mod listing;
 mod serde_impl;
+mod sink;
+mod source;
+
+#[cfg(test)]
+mod tests;
+
+pub use canon_path::{CanonPath, CanonPathError};
+pub use listing::{Opaque, ShallowTree, list_deep, list_shallow};
+pub use sink::{DirectorySink, FileSystemSink, MemoryTreeBuilder, RegularFileSink};
+pub use source::{FileSystemSource, FileType, MemoryTreeSource, Stat};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -56,10 +92,3 @@ pub struct FileTree<C>(pub FileSystemObject<C, Box<FileTree<C>>>);
 
 /// An in-memory file tree with byte-vector contents.
 pub type MemoryTree = FileTree<Vec<u8>>;
-
-/// An opaque placeholder used in shallow listings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Opaque;
-
-/// A shallow (one-level) file tree — directory children are [`Opaque`].
-pub type ShallowTree<C> = FileSystemObject<C, Opaque>;
