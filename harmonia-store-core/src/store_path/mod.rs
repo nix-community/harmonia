@@ -8,6 +8,7 @@ mod store_dir;
 pub use content_address::{
     ContentAddress, ContentAddressMethod, ContentAddressMethodAlgorithm, ParseContentAddressError,
 };
+#[cfg(feature = "derivation")]
 pub(crate) use path::into_name;
 pub use path::{
     ParseStorePathError, StorePath, StorePathError, StorePathHash, StorePathName,
