@@ -53,10 +53,15 @@ macro_rules! impl_serde_via_string {
     };
 }
 
+#[cfg(feature = "derivation")]
 pub mod derivation;
+#[cfg(feature = "derivation")]
 pub mod derived_path;
+#[cfg(feature = "derivation")]
 pub mod placeholder;
+#[cfg(feature = "derivation")]
 pub mod realisation;
+#[cfg(feature = "signature")]
 pub mod signature;
 pub mod store_path;
 
