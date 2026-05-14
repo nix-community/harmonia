@@ -22,7 +22,7 @@ use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
 use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
-use harmonia_store_core::derived_path::{DerivedPath, OutputName};
+use harmonia_store_core::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
@@ -611,6 +611,31 @@ pub trait DaemonStore: Send {
         ready(Err(DaemonError::unimplemented(Operation::AddPermRoot))).empty_logs()
     }
 
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        ready(Err(DaemonError::unimplemented(Operation::SubmitOutput))).empty_logs()
+    }
+
+    fn add_to_store_scanning<'a, 'source, Source>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: Source,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'source>>
+    where
+        Source: AsyncBufRead + Send + Unpin + 'source,
+        'a: 'source,
+    {
+        ready(Err(DaemonError::unimplemented(
+            Operation::AddToStoreScanning,
+        )))
+        .empty_logs()
+        .boxed_result()
+    }
+
     fn add_ca_to_store<'a, 'r, R>(
         &'a mut self,
         name: &'a str,
@@ -872,6 +897,14 @@ where
         (**self).add_perm_root(path, gc_root)
     }
 
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        (**self).submit_output(path, output)
+    }
+
     fn add_ca_to_store<'a, 'r, R>(
         &'a mut self,
         name: &'a str,
@@ -889,6 +922,19 @@ where
 
     fn shutdown(&mut self) -> impl Future<Output = DaemonResult<()>> + Send + '_ {
         (**self).shutdown()
+    }
+
+    fn add_to_store_scanning<'a, 'source, Source>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: Source,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'source>>
+    where
+        Source: AsyncBufRead + Send + Unpin + 'source,
+        'a: 'source,
+    {
+        (**self).add_to_store_scanning(name, cam, source)
     }
 }
 

@@ -47,7 +47,7 @@ use harmonia_protocol::{FEATURE_REALISATION_WITH_PATH, ProtocolVersion};
 // From harmonia-store-core
 use harmonia_protocol::log::{LogMessage, Message, Verbosity};
 use harmonia_store_core::derivation::BasicDerivation;
-use harmonia_store_core::derived_path::{DerivedPath, OutputName};
+use harmonia_store_core::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
@@ -964,6 +964,54 @@ where
         }
         .future_result()
         .fill_operation(Operation::AddPermRoot)
+    }
+
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        async move {
+            self.writer.write_value(&Operation::SubmitOutput).await?;
+            self.writer.write_value(path).await?;
+            self.writer.write_value(output).await?;
+            Ok(self.process_stderr().map_ok(|_: IgnoredOne| ()))
+        }
+        .future_result()
+        .fill_operation(Operation::SubmitOutput)
+    }
+
+    fn add_to_store_scanning<'a, 'source, Source>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: Source,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'source>>
+    where
+        Source: AsyncBufRead + Send + Unpin + 'source,
+        'a: 'source,
+    {
+        async move {
+            self.writer
+                .write_value(&Operation::AddToStoreScanning)
+                .await?;
+            self.writer.write_value(name).await?;
+            self.writer.write_value(&cam).await?;
+            self.writer.flush().await?;
+            Ok(ProcessStderr::new(&mut self.reader)
+                .stream()
+                .drive_result(async {
+                    let mut source = source;
+                    let mut framed = FramedWriter::new(&mut self.writer);
+                    copy_buf(&mut source, &mut framed).await?;
+                    framed.shutdown().await?;
+                    self.writer.flush().await?;
+                    Ok(()) as DaemonResult<()>
+                }))
+        }
+        .future_result()
+        .fill_operation(Operation::AddToStoreScanning)
+        .boxed_result()
     }
 
     fn add_ca_to_store<'a, 'r, S>(

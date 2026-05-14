@@ -522,6 +522,16 @@ nix_serialize_remote!(
     harmonia_store_core::store_path::StorePath
 );
 
+// SingleDerivedPath
+nix_deserialize_remote!(
+    #[nix(from_store_dir_str)]
+    harmonia_store_core::derived_path::SingleDerivedPath
+);
+nix_serialize_remote!(
+    #[nix(store_dir_display)]
+    harmonia_store_core::derived_path::SingleDerivedPath
+);
+
 // Verbosity
 nix_deserialize_remote!(
     #[nix(from = "u16")]
