@@ -664,11 +664,11 @@ nix_serialize_remote!(
 // Signature
 nix_deserialize_remote!(
     #[nix(from_str)]
-    harmonia_store_core::signature::Signature
+    harmonia_utils_signature::Signature
 );
 nix_serialize_remote!(
     #[nix(display)]
-    harmonia_store_core::signature::Signature
+    harmonia_utils_signature::Signature
 );
 
 // ContentAddress

@@ -18,10 +18,11 @@ readme               = "README.md"
 
 [dependencies]
 # Harmonia crates
-harmonia-file-nar   = { workspace = true }
-harmonia-protocol   = { workspace = true }
-harmonia-store-core = { workspace = true }
-harmonia-utils-io   = { workspace = true }
+harmonia-file-nar        = { workspace = true }
+harmonia-protocol        = { workspace = true }
+harmonia-store-core      = { workspace = true }
+harmonia-utils-io        = { workspace = true }
+harmonia-utils-signature = { workspace = true }
 
 # Async runtime
 async-stream = { workspace = true }

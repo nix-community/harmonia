@@ -6,8 +6,8 @@
 
 use std::collections::BTreeSet;
 
-use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{ContentAddress, StoreDir, StorePath};
+use harmonia_utils_signature::Signature;
 
 // Re-export the pure types so existing users of
 // `harmonia_protocol::valid_path_info::*` continue to work.

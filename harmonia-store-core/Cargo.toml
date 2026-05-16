@@ -17,19 +17,16 @@ readme               = "README.md"
 bytes                        = { workspace = true, features = [ "serde" ] }
 data-encoding                = { workspace = true }
 derive_more                  = { workspace = true }
-ed25519-dalek                = { workspace = true, optional = true }
-getrandom                    = { workspace = true, optional = true }
 harmonia-utils-base-encoding = { workspace = true }
 harmonia-utils-hash          = { workspace = true }
+harmonia-utils-signature     = { workspace = true, optional = true }
 harmonia-utils-test          = { workspace = true, optional = true }
 proptest                     = { workspace = true, optional = true }
 proptest-derive              = { workspace = true, optional = true }
 serde                        = { workspace = true }
 serde_json                   = { workspace = true, optional = true }
-subtle                       = { version = "2", default-features = false, optional = true }
 thiserror                    = { workspace = true }
 zerocopy                     = { version = "0.8", features = [ "derive" ] }
-zeroize                      = { version = "1", optional = true }
 
 [dev-dependencies]
 harmonia-store-core = { path = ".", features = [ "test" ] }
@@ -38,12 +35,17 @@ rstest              = { workspace = true }
 tempfile            = { workspace = true }
 
 [features]
-default = [ "signature", "derivation" ]
-# Cryptographic signing of store paths (NAR signatures).
-signature = [ "ed25519-dalek", "getrandom", "subtle", "zeroize" ]
+default = [ "derivation" ]
 # Derivations, derived paths, placeholders, realisations.
-derivation = [ "serde_json", "signature" ]
-test       = [ "proptest", "proptest-derive", "harmonia-utils-test", "harmonia-utils-hash/test" ]
+derivation = [ "serde_json", "harmonia-utils-signature" ]
+test = [
+    "proptest",
+    "proptest-derive",
+    "harmonia-utils-test",
+    "harmonia-utils-hash/test",
+    "derivation",
+    "harmonia-utils-signature/test",
+]
 
 [[test]]
 name = "json_upstream"

@@ -13,11 +13,12 @@ description          = "ValidPathInfo, NarHash, and JSON serialization for Nix s
 readme               = "README.md"
 
 [dependencies]
-harmonia-store-core = { workspace = true }
-harmonia-utils-hash = { workspace = true }
-proptest            = { workspace = true, optional = true }
-proptest-derive     = { workspace = true, optional = true }
-serde               = { workspace = true }
+harmonia-store-core      = { workspace = true }
+harmonia-utils-hash      = { workspace = true }
+harmonia-utils-signature = { workspace = true }
+proptest                 = { workspace = true, optional = true }
+proptest-derive          = { workspace = true, optional = true }
+serde                    = { workspace = true }
 
 [dev-dependencies]
 harmonia-store-path-info = { path = ".", features = [ "test" ] }

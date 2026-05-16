@@ -990,6 +990,7 @@ dependencies = [
  "harmonia-store-nar-info",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
+ "harmonia-utils-signature",
  "harmonia-utils-test",
  "http-range",
  "mime",
@@ -1027,6 +1028,7 @@ dependencies = [
  "harmonia-store-db",
  "harmonia-utils-hash",
  "harmonia-utils-io",
+ "harmonia-utils-signature",
  "harmonia-utils-test",
  "serde",
  "tempfile",
@@ -1092,6 +1094,7 @@ dependencies = [
  "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-io",
+ "harmonia-utils-signature",
  "harmonia-utils-test",
  "hex-literal",
  "libc",
@@ -1158,11 +1161,10 @@ dependencies = [
  "bytes",
  "data-encoding",
  "derive_more",
- "ed25519-dalek",
- "getrandom 0.4.2",
  "harmonia-store-core",
  "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
+ "harmonia-utils-signature",
  "harmonia-utils-test",
  "hex-literal",
  "proptest",
@@ -1170,11 +1172,9 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
- "subtle",
  "tempfile",
  "thiserror",
  "zerocopy",
- "zeroize",
 ]
 
 [[package]]
@@ -1184,6 +1184,7 @@ dependencies = [
  "harmonia-store-core",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
+ "harmonia-utils-signature",
  "rusqlite",
  "tempfile",
  "thiserror",
@@ -1197,6 +1198,7 @@ dependencies = [
  "harmonia-store-core",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
+ "harmonia-utils-signature",
  "harmonia-utils-test",
  "hex-literal",
  "serde",
@@ -1210,6 +1212,7 @@ dependencies = [
  "harmonia-store-core",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
+ "harmonia-utils-signature",
  "harmonia-utils-test",
  "hex-literal",
  "proptest",
@@ -1229,6 +1232,7 @@ dependencies = [
  "harmonia-protocol",
  "harmonia-store-core",
  "harmonia-utils-io",
+ "harmonia-utils-signature",
  "prometheus",
  "tempfile",
  "tokio",
@@ -1280,6 +1284,24 @@ dependencies = [
  "rstest",
  "tokio",
  "tokio-test",
+]
+
+[[package]]
+name = "harmonia-utils-signature"
+version = "3.1.0"
+dependencies = [
+ "data-encoding",
+ "ed25519-dalek",
+ "getrandom 0.4.2",
+ "harmonia-utils-base-encoding",
+ "harmonia-utils-signature",
+ "proptest",
+ "proptest-derive",
+ "serde",
+ "serde_json",
+ "subtle",
+ "thiserror",
+ "zeroize",
 ]
 
 [[package]]

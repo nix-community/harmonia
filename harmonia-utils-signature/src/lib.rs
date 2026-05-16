@@ -1,4 +1,13 @@
 #![allow(unsafe_code)]
+// SPDX-FileCopyrightText: 2024 griff
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-FileCopyrightText: 2026 John Ericson
+// SPDX-License-Identifier: EUPL-1.2 OR MIT
+//
+// This crate as originally derived from Nix.rs (https://github.com/griff/Nix.rs)
+// Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
+
+//! Cryptographic signing of Nix store paths (Ed25519 NAR signatures).
 
 use std::collections::BTreeSet;
 use std::fmt;

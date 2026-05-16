@@ -19,7 +19,7 @@ pub enum CacheError {
     Store(#[from] StoreError),
 
     #[error("Signing error: {0}")]
-    Signing(#[from] harmonia_store_core::signature::ParseKeyError),
+    Signing(#[from] harmonia_utils_signature::ParseKeyError),
 
     #[error("File serving error: {0}")]
     Serve(#[from] ServeError),

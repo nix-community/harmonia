@@ -49,11 +49,11 @@ use harmonia_protocol::log::{LogMessage, Message, Verbosity};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
-use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddressMethodAlgorithm, StoreDir, StorePath, StorePathHash, StorePathSet,
 };
 use harmonia_utils_io::{AsyncBufReadCompat, BytesReader, Lending};
+use harmonia_utils_signature::Signature;
 
 // From harmonia-file-nar
 use harmonia_file_nar::archive::{NarBytesReader, NarReader};

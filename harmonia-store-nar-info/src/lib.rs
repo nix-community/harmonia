@@ -6,12 +6,12 @@ use std::num::NonZero;
 
 use serde::{Deserialize, Serialize, Serializer};
 
-use harmonia_store_core::signature::{SecretKey, Signature};
 use harmonia_store_core::store_path::{ContentAddress, StoreDir, StorePath};
 use harmonia_store_path_info::{
     NarHash, StorePathKeyed, UnkeyedValidPathInfo, ValidPathInfo, fingerprint_path,
 };
 use harmonia_utils_hash::Hash;
+use harmonia_utils_signature::{SecretKey, Signature};
 
 /// A keyed NarInfo: store path plus narinfo metadata.
 pub type NarInfo = StorePathKeyed<UnkeyedNarInfo>;
