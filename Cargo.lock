@@ -985,8 +985,8 @@ dependencies = [
  "futures-util",
  "harmonia-file-core",
  "harmonia-file-nar",
- "harmonia-store-core",
  "harmonia-store-db",
+ "harmonia-store-derivation",
  "harmonia-store-nar-info",
  "harmonia-store-path",
  "harmonia-store-path-info",
@@ -1025,8 +1025,9 @@ dependencies = [
  "futures-core",
  "futures-util",
  "harmonia-protocol",
- "harmonia-store-core",
+ "harmonia-store-content-address",
  "harmonia-store-db",
+ "harmonia-store-derivation",
  "harmonia-store-path",
  "harmonia-utils-hash",
  "harmonia-utils-io",
@@ -1092,7 +1093,8 @@ dependencies = [
  "harmonia-file-nar",
  "harmonia-protocol-derive",
  "harmonia-store-build-result",
- "harmonia-store-core",
+ "harmonia-store-content-address",
+ "harmonia-store-derivation",
  "harmonia-store-path",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
@@ -1132,8 +1134,10 @@ version = "3.1.0"
 name = "harmonia-store-aterm"
 version = "0.0.0-alpha.0"
 dependencies = [
+ "bytes",
  "harmonia-store-aterm",
- "harmonia-store-core",
+ "harmonia-store-content-address",
+ "harmonia-store-derivation",
  "harmonia-store-path",
  "harmonia-utils-hash",
  "harmonia-utils-test",
@@ -1149,7 +1153,7 @@ name = "harmonia-store-build-result"
 version = "3.1.0"
 dependencies = [
  "harmonia-store-build-result",
- "harmonia-store-core",
+ "harmonia-store-derivation",
  "harmonia-utils-test",
  "num_enum",
  "proptest",
@@ -1159,13 +1163,46 @@ dependencies = [
 ]
 
 [[package]]
-name = "harmonia-store-core"
+name = "harmonia-store-content-address"
+version = "3.1.0"
+dependencies = [
+ "derive_more",
+ "harmonia-store-content-address",
+ "harmonia-store-path",
+ "harmonia-utils-hash",
+ "hex-literal",
+ "proptest",
+ "proptest-derive",
+ "rstest",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "harmonia-store-db"
+version = "3.1.0"
+dependencies = [
+ "harmonia-store-content-address",
+ "harmonia-store-derivation",
+ "harmonia-store-path",
+ "harmonia-store-path-info",
+ "harmonia-utils-hash",
+ "harmonia-utils-signature",
+ "rusqlite",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "harmonia-store-derivation"
 version = "0.0.0-alpha.0"
 dependencies = [
  "bytes",
  "data-encoding",
  "derive_more",
- "harmonia-store-core",
+ "harmonia-store-content-address",
+ "harmonia-store-derivation",
  "harmonia-store-path",
  "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
@@ -1183,25 +1220,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "harmonia-store-db"
-version = "3.1.0"
-dependencies = [
- "harmonia-store-core",
- "harmonia-store-path",
- "harmonia-store-path-info",
- "harmonia-utils-hash",
- "harmonia-utils-signature",
- "rusqlite",
- "tempfile",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "harmonia-store-nar-info"
 version = "3.1.0"
 dependencies = [
- "harmonia-store-core",
+ "harmonia-store-content-address",
  "harmonia-store-path",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
@@ -1234,7 +1256,7 @@ dependencies = [
 name = "harmonia-store-path-info"
 version = "3.1.0"
 dependencies = [
- "harmonia-store-core",
+ "harmonia-store-content-address",
  "harmonia-store-path",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
@@ -1256,7 +1278,8 @@ dependencies = [
  "futures-util",
  "harmonia-file-nar",
  "harmonia-protocol",
- "harmonia-store-core",
+ "harmonia-store-content-address",
+ "harmonia-store-derivation",
  "harmonia-store-path",
  "harmonia-utils-io",
  "harmonia-utils-signature",

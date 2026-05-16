@@ -247,7 +247,7 @@ mod unittests {
         de::NixRead,
         ser::{NixWrite, NixWriter},
     };
-    use harmonia_store_core::btree_set;
+    use harmonia_store_derivation::btree_set;
     use harmonia_utils_io::BytesReader;
 
     #[tokio::test]

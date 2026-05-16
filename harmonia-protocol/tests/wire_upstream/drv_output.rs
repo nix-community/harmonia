@@ -4,7 +4,7 @@
 //! The legacy hash-string format (`sha256:<hex>!<name>`) is not
 //! supported by our `DrvOutput` wire impl.
 
-use harmonia_store_core::realisation::DrvOutput;
+use harmonia_store_derivation::realisation::DrvOutput;
 
 use crate::{realisation_with_path_features, test_upstream_wire};
 

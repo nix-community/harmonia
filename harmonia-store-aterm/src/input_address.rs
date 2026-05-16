@@ -1,10 +1,10 @@
 //! For derivations that input-address their outputs
 
-use harmonia_store_core::ByteString;
-use harmonia_store_core::derivation::{
+use bytes::Bytes;
+use harmonia_store_derivation::derivation::{
     BasicDerivation, DerivationOutput, DerivationT, OutputPathName,
 };
-use harmonia_store_core::derived_path::OutputName;
+use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathNameError, StorePathSet};
 
 use crate::error::ParseError;
@@ -56,7 +56,7 @@ impl AtermOutput for UnfilledOutput {
 /// Because the input is a resolved `BasicDerivation` — all inputs are
 /// already concrete store paths, not derivation references — the hash
 /// is simply `sha256(aterm)`. This avoids the full recursive
-/// `hashDerivationModulo` algorithm that a [`Derivation`](harmonia_store_core::derivation::Derivation)
+/// `hashDerivationModulo` algorithm that a [`Derivation`](harmonia_store_derivation::derivation::Derivation)
 /// with unresolved input derivation references would require.
 pub fn hash_derivation(
     store_dir: &StoreDir,
@@ -119,8 +119,8 @@ pub fn fill_outputs(
             .to_string_lossy()
             .into_owned();
         env.insert(
-            ByteString::from(output_name.as_ref().to_owned()),
-            ByteString::from(abs_path),
+            Bytes::from(output_name.as_ref().to_owned()),
+            Bytes::from(abs_path),
         );
 
         outputs.insert(output_name, path);
@@ -141,8 +141,8 @@ pub fn fill_outputs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harmonia_store_core::derivation::DerivationOutputs;
-    use harmonia_store_core::derivation::derivation_output_arbitrary::arb_output_name_for_drv;
+    use harmonia_store_derivation::derivation::DerivationOutputs;
+    use harmonia_store_derivation::derivation::derivation_output_arbitrary::arb_output_name_for_drv;
     use proptest::prelude::*;
 
     /// Generate a `DerivationT<StorePathSet, UnfilledOutput>` whose output
@@ -230,7 +230,7 @@ mod tests {
                     .to_absolute_path(&store_dir)
                     .to_string_lossy()
                     .into_owned();
-                let env_key = ByteString::from(output_name.as_ref().to_owned());
+                let env_key = Bytes::from(output_name.as_ref().to_owned());
                 let actual_env = filled.env.get(&env_key).expect("env var should be set");
                 prop_assert_eq!(expected_env.as_bytes(), actual_env.as_ref());
             }
@@ -272,8 +272,8 @@ mod tests {
             name: "test".parse().unwrap(),
             outputs,
             inputs: StorePathSet::new(),
-            platform: ByteString::from("x86_64-linux"),
-            builder: ByteString::from("/bin/sh"),
+            platform: Bytes::from("x86_64-linux"),
+            builder: Bytes::from("/bin/sh"),
             args: vec![],
             env: std::collections::BTreeMap::new(),
             structured_attrs: None,

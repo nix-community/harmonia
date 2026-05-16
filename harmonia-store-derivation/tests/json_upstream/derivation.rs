@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
-use harmonia_store_core::content_address::ContentAddressMethodAlgorithm;
-use harmonia_store_core::derivation::{
+use harmonia_store_content_address::ContentAddressMethodAlgorithm;
+use harmonia_store_derivation::derivation::{
     BasicDerivation, Derivation, DerivationOutput, StructuredAttrs,
 };
-use harmonia_store_core::derived_path::{OutputName, SingleDerivedPath};
-use harmonia_store_core::placeholder::Placeholder;
+use harmonia_store_derivation::derived_path::{OutputName, SingleDerivedPath};
+use harmonia_store_derivation::placeholder::Placeholder;
 use harmonia_utils_hash::Algorithm;
 use std::collections::{BTreeMap, BTreeSet};
 

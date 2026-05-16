@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use harmonia_store_core::content_address::ContentAddress;
+use harmonia_store_content_address::ContentAddress;
 use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_utils_signature::Signature;
 

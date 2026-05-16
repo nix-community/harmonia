@@ -6,6 +6,8 @@
 // Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
 
 //! Nix store path types, parsing, and validation.
+//!
+//! Part of the Store (pure) layer — see `docs/architecture/harmonia-store-structure.md`.
 
 use std::collections::BTreeSet;
 

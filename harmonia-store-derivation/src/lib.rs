@@ -5,30 +5,19 @@
 // This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
 // Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
 
-//! Core Nix store semantics.
+//! Nix derivation types and semantics.
 //!
-//! This crate provides the fundamental types and pure computation logic for working
-//! with the Nix store. It is intentionally IO-free - all operations are pure functions
-//! that operate on values, enabling easy testing and composition.
-//!
-//! **Architecture**: This is the Core Layer in Harmonia's store architecture.
-//! See `docs/architecture/harmonia-store-structure.md` for details.
+//! This crate provides derivations, derived paths, placeholders, and
+//! realisations — the pure computation logic for Nix build planning.
 //!
 //! # Key Modules
 //!
-//! - `content_address` - Content addressing and store path computation
-//! - `derivation` - Derivation (.drv) file format and semantics (feature-gated)
-//! - `realisation` - Store path realisation tracking (feature-gated)
+//! - `derivation` - Derivation (.drv) file format and semantics
+//! - `derived_path` - References to derivation outputs
+//! - `placeholder` - Placeholder strings for self-referencing derivations
+//! - `realisation` - Store path realisation tracking
 //!
-//! # Design Principles
-//!
-//! 1. **No IO**: No filesystem, no network, minimal `async`
-//! 2. **Pure functions**: Deterministic, testable, referentially transparent
-//! 3. **Explicit errors**: All fallible operations return `Result`
-//! 4. **Memory-bounded**: Stream-friendly, no unbounded buffers
-
-// Type alias for byte strings
-pub type ByteString = bytes::Bytes;
+//! Part of the Store (pure) layer — see `docs/architecture/harmonia-store-structure.md`.
 
 /// Implement `serde::Serialize`/`Deserialize` via existing `Display`/`FromStr` impls.
 ///
@@ -51,14 +40,9 @@ macro_rules! impl_serde_via_string {
     };
 }
 
-pub mod content_address;
-#[cfg(feature = "derivation")]
 pub mod derivation;
-#[cfg(feature = "derivation")]
 pub mod derived_path;
-#[cfg(feature = "derivation")]
 pub mod placeholder;
-#[cfg(feature = "derivation")]
 pub mod realisation;
 
 #[cfg(any(test, feature = "test"))]

@@ -5,7 +5,7 @@
 //! path base name of the derivation and `{output}` is the output name.
 
 use actix_web::{HttpResponse, web};
-use harmonia_store_core::derived_path::OutputName;
+use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::StorePath;
 
 use crate::config::Config;

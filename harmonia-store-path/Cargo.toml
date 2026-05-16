@@ -15,7 +15,7 @@ description          = "Nix store path types, parsing, validation, and content a
 [dependencies]
 derive_more                  = { workspace = true }
 harmonia-utils-base-encoding = { workspace = true }
-harmonia-utils-hash          = { workspace = true }
+harmonia-utils-hash          = { workspace = true, public = true }
 harmonia-utils-test          = { workspace = true, optional = true }
 proptest                     = { workspace = true, optional = true }
 proptest-derive              = { workspace = true, optional = true }

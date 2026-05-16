@@ -3,7 +3,7 @@
 
 //! Pure `ValidPathInfo`, `NarHash`, and related types for Nix store metadata.
 //!
-//! Quarantined from `harmonia-store-core` because `ValidPathInfo` is a
+//! Quarantined from `harmonia-store-derivation` because `ValidPathInfo` is a
 //! bag of loosely related fields that doesn't benefit from being in core.
 //! Protocol-specific wire format derives are added in the protocol layer.
 
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize, Serializer};
 
 pub use nar_hash::NarHash;
 
-use harmonia_store_core::content_address::ContentAddress;
+use harmonia_store_content_address::ContentAddress;
 use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_utils_hash::fmt::CommonHash as _;
 use harmonia_utils_signature::Signature;

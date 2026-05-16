@@ -39,20 +39,20 @@ url = "2.5.7"
 zstd = "0.13"
 zstd-safe = "7"
 # Nix.rs-based crates
-bytes                    = { workspace = true }
-futures-core             = { workspace = true }
-futures-util             = { workspace = true }
-harmonia-file-core       = { workspace = true }
-harmonia-file-nar        = { workspace = true }
-harmonia-store-core      = { workspace = true }
-harmonia-store-db        = { workspace = true }
-harmonia-store-nar-info  = { workspace = true }
-harmonia-store-path      = { workspace = true }
-harmonia-store-path-info = { workspace = true }
-harmonia-utils-hash      = { workspace = true }
-harmonia-utils-signature = { workspace = true }
-nix                      = { workspace = true, features = [ "socket", "fs" ] }
-prometheus               = { workspace = true }
+bytes                     = { workspace = true }
+futures-core              = { workspace = true }
+futures-util              = { workspace = true }
+harmonia-file-core        = { workspace = true }
+harmonia-file-nar         = { workspace = true }
+harmonia-store-db         = { workspace = true }
+harmonia-store-derivation = { workspace = true }
+harmonia-store-nar-info   = { workspace = true }
+harmonia-store-path       = { workspace = true }
+harmonia-store-path-info  = { workspace = true }
+harmonia-utils-hash       = { workspace = true }
+harmonia-utils-signature  = { workspace = true }
+nix                       = { workspace = true, features = [ "socket", "fs" ] }
+prometheus                = { workspace = true }
 
 [dev-dependencies]
 harmonia-utils-test = { workspace = true }

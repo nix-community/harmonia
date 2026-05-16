@@ -175,7 +175,7 @@ fn test_derivation_outputs() {
 
     let drv = sp("hello.drv");
     let out = sp("hello");
-    let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
+    let out_name: harmonia_store_derivation::derived_path::OutputName = "out".parse().unwrap();
 
     db.register_valid_path(&sd(), &drv, &empty_info()).unwrap();
     db.register_valid_path(
@@ -208,7 +208,7 @@ fn test_realisation_roundtrip() {
 
     let drv_path = sp("hello.drv");
     let out_path = sp("hello");
-    let output_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
+    let output_name: harmonia_store_derivation::derived_path::OutputName = "out".parse().unwrap();
 
     assert!(
         db.query_realisation(&sd(), &drv_path, &output_name)
@@ -216,12 +216,12 @@ fn test_realisation_roundtrip() {
             .is_none()
     );
 
-    let realisation = harmonia_store_core::realisation::Realisation {
-        key: harmonia_store_core::realisation::DrvOutput {
+    let realisation = harmonia_store_derivation::realisation::Realisation {
+        key: harmonia_store_derivation::realisation::DrvOutput {
             drv_path: drv_path.clone(),
             output_name: output_name.clone(),
         },
-        value: harmonia_store_core::realisation::UnkeyedRealisation {
+        value: harmonia_store_derivation::realisation::UnkeyedRealisation {
             out_path: out_path.clone(),
             signatures: [test_sig()].into_iter().collect(),
         },
@@ -237,7 +237,7 @@ fn test_realisation_roundtrip() {
     assert_eq!(r.realisation.value.out_path, out_path);
     assert_eq!(r.realisation.value.signatures.len(), 1);
 
-    let dev_name: harmonia_store_core::derived_path::OutputName = "dev".parse().unwrap();
+    let dev_name: harmonia_store_derivation::derived_path::OutputName = "dev".parse().unwrap();
     assert!(
         db.query_realisation(&sd(), &drv_path, &dev_name)
             .unwrap()
@@ -254,7 +254,7 @@ fn test_realisation_nix_compat() {
 
     let drv_path = sp("hello.drv");
     let out_path = sp("hello");
-    let output_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
+    let output_name: harmonia_store_derivation::derived_path::OutputName = "out".parse().unwrap();
 
     // Simulate what Nix C++ does: base path for drvPath, full path for outputPath.
     db.connection().execute(

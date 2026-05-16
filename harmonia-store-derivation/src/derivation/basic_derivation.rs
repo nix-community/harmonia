@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use proptest::prelude::{Arbitrary, BoxedStrategy};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::ByteString;
 use crate::derived_path::SingleDerivedPath;
 use harmonia_store_path::{StorePathName, StorePathSet};
 
@@ -31,14 +30,14 @@ pub struct DerivationT<Inputs, Output = DerivationOutput> {
     pub name: StorePathName,
     pub outputs: DerivationOutputs<Output>,
     pub inputs: Inputs,
-    pub platform: ByteString,
-    pub builder: ByteString,
-    pub args: Vec<ByteString>,
+    pub platform: bytes::Bytes,
+    pub builder: bytes::Bytes,
+    pub args: Vec<bytes::Bytes>,
     /// Environment variables passed to the builder.
     ///
     /// Note: Must not contain the key `__json` as that key is reserved
     /// for encoding structured attributes.
-    pub env: BTreeMap<ByteString, ByteString>,
+    pub env: BTreeMap<bytes::Bytes, bytes::Bytes>,
     /// Optional structured attributes.
     ///
     /// When present, attributes are passed to the builder as JSON via the `__json`
@@ -217,13 +216,13 @@ fn helper_to_derivation<'de, Inputs: SerdeInputs, D: Deserializer<'de>>(
             .map_err(|e| serde::de::Error::custom(format!("invalid derivation name: {}", e)))?,
         outputs: helper.outputs,
         inputs: Inputs::from_helper(helper.inputs),
-        platform: ByteString::from(helper.platform),
-        builder: ByteString::from(helper.builder),
-        args: helper.args.into_iter().map(ByteString::from).collect(),
+        platform: bytes::Bytes::from(helper.platform),
+        builder: bytes::Bytes::from(helper.builder),
+        args: helper.args.into_iter().map(bytes::Bytes::from).collect(),
         env: helper
             .env
             .into_iter()
-            .map(|(k, v)| (ByteString::from(k), ByteString::from(v)))
+            .map(|(k, v)| (bytes::Bytes::from(k), bytes::Bytes::from(v)))
             .collect(),
         structured_attrs: helper.structured_attrs,
     })
@@ -307,12 +306,15 @@ impl<Inputs> DerivationT<Inputs> {
     ///
     /// This is used during derivation resolution to substitute CA output
     /// placeholders with their actual store paths.
-    pub fn apply_rewrites(&mut self, rewrites: &BTreeMap<ByteString, ByteString>) {
+    pub fn apply_rewrites(&mut self, rewrites: &BTreeMap<bytes::Bytes, bytes::Bytes>) {
         if rewrites.is_empty() {
             return;
         }
 
-        fn rewrite(s: &ByteString, rewrites: &BTreeMap<ByteString, ByteString>) -> ByteString {
+        fn rewrite(
+            s: &bytes::Bytes,
+            rewrites: &BTreeMap<bytes::Bytes, bytes::Bytes>,
+        ) -> bytes::Bytes {
             let mut buf = Vec::from(s.as_ref());
             for (from, to) in rewrites {
                 // Repeatedly scan for the pattern and replace all occurrences.
@@ -327,7 +329,7 @@ impl<Inputs> DerivationT<Inputs> {
                     }
                 }
             }
-            ByteString::from(buf)
+            bytes::Bytes::from(buf)
         }
 
         self.builder = rewrite(&self.builder, rewrites);
@@ -343,7 +345,7 @@ impl<Inputs> DerivationT<Inputs> {
         }
 
         if let Some(ref mut sa) = self.structured_attrs {
-            let json_bytes = ByteString::from(serde_json::to_string(&sa.attrs).unwrap());
+            let json_bytes = bytes::Bytes::from(serde_json::to_string(&sa.attrs).unwrap());
             let rewritten = rewrite(&json_bytes, rewrites);
             if let Ok(attrs) = serde_json::from_slice(&rewritten) {
                 sa.attrs = attrs;
@@ -355,7 +357,7 @@ impl<Inputs> DerivationT<Inputs> {
 impl Derivation {
     /// Create a new derivation with the given name, platform, and builder, which are the minimal
     /// fields for a derivation.
-    pub fn new(name: StorePathName, platform: ByteString, builder: ByteString) -> Self {
+    pub fn new(name: StorePathName, platform: bytes::Bytes, builder: bytes::Bytes) -> Self {
         Self {
             name,
             outputs: DerivationOutputs::new(),

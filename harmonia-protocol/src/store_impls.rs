@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
 // SPDX-License-Identifier: EUPL-1.2 OR MIT
 
-//! Hand-written NixSerialize/NixDeserialize implementations for harmonia-store-core types.
+//! Hand-written NixSerialize/NixDeserialize implementations for harmonia-store-derivation types.
 //!
 //! These impls have custom serialization logic that can't be expressed with derives,
 //! so they live here in the protocol layer instead of in store-core.
@@ -20,10 +20,10 @@ use crate::de::{NixDeserialize, NixRead};
 use crate::log::{Activity, ActivityResult, LogMessage, StopActivity};
 use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
-use harmonia_store_core::content_address::{ContentAddress, ContentAddressMethodAlgorithm};
-use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, StructuredAttrs};
-use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
-use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
+use harmonia_store_content_address::{ContentAddress, ContentAddressMethodAlgorithm};
+use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, StructuredAttrs};
+use harmonia_store_derivation::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
+use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_path::{StorePath, StorePathName};
 use harmonia_utils_hash::fmt::CommonHash;
 
@@ -69,7 +69,7 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
     where
         R: ?Sized + NixRead + Send,
     {
-        use harmonia_store_core::derivation::DerivationOutputs;
+        use harmonia_store_derivation::derivation::DerivationOutputs;
 
         // Try to read the drv path - if not present, return None
         if let Some(drv_path) = reader.try_read_value::<StorePath>().await? {
@@ -190,7 +190,7 @@ where
                 .to_string()
                 .parse()
                 .map_err(Error::unsupported_data)?;
-            let path = harmonia_store_core::content_address::make_store_path_from_ca(
+            let path = harmonia_store_content_address::make_store_path_from_ca(
                 writer.store_dir(),
                 name,
                 *ca,
@@ -635,11 +635,11 @@ impl NixDeserialize for Field {
 // OutputName
 nix_deserialize_remote!(
     #[nix(from_str)]
-    harmonia_store_core::derived_path::OutputName
+    harmonia_store_derivation::derived_path::OutputName
 );
 nix_serialize_remote!(
     #[nix(display)]
-    harmonia_store_core::derived_path::OutputName
+    harmonia_store_derivation::derived_path::OutputName
 );
 
 // Algorithm
@@ -677,11 +677,11 @@ nix_serialize_remote!(
 // ContentAddress
 nix_deserialize_remote!(
     #[nix(from_str)]
-    harmonia_store_core::content_address::ContentAddress
+    harmonia_store_content_address::ContentAddress
 );
 nix_serialize_remote!(
     #[nix(display)]
-    harmonia_store_core::content_address::ContentAddress
+    harmonia_store_content_address::ContentAddress
 );
 
 // Hash and its format wrappers
@@ -704,11 +704,11 @@ nix_serialize_remote!(#[nix(display)] harmonia_utils_hash::fmt::Bare<harmonia_ut
 // ContentAddressMethodAlgorithm
 nix_deserialize_remote!(
     #[nix(from_str)]
-    harmonia_store_core::content_address::ContentAddressMethodAlgorithm
+    harmonia_store_content_address::ContentAddressMethodAlgorithm
 );
 nix_serialize_remote!(
     #[nix(display)]
-    harmonia_store_core::content_address::ContentAddressMethodAlgorithm
+    harmonia_store_content_address::ContentAddressMethodAlgorithm
 );
 
 // StorePathHash
@@ -741,7 +741,7 @@ impl crate::ser::NixSerialize for harmonia_store_path::StoreDir {
 #[cfg(test)]
 mod tests {
     use crate::ser::NixWrite;
-    use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
+    use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 
     fn sample_realisation() -> Realisation {
         Realisation {

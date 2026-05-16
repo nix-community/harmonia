@@ -1,6 +1,6 @@
-use harmonia_store_core::content_address::{ContentAddress, ContentAddressMethodAlgorithm};
-use harmonia_store_core::derivation::DerivationOutput;
-use harmonia_store_core::derived_path::OutputName;
+use harmonia_store_content_address::{ContentAddress, ContentAddressMethodAlgorithm};
+use harmonia_store_derivation::derivation::DerivationOutput;
+use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName};
 use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::CommonHash as _;
@@ -201,7 +201,7 @@ impl AtermOutput for DerivationOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harmonia_store_core::derivation::derivation_output_arbitrary::arb_output_name_for_drv;
+    use harmonia_store_derivation::derivation::derivation_output_arbitrary::arb_output_name_for_drv;
     use proptest::prelude::*;
 
     fn arb_output_with_names()

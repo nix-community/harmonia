@@ -9,19 +9,19 @@ repository.workspace = true
 description          = "NarInfo formatting and construction for Nix binary cache protocol"
 
 [dependencies]
-harmonia-store-core      = { workspace = true }
-harmonia-store-path      = { workspace = true }
-harmonia-store-path-info = { workspace = true }
-harmonia-utils-hash      = { workspace = true }
-harmonia-utils-signature = { workspace = true }
-serde                    = { workspace = true }
+harmonia-store-content-address = { workspace = true }
+harmonia-store-path            = { workspace = true, public = true }
+harmonia-store-path-info       = { workspace = true, public = true }
+harmonia-utils-hash            = { workspace = true, public = true }
+harmonia-utils-signature       = { workspace = true, public = true }
+serde                          = { workspace = true }
 
 [dev-dependencies]
-harmonia-store-core      = { workspace = true }
-harmonia-store-path-info = { workspace = true }
-harmonia-utils-test      = { workspace = true }
-hex-literal              = { workspace = true }
-serde_json               = { workspace = true }
+harmonia-store-content-address = { workspace = true }
+harmonia-store-path-info       = { workspace = true }
+harmonia-utils-test            = { workspace = true }
+hex-literal                    = { workspace = true }
+serde_json                     = { workspace = true }
 
 [[test]]
 name = "json_upstream"

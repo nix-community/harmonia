@@ -4,8 +4,8 @@ use harmonia_store_build_result::{
     BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, FailureStatus,
     Microseconds, SuccessStatus,
 };
-use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::realisation::UnkeyedRealisation;
+use harmonia_store_derivation::derived_path::OutputName;
+use harmonia_store_derivation::realisation::UnkeyedRealisation;
 use harmonia_utils_test::json_upstream::libstore_test_data_path;
 use harmonia_utils_test::test_upstream_json;
 
