@@ -317,6 +317,7 @@ impl<Inputs> DerivationT<Inputs> {
         ) -> bytes::Bytes {
             let mut buf = Vec::from(s.as_ref());
             for (from, to) in rewrites {
+                assert!(!from.is_empty(), "rewrite key must not be empty");
                 // Repeatedly scan for the pattern and replace all occurrences.
                 // TODO: after https://github.com/tokio-rs/bytes/issues/824 is resolved, use the replace method on BytesMut.
                 let mut i = 0;

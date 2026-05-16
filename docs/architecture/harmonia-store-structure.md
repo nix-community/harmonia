@@ -70,7 +70,7 @@ composed.
 The `harmonia-utils-*` crates implement concrete protocols and encodings that
 Nix happens to use today (nixbase32, NAR padding, hash algorithms, Ed25519
 signatures) but contain no Nix store semantics. They could be reused outside
-Nix-relates tasks.
+Nix-related tasks.
 
 ## Dependency Graph
 
