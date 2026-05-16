@@ -47,6 +47,7 @@ futures-core = "0.3"
 futures-sink = "0.3"
 futures-util = { version = "0.3", features = [ "sink" ] }
 getrandom = "0.4"
+libc = "0.2"
 md5 = "0.8"
 memchr = "2"
 nix = { version = "0.31", features = [ "signal", "mman" ] }

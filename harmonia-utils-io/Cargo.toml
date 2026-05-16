@@ -17,12 +17,23 @@ readme               = "README.md"
 bytes            = { workspace = true }
 futures-util     = { workspace = true }
 pin-project-lite = { workspace = true }
-tokio            = { workspace = true, features = [ "io-util", "sync" ] }
+tokio            = { workspace = true, features = [ "io-util", "net", "sync" ] }
+
+# Linux opens the dir with O_PATH
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true, features = [ "fs" ] }
+
+# FreeBSD uses bindat/connectat
+[target.'cfg(target_os = "freebsd")'.dependencies]
+libc = { workspace = true }
+nix  = { workspace = true, features = [ "fs", "socket" ] }
 
 [dev-dependencies]
 hex-literal = { workspace = true }
 proptest    = { workspace = true }
 rstest      = { workspace = true }
+tempfile    = { workspace = true }
+tokio       = { workspace = true, features = [ "macros", "rt-multi-thread" ] }
 tokio-test  = { workspace = true }
 
 [lints]
