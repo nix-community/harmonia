@@ -280,6 +280,36 @@ pub mod arbitrary {
             arb_derivation_output_impure(),
         ]
     }
+
+    /// Generate an [`OutputName`] that, combined with the given
+    /// `drv_name`, forms a valid [`StorePathName`] when formatted as
+    /// an [`OutputPathName`].
+    pub fn arb_output_name_for_drv(
+        drv_name: &StorePathName,
+    ) -> impl Strategy<Value = OutputName> + use<> {
+        use crate::store_path::proptest::arb_output_name;
+
+        // "out" output uses just drv_name (no suffix), so always fits.
+        // Non-default: "{drv_name}-{output_name}" must fit in 211 chars.
+        let budget = 211_usize.saturating_sub(drv_name.to_string().len() + 1);
+        // Clamp to the output name generator's max (14)
+        let max_output_len = budget.min(14);
+
+        if max_output_len == 0 {
+            // No room for a non-default output name, only "out" works
+            Just(OutputName::default()).boxed()
+        } else {
+            prop_oneof![
+                1 => Just(OutputName::default()),
+                3 => arb_output_name()
+                    .prop_map(move |mut s| {
+                        s.truncate(max_output_len);
+                        s.parse::<OutputName>().expect("truncated output name should be valid")
+                    }),
+            ]
+            .boxed()
+        }
+    }
 }
 
 #[cfg(test)]

@@ -47,13 +47,12 @@ fn roundtrip_non_utf8_bytes() {
     assert_eq!(printed, input);
 }
 
-/// CA fixed is special: the parser accepts any path but the printer recomputes
-/// the correct path from the content address, so a dummy path won't roundtrip
-/// byte-for-byte. Instead we verify the structure survives a round trip.
+/// CA fixed: the parser verifies the path matches what the content
+/// address computes, and the printer recomputes it from the hash.
 #[test]
 fn roundtrip_ca_fixed() {
     let store_dir = StoreDir::default();
-    let input = r#"Derive([("out","/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-linux-6.16.tar.xz","sha256","1a4be2fe6b5246aa4ac8987a8a4af34c42a8dd7d08b46ab48516bcc1befbcd83")],[],[],"builtin","builtin:fetchurl",[],[("name","linux-6.16.tar.xz")])"#;
+    let input = r#"Derive([("out","/nix/store/6fr8dalasgpy0bpykhjq2b9q65lb4j8y-linux-6.16.tar.xz","sha256","1a4be2fe6b5246aa4ac8987a8a4af34c42a8dd7d08b46ab48516bcc1befbcd83")],[],[],"builtin","builtin:fetchurl",[],[("name","linux-6.16.tar.xz")])"#;
 
     let drv = parse_derivation_aterm(
         &store_dir,

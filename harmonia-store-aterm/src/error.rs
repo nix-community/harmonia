@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use harmonia_store_core::store_path::{
-    ParseContentAddressError, ParseStorePathError, StorePathError, StorePathNameError,
+    ParseContentAddressError, ParseStorePathError, StorePathNameError,
 };
 
 #[derive(Debug, Error)]
@@ -30,17 +30,4 @@ pub enum ParseError {
     Hash(String),
     #[error("invalid UTF-8 in string at position {pos}")]
     InvalidUtf8 { pos: usize },
-}
-
-impl ParseError {
-    /// Wrap a [`StorePathError`] into a [`ParseError::StorePath`].
-    pub(crate) fn store_path_error(pos: usize, path: &str, error: StorePathError) -> Self {
-        Self::StorePath {
-            pos,
-            source: ParseStorePathError {
-                path: path.to_owned(),
-                error,
-            },
-        }
-    }
 }

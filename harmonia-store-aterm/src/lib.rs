@@ -1,6 +1,7 @@
 mod error;
 mod parser;
 mod printer;
+pub mod raw_output;
 
 pub use error::ParseError;
 pub use printer::print_derivation_aterm;
