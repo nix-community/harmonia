@@ -2,8 +2,10 @@ use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::content_address::{ContentAddress, ContentAddressMethod, ContentAddressMethodAlgorithm};
 use crate::derived_path::OutputName;
+use harmonia_store_content_address::{
+    ContentAddress, ContentAddressMethod, ContentAddressMethodAlgorithm,
+};
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathNameError};
 use harmonia_utils_hash::Hash;
 
@@ -160,9 +162,9 @@ impl DerivationOutput {
                 }
                 .to_string()
                 .parse()?;
-                Ok(Some(crate::content_address::make_store_path_from_ca(
-                    store_dir, name, *ca,
-                )))
+                Ok(Some(
+                    harmonia_store_content_address::make_store_path_from_ca(store_dir, name, *ca),
+                ))
             }
             _ => Ok(None),
         }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
-use harmonia_store_core::derived_path::{DerivedPath, OutputSpec, SingleDerivedPath};
+use harmonia_store_derivation::derived_path::{DerivedPath, OutputSpec, SingleDerivedPath};
 
 test_upstream_json!(
     test_single_derived_path_opaque,

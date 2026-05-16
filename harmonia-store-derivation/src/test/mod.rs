@@ -1,5 +1,4 @@
 pub use harmonia_utils_test as arbitrary;
-#[cfg(feature = "derivation")]
 pub mod derived_path;
 
 #[macro_export]

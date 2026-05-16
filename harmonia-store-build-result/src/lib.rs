@@ -14,8 +14,8 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::realisation::UnkeyedRealisation;
+use harmonia_store_derivation::derived_path::OutputName;
+use harmonia_store_derivation::realisation::UnkeyedRealisation;
 
 /// A duration measured in microseconds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

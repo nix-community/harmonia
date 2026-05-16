@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use harmonia_store_core::content_address::ParseContentAddressError;
+use harmonia_store_content_address::ParseContentAddressError;
 use harmonia_store_path::{ParseStorePathError, StorePathNameError};
 
 #[derive(Debug, Error)]

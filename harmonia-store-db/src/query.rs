@@ -8,7 +8,7 @@ use std::num::NonZero;
 
 use rusqlite::params;
 
-use harmonia_store_core::content_address::ContentAddress;
+use harmonia_store_content_address::ContentAddress;
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 
 use crate::connection::StoreDb;
@@ -394,9 +394,9 @@ impl StoreDb {
         &self,
         store_dir: &StoreDir,
         drv_path: &StorePath,
-        output_name: &harmonia_store_core::derived_path::OutputName,
+        output_name: &harmonia_store_derivation::derived_path::OutputName,
     ) -> Result<Option<Realisation>> {
-        use harmonia_store_core::realisation;
+        use harmonia_store_derivation::realisation;
 
         let mut stmt = self.conn.prepare_cached(
             r#"

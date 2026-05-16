@@ -38,7 +38,7 @@ pub struct DerivationOutput {
     /// ID of the derivation path
     pub drv_id: ValidPathId,
     /// Symbolic output name (usually "out")
-    pub output_id: harmonia_store_core::derived_path::OutputName,
+    pub output_id: harmonia_store_derivation::derived_path::OutputName,
     /// Store path of the output
     pub path: harmonia_store_path::StorePath,
 }
@@ -49,5 +49,5 @@ pub struct Realisation {
     /// Database row ID
     pub id: RealisationId,
     /// The realisation data.
-    pub realisation: harmonia_store_core::realisation::Realisation,
+    pub realisation: harmonia_store_derivation::realisation::Realisation,
 }

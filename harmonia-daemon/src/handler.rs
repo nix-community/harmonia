@@ -18,8 +18,8 @@ use harmonia_protocol::daemon::{
     ResultLog, TrustLevel,
 };
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
-use harmonia_store_core::realisation::{DrvOutput, UnkeyedRealisation};
 use harmonia_store_db::StoreDb;
+use harmonia_store_derivation::realisation::{DrvOutput, UnkeyedRealisation};
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 
 use crate::error::DaemonError;

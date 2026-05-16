@@ -28,9 +28,9 @@ composed.
                          ↓
 ┌──────────────────────────────────────────────────────┐
 │  Store (pure)                                        │
-│  harmonia-store-path · harmonia-store-core           │
-│  harmonia-store-aterm · harmonia-store-path-info     │
-│  store paths, content addressing, derivations        │
+│  harmonia-store-path · harmonia-store-content-address│
+│  harmonia-store-derivation · harmonia-store-aterm    │
+│  harmonia-store-path-info · harmonia-store-nar-info  │
 │  no I/O, no async                                    │
 └──────────────────────────────────────────────────────┘
                          ↓
@@ -46,7 +46,8 @@ composed.
 | Crate | Purpose |
 |-------|---------|
 | [harmonia-store-path](../../harmonia-store-path/README.md) | Store path types, parsing, validation |
-| [harmonia-store-core](../../harmonia-store-core/README.md) | Content addressing, derivations (pure) |
+| [harmonia-store-content-address](../../harmonia-store-content-address/README.md) | Content addressing and store path computation |
+| [harmonia-store-derivation](../../harmonia-store-derivation/README.md) | Derivations, derived paths, realisations (pure) |
 | [harmonia-store-aterm](../../harmonia-store-aterm/) | ATerm derivation parser |
 | [harmonia-store-path-info](../../harmonia-store-path-info/) | ValidPathInfo types (pure) |
 | [harmonia-store-db](../../harmonia-store-db/README.md) | SQLite store metadata |
@@ -66,10 +67,10 @@ composed.
 | [harmonia-utils-signature](../../harmonia-utils-signature/) | Ed25519 NAR signatures (no store dep) |
 | [harmonia-utils-test](../../harmonia-utils-test/README.md) | Proptest strategies (dev-only) |
 
-The `harmonia-utils-*` crates are the inverse of `harmonia-store-core`: they
-implement concrete protocols and encodings that Nix happens to use today
-(nixbase32, NAR padding, hash algorithms) but contain no store semantics. They
-could be reused outside Harmonia.
+The `harmonia-utils-*` crates implement concrete protocols and encodings that
+Nix happens to use today (nixbase32, NAR padding, hash algorithms, Ed25519
+signatures) but contain no Nix store semantics. They could be reused outside
+Nix-relates tasks.
 
 ## Dependency Graph
 
@@ -90,7 +91,8 @@ graph BT
     subgraph "Store (pure)"
         store-aterm
         store-build-result
-        store-core
+        store-content-address
+        store-derivation
         store-nar-info
         store-path
         store-path-info
@@ -107,20 +109,23 @@ graph BT
     utils-hash --> utils-base-encoding
     utils-signature --> utils-base-encoding
     store-path --> utils-hash
-    store-core --> store-path
-    store-aterm --> store-core
-    store-build-result --> store-core
-    store-path-info --> store-core
+    store-content-address --> store-path
+    store-derivation --> store-content-address
+    store-derivation --> utils-signature
+    store-path-info --> store-content-address
     store-path-info --> utils-signature
-    protocol --> file-nar
-    protocol --> protocol-derive
-    protocol --> store-build-result
-    protocol --> store-path-info
+    store-aterm --> store-derivation
+    store-build-result --> store-derivation
+    store-db --> store-derivation
     store-db --> store-path-info
     store-nar-info --> store-path-info
     cache --> file-nar
     cache --> store-db
     cache --> store-nar-info
+    protocol --> file-nar
+    protocol --> protocol-derive
+    protocol --> store-build-result
+    protocol --> store-path-info
     daemon --> protocol
     daemon --> store-db
     store-remote --> protocol
@@ -138,13 +143,14 @@ intra-workspace dependencies.
 - Encoding/hash utils: pure, `const` where possible, tested against upstream
   vectors.
 
-**Store (pure)** (`harmonia-store-path`, `harmonia-store-core`, `harmonia-store-aterm`, `harmonia-store-path-info`, `harmonia-store-build-result`, `harmonia-store-nar-info`)
+**Store (pure)** (`harmonia-store-path`, `harmonia-store-content-address`, `harmonia-store-derivation`, `harmonia-store-aterm`, `harmonia-store-path-info`, `harmonia-store-build-result`, `harmonia-store-nar-info`)
 - No I/O, no async, no `tokio`.
 - Pure, deterministic functions returning `Result`; no panics.
 - Stream-friendly (no unbounded buffers).
-- `harmonia-store-path`: fundamental store path types (`StorePath`, `StoreDir`, etc.) with no store-semantic dependencies.
-- `harmonia-store-core`: content addressing, derivations, realisations — depends on `harmonia-store-path`.
-- `harmonia-store-aterm`, `harmonia-store-path-info`, `harmonia-store-build-result`, `harmonia-store-nar-info`: separate crates for formats/types that don't belong in core (to avoid "infecting" it with their issues).
+- `harmonia-store-path`: fundamental store path types (`StorePath`, `StoreDir`, etc.) — leaf crate with no store-semantic dependencies.
+- `harmonia-store-content-address`: `ContentAddress` types and `make_store_path_from_ca` — depends on `harmonia-store-path`.
+- `harmonia-store-derivation`: derivations, derived paths, placeholders, realisations — depends on `harmonia-store-content-address`.
+- `harmonia-store-aterm`, `harmonia-store-path-info`, `harmonia-store-build-result`, `harmonia-store-nar-info`: format/metadata crates kept separate to avoid coupling.
 
 **File** (`harmonia-file-core`, `harmonia-file-nar`)
 - `harmonia-file-core`: pure file tree types and serde matching nix's JSON format.
@@ -152,7 +158,7 @@ intra-workspace dependencies.
 
 **Database** (`harmonia-store-db`)
 - Schema matches Nix's `db.sqlite` exactly.
-- Uses `harmonia-store-core` types for realisations, store paths, etc.
+- Uses store types for realisations, store paths, etc.
 - System database opened read-only/immutable.
 - Synchronous API; callers wrap in `spawn_blocking`.
 - Tests use `:memory:`.
@@ -171,9 +177,9 @@ intra-workspace dependencies.
 
 | hnix-store | Harmonia |
 |------------|----------|
-| hnix-store-core | harmonia-store-core |
+| hnix-store-core | harmonia-store-path + harmonia-store-content-address + harmonia-store-derivation |
 | hnix-store-nar | harmonia-file-nar |
-| hnix-store-json | harmonia-protocol (JSON lives in store-core due to orphan rules) |
+| hnix-store-json | harmonia-protocol (JSON serialization for protocol types) |
 | hnix-store-remote | harmonia-store-remote / harmonia-client |
 | hnix-store-db | harmonia-store-db |
 | hnix-store-readonly | (not yet split out) |

@@ -102,7 +102,7 @@ impl Store {
     pub fn query_realisation(
         &self,
         drv_path: &StorePath,
-        output_name: &harmonia_store_core::derived_path::OutputName,
+        output_name: &harmonia_store_derivation::derived_path::OutputName,
     ) -> Result<Option<Realisation>> {
         self.with_db(|db| {
             if !db.has_ca_schema().map_err(|e| self.db_err(e))? {

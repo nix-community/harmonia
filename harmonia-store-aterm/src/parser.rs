@@ -3,12 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use memchr::{memchr, memchr2};
 
-use harmonia_store_core::ByteString;
-use harmonia_store_core::derivation::{
+use bytes::Bytes;
+use harmonia_store_derivation::derivation::{
     Derivation, DerivationOutput, DerivationOutputs, StructuredAttrs,
 };
-use harmonia_store_core::derivation::{DerivationInputs, OutputInputs};
-use harmonia_store_core::derived_path::OutputName;
+use harmonia_store_derivation::derivation::{DerivationInputs, OutputInputs};
+use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 
 use crate::ParseError;
@@ -29,10 +29,10 @@ pub(crate) struct Parser<'a> {
     store_dir: &'a StoreDir,
 }
 
-fn cow_to_bytes(cow: Cow<'_, [u8]>) -> ByteString {
+fn cow_to_bytes(cow: Cow<'_, [u8]>) -> Bytes {
     match cow {
-        Cow::Owned(v) => ByteString::from(v),
-        Cow::Borrowed(s) => ByteString::copy_from_slice(s),
+        Cow::Owned(v) => Bytes::from(v),
+        Cow::Borrowed(s) => Bytes::copy_from_slice(s),
     }
 }
 
@@ -66,7 +66,7 @@ impl<'a> Parser<'a> {
         let builder = cow_to_bytes(self.parse_string()?);
         self.expect_char(',')?;
 
-        let args: Vec<ByteString> = self
+        let args: Vec<Bytes> = self
             .parse_string_list()?
             .into_iter()
             .map(cow_to_bytes)
@@ -87,14 +87,14 @@ impl<'a> Parser<'a> {
         // Extract structured attrs from __json env var (matches cppnix behavior:
         // the ATerm format stores structured attrs as a JSON string in __json,
         // but the Derivation type represents them as a separate field).
-        let structured_attrs =
-            env.remove(&ByteString::from_static(b"__json"))
-                .and_then(|json_bytes| {
-                    let json_str = std::str::from_utf8(&json_bytes).ok()?;
-                    let attrs: serde_json::Map<String, serde_json::Value> =
-                        serde_json::from_str(json_str).ok()?;
-                    Some(StructuredAttrs { attrs })
-                });
+        let structured_attrs = env
+            .remove(&Bytes::from_static(b"__json"))
+            .and_then(|json_bytes| {
+                let json_str = std::str::from_utf8(&json_bytes).ok()?;
+                let attrs: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_str(json_str).ok()?;
+                Some(StructuredAttrs { attrs })
+            });
 
         Ok(Derivation {
             name,
@@ -281,7 +281,7 @@ impl<'a> Parser<'a> {
         Ok(srcs)
     }
 
-    fn parse_env(&mut self) -> Result<BTreeMap<ByteString, ByteString>, ParseError> {
+    fn parse_env(&mut self) -> Result<BTreeMap<Bytes, Bytes>, ParseError> {
         self.expect_char('[')?;
         let mut env = BTreeMap::new();
 

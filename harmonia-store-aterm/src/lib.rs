@@ -7,7 +7,7 @@ pub mod raw_output;
 pub use error::ParseError;
 pub use printer::print_derivation_aterm;
 
-use harmonia_store_core::derivation::Derivation;
+use harmonia_store_derivation::derivation::Derivation;
 use harmonia_store_path::{StoreDir, StorePathName};
 
 /// Parse a Nix derivation in [ATerm format](https://nix.dev/manual/nix/latest/protocols/derivation-aterm.html)

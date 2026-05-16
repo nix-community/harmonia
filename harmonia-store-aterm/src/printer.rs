@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use harmonia_store_core::ByteString;
-use harmonia_store_core::derivation::{
+use bytes::Bytes;
+use harmonia_store_derivation::derivation::{
     DerivationInputs, DerivationT, OutputInputs, StructuredAttrs,
 };
-use harmonia_store_core::derived_path::OutputName;
+use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 
 use crate::raw_output::AtermOutput;
@@ -174,16 +174,16 @@ fn write_input_srcs(store_dir: &StoreDir, srcs: &StorePathSet, out: &mut Vec<u8>
 }
 
 fn write_env(
-    env: &BTreeMap<ByteString, ByteString>,
+    env: &BTreeMap<Bytes, Bytes>,
     structured_attrs: &Option<StructuredAttrs>,
     out: &mut Vec<u8>,
 ) {
     // When structured attrs are present, the ATerm format stores them as the
     // `__json` env var. Merge it into the sorted env output.
-    let json_key = ByteString::from("__json");
+    let json_key = Bytes::from("__json");
     let json_value = structured_attrs
         .as_ref()
-        .map(|sa| ByteString::from(serde_json::to_string(&sa.attrs).unwrap()));
+        .map(|sa| Bytes::from(serde_json::to_string(&sa.attrs).unwrap()));
 
     out.push(b'[');
     let mut first = true;

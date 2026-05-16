@@ -142,7 +142,7 @@ mod unittests {
     use crate::types::DaemonResult;
     use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
     use harmonia_file_nar::archive::{test_data, write_nar};
-    use harmonia_store_core::btree_set;
+    use harmonia_store_derivation::btree_set;
     use harmonia_utils_io::DEFAULT_BUF_SIZE;
 
     #[tokio::test]

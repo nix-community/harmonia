@@ -20,7 +20,7 @@ This crate provides the server-side implementation of the Nix daemon protocol, h
 ## Key Characteristics
 
 Ties everything together:
-- Uses harmonia-store-core for semantics
+- Uses harmonia-store-derivation for semantics
 - Uses harmonia-nar for archive operations
 - Uses harmonia-protocol for communication
 - Adds IO effects (filesystem, sockets)

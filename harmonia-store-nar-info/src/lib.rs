@@ -6,7 +6,7 @@ use std::num::NonZero;
 
 use serde::{Deserialize, Serialize, Serializer};
 
-use harmonia_store_core::content_address::ContentAddress;
+use harmonia_store_content_address::ContentAddress;
 use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_store_path_info::{
     NarHash, StorePathKeyed, UnkeyedValidPathInfo, ValidPathInfo, fingerprint_path,

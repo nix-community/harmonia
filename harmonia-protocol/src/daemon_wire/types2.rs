@@ -18,10 +18,10 @@ use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
 use crate::types::{ClientOptions, DaemonPath, DaemonString};
 use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
-use harmonia_store_core::content_address::{ContentAddress, ContentAddressMethodAlgorithm};
-use harmonia_store_core::derivation::BasicDerivation;
-use harmonia_store_core::derived_path::DerivedPath;
-use harmonia_store_core::realisation::{DrvOutput, Realisation};
+use harmonia_store_content_address::{ContentAddress, ContentAddressMethodAlgorithm};
+use harmonia_store_derivation::derivation::BasicDerivation;
+use harmonia_store_derivation::derived_path::DerivedPath;
+use harmonia_store_derivation::realisation::{DrvOutput, Realisation};
 use harmonia_store_path::{StorePath, StorePathHash, StorePathSet};
 use harmonia_utils_signature::Signature;
 

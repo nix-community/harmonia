@@ -13,14 +13,15 @@ description          = "SQLite database interface for Nix store metadata"
 readme               = "README.md"
 
 [dependencies]
-harmonia-store-core      = { workspace = true }
-harmonia-store-path      = { workspace = true }
-harmonia-store-path-info = { workspace = true }
-harmonia-utils-hash      = { workspace = true }
-harmonia-utils-signature = { workspace = true }
-rusqlite                 = { workspace = true }
-thiserror                = { workspace = true }
-tracing                  = { workspace = true }
+harmonia-store-content-address = { workspace = true }
+harmonia-store-derivation      = { workspace = true }
+harmonia-store-path            = { workspace = true }
+harmonia-store-path-info       = { workspace = true }
+harmonia-utils-hash            = { workspace = true }
+harmonia-utils-signature       = { workspace = true }
+rusqlite                       = { workspace = true }
+thiserror                      = { workspace = true }
+tracing                        = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

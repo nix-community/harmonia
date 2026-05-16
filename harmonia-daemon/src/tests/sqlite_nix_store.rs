@@ -199,12 +199,12 @@ async fn test_handler_query_realisation() {
         db.create_schema().unwrap();
         db.register_realisation(
             &store_dir,
-            &harmonia_store_core::realisation::Realisation {
-                key: harmonia_store_core::realisation::DrvOutput {
+            &harmonia_store_derivation::realisation::Realisation {
+                key: harmonia_store_derivation::realisation::DrvOutput {
                     drv_path: drv_base.parse().unwrap(),
                     output_name: "out".parse().unwrap(),
                 },
-                value: harmonia_store_core::realisation::UnkeyedRealisation {
+                value: harmonia_store_derivation::realisation::UnkeyedRealisation {
                     out_path: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-out".parse().unwrap(),
                     signatures: [sig.parse().unwrap()].into_iter().collect(),
                 },
@@ -216,7 +216,7 @@ async fn test_handler_query_realisation() {
     let handler = LocalStoreHandler::new(store_dir, db_path).await.unwrap();
     let mut store = handler.handshake().await.unwrap();
 
-    let id = harmonia_store_core::realisation::DrvOutput {
+    let id = harmonia_store_derivation::realisation::DrvOutput {
         drv_path: StorePath::from_base_path(drv_base).unwrap(),
         output_name: "out".parse().unwrap(),
     };
@@ -231,7 +231,7 @@ async fn test_handler_query_realisation() {
         "cache.nixos.org-1"
     );
 
-    let miss = harmonia_store_core::realisation::DrvOutput {
+    let miss = harmonia_store_derivation::realisation::DrvOutput {
         drv_path: StorePath::from_base_path(drv_base).unwrap(),
         output_name: "dev".parse().unwrap(),
     };

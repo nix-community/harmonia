@@ -1,4 +1,15 @@
-pub(crate) mod to_store_path;
+// SPDX-FileCopyrightText: 2024 griff
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-License-Identifier: EUPL-1.2 OR MIT
+
+//! Content addressing for the Nix store.
+//!
+//! This crate provides the `ContentAddress` type and the logic for computing
+//! content-addressed store paths.
+//!
+//! Part of the Store (pure) layer — see `docs/architecture/harmonia-store-structure.md`.
+
+mod to_store_path;
 mod types;
 
 pub use types::{

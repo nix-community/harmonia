@@ -133,7 +133,7 @@ impl StoreDb {
         &self,
         store_dir: &StoreDir,
         drv_path: &StorePath,
-        output_id: &harmonia_store_core::derived_path::OutputName,
+        output_id: &harmonia_store_derivation::derived_path::OutputName,
         output_path: &StorePath,
     ) -> Result<()> {
         let drv_full = store_dir.display(drv_path).to_string();
@@ -184,7 +184,7 @@ impl StoreDb {
     pub fn register_realisation(
         &self,
         store_dir: &StoreDir,
-        realisation: &harmonia_store_core::realisation::Realisation,
+        realisation: &harmonia_store_derivation::realisation::Realisation,
     ) -> Result<i64> {
         let drv_path = realisation.key.drv_path.to_string();
         let output_name: &str = realisation.key.output_name.as_ref();

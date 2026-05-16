@@ -13,8 +13,8 @@ use harmonia_store_build_result::{
 
 use crate::de::{Error as _, NixDeserialize as NixDeserializeTrait, NixRead};
 use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
-use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::realisation::UnkeyedRealisation;
+use harmonia_store_derivation::derived_path::OutputName;
+use harmonia_store_derivation::realisation::UnkeyedRealisation;
 
 // Wire protocol serialization - maintains compatibility with the flat status enum format
 

@@ -2,7 +2,7 @@
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
-use harmonia_store_core::derived_path::OutputSpec;
+use harmonia_store_derivation::derived_path::OutputSpec;
 
 test_upstream_json!(
     test_output_spec_all,

@@ -146,7 +146,8 @@ def generate_mermaid(
     STORE_PURE = {
         "store-aterm",
         "store-build-result",
-        "store-core",
+        "store-content-address",
+        "store-derivation",
         "store-nar-info",
         "store-path",
         "store-path-info",

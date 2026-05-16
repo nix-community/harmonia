@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use crate::ByteString;
 use crate::derived_path::{OutputName, SingleDerivedPath};
 use crate::placeholder::Placeholder;
 use harmonia_store_path::{StoreDir, StorePath, StorePathSet};
@@ -68,7 +67,7 @@ impl Derivation {
         query: &mut impl FnMut(&[(&SingleDerivedPath, &OutputName)]) -> Vec<Option<StorePath>>,
     ) -> Option<BasicDerivation> {
         let mut input_srcs = StorePathSet::new();
-        let mut input_rewrites = BTreeMap::<ByteString, ByteString>::new();
+        let mut input_rewrites = BTreeMap::<bytes::Bytes, bytes::Bytes>::new();
 
         let mut built_inputs: Vec<(&SingleDerivedPath, &OutputName)> = Vec::new();
 
@@ -93,8 +92,8 @@ impl Derivation {
             let ph_path = placeholder.render();
             let actual = actual_path.to_absolute_path(store_dir);
             input_rewrites.insert(
-                ByteString::copy_from_slice(ph_path.as_os_str().as_encoded_bytes()),
-                ByteString::copy_from_slice(actual.as_os_str().as_encoded_bytes()),
+                bytes::Bytes::copy_from_slice(ph_path.as_os_str().as_encoded_bytes()),
+                bytes::Bytes::copy_from_slice(actual.as_os_str().as_encoded_bytes()),
             );
 
             input_srcs.insert(actual_path);

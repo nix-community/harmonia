@@ -40,7 +40,7 @@ pub fn supported_features() -> FeatureSet {
 )]
 #[nix(from = "u16", into = "u16")]
 pub struct ProtocolVersion(u8, u8);
-harmonia_store_core::impl_serde_via_string!(ProtocolVersion);
+harmonia_store_derivation::impl_serde_via_string!(ProtocolVersion);
 impl ProtocolVersion {
     pub const fn max() -> Self {
         PROTOCOL_VERSION
@@ -144,7 +144,7 @@ pub enum ProtocolRange {
     From(ProtocolVersion),
     Between(ProtocolVersion, ProtocolVersion),
 }
-harmonia_store_core::impl_serde_via_string!(ProtocolRange);
+harmonia_store_derivation::impl_serde_via_string!(ProtocolRange);
 
 impl ProtocolRange {
     pub const fn from_minor(from: u8, to_inclusive: u8) -> ProtocolRange {

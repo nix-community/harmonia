@@ -13,12 +13,12 @@ description          = "BuildResult types and JSON serialization for Nix build r
 readme               = "README.md"
 
 [dependencies]
-harmonia-store-core = { workspace = true }
-num_enum            = { workspace = true }
-proptest            = { workspace = true, optional = true }
-proptest-derive     = { workspace = true, optional = true }
-serde               = { workspace = true }
-serde_json          = { workspace = true }
+harmonia-store-derivation = { workspace = true }
+num_enum                  = { workspace = true }
+proptest                  = { workspace = true, optional = true }
+proptest-derive           = { workspace = true, optional = true }
+serde                     = { workspace = true }
+serde_json                = { workspace = true }
 
 [dev-dependencies]
 harmonia-store-build-result = { path = ".", features = [ "test" ] }
@@ -26,7 +26,7 @@ harmonia-utils-test         = { workspace = true }
 serde_json                  = { workspace = true }
 
 [features]
-test = [ "proptest", "proptest-derive", "harmonia-store-core/test" ]
+test = [ "proptest", "proptest-derive", "harmonia-store-derivation/test" ]
 
 [[test]]
 name = "json_upstream"
