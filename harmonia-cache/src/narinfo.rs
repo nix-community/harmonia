@@ -41,8 +41,7 @@ pub(crate) async fn get(
         },
         &hash,
         &settings.secret_keys,
-    )
-    .map_err(CacheError::from)?;
+    );
 
     if param.json.is_some() {
         // JSON format: return the full nar-info (upstream JSON v3 format).

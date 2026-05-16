@@ -6,9 +6,11 @@ use std::num::NonZero;
 
 use serde::{Deserialize, Serialize, Serializer};
 
-use harmonia_store_core::signature::{FingerprintError, SecretKey, Signature, fingerprint_path};
+use harmonia_store_core::signature::{SecretKey, Signature};
 use harmonia_store_core::store_path::{ContentAddress, StoreDir, StorePath};
-use harmonia_store_path_info::{NarHash, StorePathKeyed, UnkeyedValidPathInfo, ValidPathInfo};
+use harmonia_store_path_info::{
+    NarHash, StorePathKeyed, UnkeyedValidPathInfo, ValidPathInfo, fingerprint_path,
+};
 use harmonia_utils_hash::Hash;
 
 /// A keyed NarInfo: store path plus narinfo metadata.
@@ -37,11 +39,10 @@ pub fn build_narinfo(
     mut info: ValidPathInfo,
     hash: &str,
     sign_keys: &[SecretKey],
-) -> Result<NarInfo, FingerprintError> {
+) -> NarInfo {
     use harmonia_utils_hash::fmt::CommonHash as _;
 
     let nar_hash_obj: Hash = info.info.nar_hash.into();
-    let nar_hash = format!("{}", nar_hash_obj.as_base32()).into_bytes();
     let nar_hash_bare = format!("{}", nar_hash_obj.as_base32().as_bare());
 
     let url = format!("nar/{nar_hash_bare}.nar?hash={hash}");
@@ -50,15 +51,15 @@ pub fn build_narinfo(
     let fingerprint = fingerprint_path(
         store_dir,
         &info.path,
-        &nar_hash,
+        &info.info.nar_hash,
         info.info.nar_size,
         &info.info.references,
-    )?;
+    );
     for sk in sign_keys {
         info.info.signatures.insert(sk.sign(&fingerprint));
     }
 
-    Ok(NarInfo {
+    NarInfo {
         path: info.path,
         info: UnkeyedNarInfo {
             info: info.info,
@@ -67,7 +68,7 @@ pub fn build_narinfo(
             download_hash: None,
             download_size: None,
         },
-    })
+    }
 }
 
 /// Helper macro for adding lines to narinfo

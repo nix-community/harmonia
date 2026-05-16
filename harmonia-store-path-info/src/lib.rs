@@ -23,6 +23,74 @@ use harmonia_store_core::signature::Signature;
 #[cfg(any(test, feature = "test"))]
 use harmonia_store_core::signature::proptests::arb_signatures;
 use harmonia_store_core::store_path::{ContentAddress, StoreDir, StorePath};
+use harmonia_utils_hash::fmt::CommonHash as _;
+
+/// Generate a fingerprint for signing a store path.
+///
+/// The fingerprint format is:
+/// `1;<store-path>;<nar-hash>;<nar-size>;<comma-separated-references>`
+///
+/// # Arguments
+/// * `store_dir` - The Nix store directory
+/// * `store_path` - The store path to fingerprint
+/// * `nar_hash` - The NAR hash (always SHA256)
+/// * `nar_size` - The size of the NAR in bytes
+/// * `references` - Sorted references to other store paths
+pub fn fingerprint_path(
+    store_dir: &StoreDir,
+    store_path: &StorePath,
+    nar_hash: &NarHash,
+    nar_size: u64,
+    references: &BTreeSet<StorePath>,
+) -> Vec<u8> {
+    let nar_hash_str = format!("{}", nar_hash.as_base32());
+    let nar_hash_bytes = nar_hash_str.as_bytes();
+    let nar_size_str = nar_size.to_string();
+    let nar_size_bytes = nar_size_str.as_bytes();
+
+    // Construct full store path string using StoreDir's display functionality
+    let store_path_str = format!("{}", store_dir.display(store_path));
+    let store_path_bytes = store_path_str.as_bytes();
+
+    // Calculate capacity
+    let fixed_len = 2 + // "1;"
+        store_path_bytes.len() + 1 + // store path + ";"
+        nar_hash_bytes.len() + 1 + // nar hash + ";"
+        nar_size_bytes.len() + 1; // nar size + ";"
+
+    let refs_len = if references.is_empty() {
+        0
+    } else {
+        // Each reference formatted with store_dir
+        references
+            .iter()
+            .map(|r| format!("{}", store_dir.display(r)).len())
+            .sum::<usize>()
+            + references.len().saturating_sub(1) // commas between refs
+    };
+
+    let mut result = Vec::with_capacity(fixed_len + refs_len);
+
+    // Add fixed parts
+    result.extend_from_slice(b"1;");
+    result.extend_from_slice(store_path_bytes);
+    result.push(b';');
+    result.extend_from_slice(nar_hash_bytes);
+    result.push(b';');
+    result.extend_from_slice(nar_size_bytes);
+    result.push(b';');
+
+    // Add references (comma-separated)
+    for (i, reference) in references.iter().enumerate() {
+        if i > 0 {
+            result.push(b',');
+        }
+        let ref_str = format!("{}", store_dir.display(reference));
+        result.extend_from_slice(ref_str.as_bytes());
+    }
+
+    result
+}
 
 /// Serializes in "pure" format, omitting impure fields when they have default values.
 /// Used for content-addressed paths.
@@ -220,5 +288,29 @@ impl<'de> Deserialize<'de> for Pure<UnkeyedValidPathInfo> {
         D: serde::Deserializer<'de>,
     {
         deserialize_info(deserializer).map(Pure)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harmonia_utils_hash::fmt::Base32;
+
+    #[test]
+    fn test_fingerprint_path() {
+        let store_dir = StoreDir::new("/nix/store").unwrap();
+        let store_path =
+            StorePath::from_bytes(b"syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin").unwrap();
+        let nar_hash: NarHash = "sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0"
+            .parse::<Base32<NarHash>>()
+            .unwrap()
+            .into_hash();
+        let mut references = BTreeSet::new();
+        references.insert(
+            StorePath::from_bytes(b"0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0").unwrap(),
+        );
+        let fingerprint = fingerprint_path(&store_dir, &store_path, &nar_hash, 196040, &references);
+        let expected = b"1;/nix/store/syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin;sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0;196040;/nix/store/0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0";
+        assert_eq!(fingerprint, expected);
     }
 }

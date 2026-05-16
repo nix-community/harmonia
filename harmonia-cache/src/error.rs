@@ -21,9 +21,6 @@ pub enum CacheError {
     #[error("Signing error: {0}")]
     Signing(#[from] harmonia_store_core::signature::ParseKeyError),
 
-    #[error("Fingerprint error: {0}")]
-    Fingerprint(#[from] harmonia_store_core::signature::FingerprintError),
-
     #[error("File serving error: {0}")]
     Serve(#[from] ServeError),
 }
