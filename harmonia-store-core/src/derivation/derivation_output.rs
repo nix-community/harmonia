@@ -168,9 +168,9 @@ impl DerivationOutput {
     }
 }
 
-pub type DerivationOutputs = BTreeMap<OutputName, DerivationOutput>;
+pub type DerivationOutputs<Output = DerivationOutput> = BTreeMap<OutputName, Output>;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 pub mod arbitrary {
     use super::*;
     use crate::test::arbitrary::helpers::Union;
