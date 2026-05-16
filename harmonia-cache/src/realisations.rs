@@ -6,7 +6,7 @@
 
 use actix_web::{HttpResponse, web};
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_path::StorePath;
 
 use crate::config::Config;
 use crate::{ServerResult, cache_control_max_age_1y, cache_control_no_store};

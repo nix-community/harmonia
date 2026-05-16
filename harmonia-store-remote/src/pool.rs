@@ -22,7 +22,7 @@
 use crate::metrics::PoolMetrics;
 use crate::{DaemonClient, DaemonClientBuilder};
 use harmonia_protocol::types::{DaemonError, DaemonErrorKind, DaemonResult, HandshakeDaemonStore};
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_path::StoreDir;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

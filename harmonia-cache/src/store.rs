@@ -1,6 +1,6 @@
 use crate::error::{CacheError, Result, StoreError};
-use harmonia_store_core::store_path::{StoreDir, StorePath};
 use harmonia_store_db::{Realisation, StoreDb, ValidPathInfo};
+use harmonia_store_path::{StoreDir, StorePath};
 use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
@@ -70,7 +70,7 @@ impl Store {
     /// Resolve a 32-char store-path hash to its full `StorePath`.
     pub fn query_path_from_hash_part(
         &self,
-        hash: &harmonia_store_core::store_path::StorePathHash,
+        hash: &harmonia_store_path::StorePathHash,
     ) -> Result<Option<StorePath>> {
         self.with_db(|db| {
             db.query_path_from_hash_part(&self.store_dir, hash)
@@ -81,7 +81,7 @@ impl Store {
     /// Resolve a 32-char store-path hash directly to its `ValidPathInfo`.
     pub fn query_path_info_by_hash_part(
         &self,
-        hash: &harmonia_store_core::store_path::StorePathHash,
+        hash: &harmonia_store_path::StorePathHash,
     ) -> Result<Option<ValidPathInfo>> {
         self.with_db(|db| {
             db.query_path_info_by_hash_part(&self.store_dir, hash)

@@ -8,8 +8,8 @@
 
 use std::collections::BTreeSet;
 
-use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_store_db::StoreDb;
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_store_path_info::{NarHash, UnkeyedValidPathInfo};
 use harmonia_utils_signature::Signature;
 

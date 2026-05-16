@@ -20,12 +20,11 @@ use crate::de::{NixDeserialize, NixRead};
 use crate::log::{Activity, ActivityResult, LogMessage, StopActivity};
 use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
+use harmonia_store_core::content_address::{ContentAddress, ContentAddressMethodAlgorithm};
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, StructuredAttrs};
 use harmonia_store_core::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
-use harmonia_store_core::store_path::{
-    ContentAddress, ContentAddressMethodAlgorithm, StorePath, StorePathName,
-};
+use harmonia_store_path::{StorePath, StorePathName};
 use harmonia_utils_hash::fmt::CommonHash;
 
 // ========== BasicDerivation ==========
@@ -191,7 +190,11 @@ where
                 .to_string()
                 .parse()
                 .map_err(Error::unsupported_data)?;
-            let path = writer.store_dir().make_store_path_from_ca(name, *ca);
+            let path = harmonia_store_core::content_address::make_store_path_from_ca(
+                writer.store_dir(),
+                name,
+                *ca,
+            );
             writer.write_value(&path).await?;
             writer.write_value(&ca.method_algorithm()).await?;
             writer.write_display(ca.hash().base32().bare()).await?;
@@ -515,11 +518,11 @@ impl NixDeserialize for Option<UnkeyedRealisation> {
 // StorePath
 nix_deserialize_remote!(
     #[nix(from_store_dir_str)]
-    harmonia_store_core::store_path::StorePath
+    harmonia_store_path::StorePath
 );
 nix_serialize_remote!(
     #[nix(store_dir_display)]
-    harmonia_store_core::store_path::StorePath
+    harmonia_store_path::StorePath
 );
 
 // Verbosity
@@ -674,11 +677,11 @@ nix_serialize_remote!(
 // ContentAddress
 nix_deserialize_remote!(
     #[nix(from_str)]
-    harmonia_store_core::store_path::ContentAddress
+    harmonia_store_core::content_address::ContentAddress
 );
 nix_serialize_remote!(
     #[nix(display)]
-    harmonia_store_core::store_path::ContentAddress
+    harmonia_store_core::content_address::ContentAddress
 );
 
 // Hash and its format wrappers
@@ -701,25 +704,25 @@ nix_serialize_remote!(#[nix(display)] harmonia_utils_hash::fmt::Bare<harmonia_ut
 // ContentAddressMethodAlgorithm
 nix_deserialize_remote!(
     #[nix(from_str)]
-    harmonia_store_core::store_path::ContentAddressMethodAlgorithm
+    harmonia_store_core::content_address::ContentAddressMethodAlgorithm
 );
 nix_serialize_remote!(
     #[nix(display)]
-    harmonia_store_core::store_path::ContentAddressMethodAlgorithm
+    harmonia_store_core::content_address::ContentAddressMethodAlgorithm
 );
 
 // StorePathHash
 nix_deserialize_remote!(
     #[nix(from_str)]
-    harmonia_store_core::store_path::StorePathHash
+    harmonia_store_path::StorePathHash
 );
 nix_serialize_remote!(
     #[nix(display)]
-    harmonia_store_core::store_path::StorePathHash
+    harmonia_store_path::StorePathHash
 );
 
 // StoreDir - uses the store_dir from the NixRead/NixWrite context
-impl crate::de::NixDeserialize for harmonia_store_core::store_path::StoreDir {
+impl crate::de::NixDeserialize for harmonia_store_path::StoreDir {
     async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
     where
         R: ?Sized + crate::de::NixRead + Send,
@@ -728,7 +731,7 @@ impl crate::de::NixDeserialize for harmonia_store_core::store_path::StoreDir {
     }
 }
 
-impl crate::ser::NixSerialize for harmonia_store_core::store_path::StoreDir {
+impl crate::ser::NixSerialize for harmonia_store_path::StoreDir {
     async fn serialize<W: crate::ser::NixWrite>(&self, _writer: &mut W) -> Result<(), W::Error> {
         // StoreDir is never serialized over the wire - it's a local configuration value
         Ok(())

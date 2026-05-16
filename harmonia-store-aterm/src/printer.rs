@@ -5,7 +5,7 @@ use harmonia_store_core::derivation::{
     DerivationInputs, DerivationT, OutputInputs, StructuredAttrs,
 };
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
+use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 
 use crate::raw_output::AtermOutput;
 

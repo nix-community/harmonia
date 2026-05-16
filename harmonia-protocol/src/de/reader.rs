@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::ProtocolVersion;
 use crate::version::FeatureSet;
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_path::StoreDir;
 use harmonia_utils_io::{
     AsyncBytesRead, BytesReader, DEFAULT_MAX_BUF_SIZE, DEFAULT_RESERVED_BUF_SIZE,
     TryReadBytesLimited, TryReadU64,

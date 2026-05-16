@@ -5,7 +5,7 @@ use std::sync::Arc;
 use proptest::prelude::{Arbitrary, BoxedStrategy};
 use serde::{Deserialize, Serialize};
 
-use crate::store_path::{
+use harmonia_store_path::{
     FromStoreDirStr, ParseStorePathError, StoreDir, StoreDirDisplay, StorePath, StorePathError,
 };
 
@@ -322,7 +322,7 @@ mod unittests {
     use rstest::rstest;
 
     use super::*;
-    use crate::store_path::{StoreDir, StorePathError};
+    use harmonia_store_path::{StoreDir, StorePathError};
 
     fn drv() -> Arc<SingleDerivedPath> {
         Arc::new(SingleDerivedPath::Opaque(

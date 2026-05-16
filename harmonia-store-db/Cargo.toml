@@ -14,6 +14,7 @@ readme               = "README.md"
 
 [dependencies]
 harmonia-store-core      = { workspace = true }
+harmonia-store-path      = { workspace = true }
 harmonia-store-path-info = { workspace = true }
 harmonia-utils-hash      = { workspace = true }
 harmonia-utils-signature = { workspace = true }

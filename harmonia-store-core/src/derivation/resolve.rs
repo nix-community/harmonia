@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::ByteString;
 use crate::derived_path::{OutputName, SingleDerivedPath};
 use crate::placeholder::Placeholder;
-use crate::store_path::{StoreDir, StorePath, StorePathSet};
+use harmonia_store_path::{StoreDir, StorePath, StorePathSet};
 
 use super::{BasicDerivation, Derivation, DerivationOutput};
 

@@ -18,7 +18,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use harmonia_protocol::types::DaemonStore;
-use harmonia_store_core::store_path::{StoreDir, StorePath};
+use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_store_remote::DaemonClient;
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, timeout};

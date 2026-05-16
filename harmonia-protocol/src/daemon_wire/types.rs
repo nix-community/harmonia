@@ -5,7 +5,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use crate::de::{NixDeserialize as NixDeserializeTrait, NixRead};
 use crate::ser::{NixSerialize as NixSerializeTrait, NixWrite};
 use crate::version::ProtocolRange;
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_path::StorePath;
 
 #[derive(
     Debug,
@@ -72,7 +72,7 @@ macro_rules! optional_from_store_dir_str {
                 R: ?Sized + NixRead + Send,
             {
                 use crate::de::Error;
-                use harmonia_store_core::store_path::FromStoreDirStr;
+                use harmonia_store_path::FromStoreDirStr;
                 if let Some(buf) = reader.try_read_bytes().await? {
                     let s = ::std::str::from_utf8(&buf).map_err(Error::invalid_data)?;
                     if s == "" {

@@ -9,7 +9,7 @@ use harmonia_store_core::derivation::{
 };
 use harmonia_store_core::derivation::{DerivationInputs, OutputInputs};
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
+use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 
 use crate::ParseError;
 use crate::raw_output::{AtermOutput, BorrowedRawOutput};

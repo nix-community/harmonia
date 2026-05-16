@@ -9,7 +9,7 @@ use proptest::collection::btree_set;
 use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::store_path::{StorePathNameError, into_name};
+use harmonia_store_path::{StorePathNameError, into_name};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -39,7 +39,7 @@ impl Arbitrary for OutputName {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use crate::store_path::proptest::arb_output_name;
+        use harmonia_store_path::proptest::arb_output_name;
         arb_output_name().prop_map(OutputName).boxed()
     }
 }
@@ -150,7 +150,8 @@ impl FromStr for OutputSpec {
 mod unittests {
     use rstest::rstest;
 
-    use crate::{derived_path::OutputSpec, store_path::StorePathNameError};
+    use crate::derived_path::OutputSpec;
+    use harmonia_store_path::StorePathNameError;
 
     #[macro_export]
     macro_rules! set {

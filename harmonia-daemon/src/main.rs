@@ -28,7 +28,7 @@ async fn main() -> Result<(), DaemonError> {
     info!("Database path: {}", config.db_path.display());
 
     // Create StoreDir from config
-    let store_dir = harmonia_store_core::store_path::StoreDir::new(&config.store_dir)
+    let store_dir = harmonia_store_path::StoreDir::new(&config.store_dir)
         .map_err(|e| DaemonError::config(format!("Invalid store directory: {e}")))?;
 
     // Create the local store handler

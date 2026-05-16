@@ -38,12 +38,11 @@ use harmonia_protocol::ser::{NixWrite, NixWriter};
 use harmonia_protocol::types::{AddToStoreItem, DaemonPath};
 use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_protocol::version::{FeatureSet, supported_features};
+use harmonia_store_core::content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
-use harmonia_store_core::store_path::{
-    ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
-};
+use harmonia_store_path::{StorePath, StorePathHash, StorePathSet};
 use harmonia_utils_io::{AsyncBufReadCompat, BytesReader};
 use harmonia_utils_signature::Signature;
 
@@ -86,7 +85,7 @@ where
 /// Builder for daemon server connections.
 pub struct Builder {
     store_trust: Option<TrustLevel>,
-    store_dir: harmonia_store_core::store_path::StoreDir,
+    store_dir: harmonia_store_path::StoreDir,
     min_version: ProtocolVersion,
     max_version: ProtocolVersion,
     nix_version: Option<String>,
@@ -97,7 +96,7 @@ impl Builder {
         Default::default()
     }
 
-    pub fn set_store_dir(mut self, store_dir: harmonia_store_core::store_path::StoreDir) -> Self {
+    pub fn set_store_dir(mut self, store_dir: harmonia_store_path::StoreDir) -> Self {
         self.store_dir = store_dir;
         self
     }
@@ -1076,7 +1075,7 @@ where
 pub struct DaemonServer<H> {
     handler: H,
     socket_path: std::path::PathBuf,
-    store_dir: harmonia_store_core::store_path::StoreDir,
+    store_dir: harmonia_store_path::StoreDir,
 }
 
 impl<H> DaemonServer<H>
@@ -1086,7 +1085,7 @@ where
     pub fn new(
         handler: H,
         socket_path: std::path::PathBuf,
-        store_dir: harmonia_store_core::store_path::StoreDir,
+        store_dir: harmonia_store_path::StoreDir,
     ) -> Self {
         Self {
             handler,

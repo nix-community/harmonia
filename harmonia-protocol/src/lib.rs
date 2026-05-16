@@ -43,7 +43,18 @@ pub use version::{
 };
 
 // Re-exports required by derive macros (harmonia_protocol_derive generates code using crate::store_path, etc.)
-pub use harmonia_store_core::store_path;
+// The module exposes both the content-address types from harmonia-store-core and the
+// store-path types (FromStoreDirStr, StoreDirDisplay, etc.) from harmonia-store-path.
+pub mod store_path {
+    pub use harmonia_store_core::content_address::{
+        ContentAddress, ContentAddressMethod, ContentAddressMethodAlgorithm,
+        ParseContentAddressError, make_store_path_from_ca,
+    };
+    pub use harmonia_store_path::{
+        FromStoreDirStr, ParseStorePathError, StoreDir, StoreDirDisplay, StorePath, StorePathError,
+        StorePathHash, StorePathName, StorePathNameError, StorePathSet, into_name,
+    };
+}
 
 // Hand-written serialization impls for harmonia-store-core types
 mod store_impls;

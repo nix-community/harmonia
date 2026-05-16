@@ -27,10 +27,10 @@ composed.
 └────────────────────────────┴─────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────┐
-│  Core (pure)                                         │
-│  harmonia-store-core · harmonia-store-aterm          │
-│  harmonia-store-path-info                            │
-│  store paths, derivations, references                │
+│  Store (pure)                                        │
+│  harmonia-store-path · harmonia-store-core           │
+│  harmonia-store-aterm · harmonia-store-path-info     │
+│  store paths, content addressing, derivations        │
 │  no I/O, no async                                    │
 └──────────────────────────────────────────────────────┘
                          ↓
@@ -45,7 +45,8 @@ composed.
 
 | Crate | Purpose |
 |-------|---------|
-| [harmonia-store-core](../../harmonia-store-core/README.md) | Store paths, derivations (pure) |
+| [harmonia-store-path](../../harmonia-store-path/README.md) | Store path types, parsing, validation |
+| [harmonia-store-core](../../harmonia-store-core/README.md) | Content addressing, derivations (pure) |
 | [harmonia-store-aterm](../../harmonia-store-aterm/) | ATerm derivation parser |
 | [harmonia-store-path-info](../../harmonia-store-path-info/) | ValidPathInfo types (pure) |
 | [harmonia-store-db](../../harmonia-store-db/README.md) | SQLite store metadata |
@@ -72,89 +73,29 @@ could be reused outside Harmonia.
 
 ## Dependency Graph
 
-<!-- Regenerate both diagrams with: python3 scripts/dependency-diagram.py --update -->
-
-```mermaid
----
-title: Full dependency graph
----
-graph BT
-    subgraph Utilities
-        utils-base-encoding
-        utils-hash
-        utils-io
-        utils-signature
-        utils-test
-    end
-    subgraph File
-        file-core
-        file-nar
-    end
-    bench
-    client
-    ssh-store
-    file-nar --> file-core
-    file-nar --> utils-io
-    utils-hash --> utils-base-encoding
-    utils-signature --> utils-base-encoding
-    store-core --> utils-base-encoding
-    store-core --> utils-hash
-    store-aterm --> store-core
-    store-aterm --> utils-hash
-    store-build-result --> store-core
-    store-path-info --> store-core
-    store-path-info --> utils-hash
-    store-path-info --> utils-signature
-    protocol --> file-nar
-    protocol --> protocol-derive
-    protocol --> store-build-result
-    protocol --> store-core
-    protocol --> store-path-info
-    protocol --> utils-hash
-    protocol --> utils-io
-    protocol --> utils-signature
-    store-db --> store-core
-    store-db --> store-path-info
-    store-db --> utils-hash
-    store-db --> utils-signature
-    store-nar-info --> store-core
-    store-nar-info --> store-path-info
-    store-nar-info --> utils-hash
-    store-nar-info --> utils-signature
-    cache --> file-core
-    cache --> file-nar
-    cache --> store-core
-    cache --> store-db
-    cache --> store-nar-info
-    cache --> store-path-info
-    cache --> utils-hash
-    cache --> utils-signature
-    daemon --> protocol
-    daemon --> store-core
-    daemon --> store-db
-    daemon --> utils-hash
-    daemon --> utils-io
-    daemon --> utils-signature
-    store-remote --> file-nar
-    store-remote --> protocol
-    store-remote --> store-core
-    store-remote --> utils-io
-    store-remote --> utils-signature
-```
+<!-- Regenerate with: python3 scripts/dependency-diagram.py --update -->
 
 ```mermaid
 ---
 title: Transitive reduction
 ---
 graph BT
-    subgraph Utilities
+    subgraph "Utilities"
         utils-base-encoding
         utils-hash
         utils-io
         utils-signature
         utils-test
     end
-    subgraph File
+    subgraph "Store (pure)"
+        store-aterm
+        store-build-result
+        store-core
+        store-nar-info
+        store-path
+        store-path-info
+    end
+    subgraph "File"
         file-core
         file-nar
     end
@@ -165,7 +106,8 @@ graph BT
     file-nar --> utils-io
     utils-hash --> utils-base-encoding
     utils-signature --> utils-base-encoding
-    store-core --> utils-hash
+    store-path --> utils-hash
+    store-core --> store-path
     store-aterm --> store-core
     store-build-result --> store-core
     store-path-info --> store-core
@@ -196,12 +138,13 @@ intra-workspace dependencies.
 - Encoding/hash utils: pure, `const` where possible, tested against upstream
   vectors.
 
-**Core** (`harmonia-store-core`)
+**Store (pure)** (`harmonia-store-path`, `harmonia-store-core`, `harmonia-store-aterm`, `harmonia-store-path-info`, `harmonia-store-build-result`, `harmonia-store-nar-info`)
 - No I/O, no async, no `tokio`.
 - Pure, deterministic functions returning `Result`; no panics.
 - Stream-friendly (no unbounded buffers).
-- `harmonia-store-aterm` and `harmonia-store-path-info` would typically be part of `harmonia-store-core`.
-  However, since these data types / formats both have issues, they are instead placed in separate libraries to make sure they don't "infect" the rest of `harmonia-store-core`.
+- `harmonia-store-path`: fundamental store path types (`StorePath`, `StoreDir`, etc.) with no store-semantic dependencies.
+- `harmonia-store-core`: content addressing, derivations, realisations — depends on `harmonia-store-path`.
+- `harmonia-store-aterm`, `harmonia-store-path-info`, `harmonia-store-build-result`, `harmonia-store-nar-info`: separate crates for formats/types that don't belong in core (to avoid "infecting" it with their issues).
 
 **File** (`harmonia-file-core`, `harmonia-file-nar`)
 - `harmonia-file-core`: pure file tree types and serde matching nix's JSON format.

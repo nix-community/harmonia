@@ -1,6 +1,6 @@
 //! Worker protocol wire tests for `ContentAddress` and `Option<ContentAddress>`.
 
-use harmonia_store_core::store_path::ContentAddress;
+use harmonia_store_core::content_address::ContentAddress;
 
 use crate::{no_features, test_upstream_wire};
 

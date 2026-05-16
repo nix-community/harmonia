@@ -8,7 +8,8 @@ use std::num::NonZero;
 
 use rusqlite::params;
 
-use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathHash};
+use harmonia_store_core::content_address::ContentAddress;
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 
 use crate::connection::StoreDb;
 use crate::error::Result;
@@ -68,7 +69,7 @@ fn valid_path_info_from_row(
         .unwrap_or_default();
 
     let ca = ca_str
-        .map(|s| parse_from_sql::<harmonia_store_core::store_path::ContentAddress>(8, &s))
+        .map(|s| parse_from_sql::<ContentAddress>(8, &s))
         .transpose()?;
 
     Ok(ValidPathInfo {

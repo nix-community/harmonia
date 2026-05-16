@@ -1,6 +1,6 @@
 //! Worker protocol wire tests for `StorePath` and `Option<StorePath>`.
 
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_path::StorePath;
 
 use crate::{no_features, test_upstream_wire};
 

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::derived_path::OutputName;
-use crate::store_path::{ParseStorePathError, StorePath, StorePathNameError};
+use harmonia_store_path::{ParseStorePathError, StorePath, StorePathNameError};
 use harmonia_utils_signature::Signature;
 
 /// Identifies a specific output of a derivation.

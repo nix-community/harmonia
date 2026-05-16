@@ -4,7 +4,7 @@ use crate::{cache_control_max_age_1y, some_or_404};
 use actix_web::web::Bytes;
 use actix_web::{HttpRequest, HttpResponse, http, web};
 use harmonia_file_nar::NarByteStream;
-use harmonia_store_core::store_path::StorePathHash;
+use harmonia_store_path::StorePathHash;
 use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::CommonHash;
 use serde::Deserialize;

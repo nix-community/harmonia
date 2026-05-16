@@ -18,7 +18,7 @@ pub struct ValidPathInfo {
     /// Database row ID
     pub id: ValidPathId,
     /// The store path.
-    pub path: harmonia_store_core::store_path::StorePath,
+    pub path: harmonia_store_path::StorePath,
     /// Metadata about the path.
     pub info: harmonia_store_path_info::UnkeyedValidPathInfo,
 }
@@ -40,7 +40,7 @@ pub struct DerivationOutput {
     /// Symbolic output name (usually "out")
     pub output_id: harmonia_store_core::derived_path::OutputName,
     /// Store path of the output
-    pub path: harmonia_store_core::store_path::StorePath,
+    pub path: harmonia_store_path::StorePath,
 }
 
 /// A content-addressed derivation realisation (`BuildTraceV3` row).
