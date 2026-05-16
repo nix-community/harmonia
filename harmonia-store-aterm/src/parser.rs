@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use memchr::{memchr, memchr2};
@@ -8,13 +9,10 @@ use harmonia_store_core::derivation::{
 };
 use harmonia_store_core::derivation::{DerivationInputs, OutputInputs};
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::store_path::{
-    ContentAddress, ContentAddressMethodAlgorithm, StoreDir, StorePath, StorePathName, StorePathSet,
-};
-use harmonia_utils_hash::Hash;
-use harmonia_utils_hash::fmt::NonSRI;
+use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 
 use crate::ParseError;
+use crate::raw_output::{AtermOutput, BorrowedRawOutput};
 
 /// ATerm derivation format version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,13 +29,11 @@ pub(crate) struct Parser<'a> {
     store_dir: &'a StoreDir,
 }
 
-/// Raw output fields before variant resolution. We need all outputs and the env
-/// parsed before we can determine Impure vs CAFloating.
-struct RawOutput {
-    name: String,
-    path: Vec<u8>,
-    hash_algo: Vec<u8>,
-    hash: Vec<u8>,
+fn cow_to_bytes(cow: Cow<'_, [u8]>) -> ByteString {
+    match cow {
+        Cow::Owned(v) => ByteString::from(v),
+        Cow::Borrowed(s) => ByteString::copy_from_slice(s),
+    }
 }
 
 impl<'a> Parser<'a> {
@@ -55,7 +51,7 @@ impl<'a> Parser<'a> {
     ) -> Result<Derivation, ParseError> {
         let version = self.parse_drv_header()?;
 
-        let raw_outputs = self.parse_raw_outputs()?;
+        let outputs = self.parse_outputs(&name)?;
         self.expect_char(',')?;
 
         let input_drvs = self.parse_input_drvs(version)?;
@@ -64,24 +60,22 @@ impl<'a> Parser<'a> {
         let input_srcs = self.parse_input_srcs()?;
         self.expect_char(',')?;
 
-        let platform = ByteString::from(self.parse_string()?);
+        let platform = cow_to_bytes(self.parse_string()?);
         self.expect_char(',')?;
 
-        let builder = ByteString::from(self.parse_string()?);
+        let builder = cow_to_bytes(self.parse_string()?);
         self.expect_char(',')?;
 
         let args: Vec<ByteString> = self
             .parse_string_list()?
             .into_iter()
-            .map(ByteString::from)
+            .map(cow_to_bytes)
             .collect();
         self.expect_char(',')?;
 
         let mut env = self.parse_env()?;
 
         self.expect_char(')')?;
-
-        let outputs = resolve_outputs(raw_outputs, self.store_dir)?;
 
         // Build DerivationInputs and convert to BTreeSet<SingleDerivedPath>
         let inputs_struct = DerivationInputs {
@@ -139,15 +133,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_raw_outputs(&mut self) -> Result<Vec<RawOutput>, ParseError> {
+    fn parse_outputs(&mut self, drv_name: &StorePathName) -> Result<DerivationOutputs, ParseError> {
         self.expect_char('[')?;
-        let mut outputs = Vec::new();
+        let mut outputs = DerivationOutputs::new();
 
         while self.peek() != Some(b']') {
             self.expect_char('(')?;
             let name_bytes = self.parse_string()?;
-            let name = String::from_utf8(name_bytes)
-                .map_err(|_| ParseError::InvalidUtf8 { pos: self.pos })?;
+            let name: OutputName = std::str::from_utf8(&name_bytes)
+                .map_err(|_| ParseError::InvalidUtf8 { pos: self.pos })?
+                .parse()?;
             self.expect_char(',')?;
             let path = self.parse_string()?;
             self.expect_char(',')?;
@@ -156,12 +151,17 @@ impl<'a> Parser<'a> {
             let hash = self.parse_string()?;
             self.expect_char(')')?;
 
-            outputs.push(RawOutput {
-                name,
-                path,
-                hash_algo,
-                hash,
-            });
+            let output = DerivationOutput::from_raw(
+                BorrowedRawOutput {
+                    path: &path,
+                    hash_algo: &hash_algo,
+                    hash: &hash,
+                },
+                self.store_dir,
+                drv_name,
+                &name,
+            )?;
+            outputs.insert(name, output);
 
             if self.peek() == Some(b',') {
                 self.advance();
@@ -287,9 +287,9 @@ impl<'a> Parser<'a> {
 
         while self.peek() != Some(b']') {
             self.expect_char('(')?;
-            let key = ByteString::from(self.parse_string()?);
+            let key = cow_to_bytes(self.parse_string()?);
             self.expect_char(',')?;
-            let value = ByteString::from(self.parse_string()?);
+            let value = cow_to_bytes(self.parse_string()?);
             self.expect_char(')')?;
 
             env.insert(key, value);
@@ -307,16 +307,12 @@ impl<'a> Parser<'a> {
         let pos = self.pos;
         let bytes = self.parse_string()?;
         let s = std::str::from_utf8(&bytes).map_err(|_| ParseError::InvalidUtf8 { pos })?;
-        let base_name = self
-            .store_dir
-            .strip_prefix(s)
-            .map_err(|e| ParseError::store_path_error(pos, s, e))?;
-        base_name
-            .parse::<StorePath>()
+        self.store_dir
+            .parse(s)
             .map_err(|e| ParseError::StorePath { pos, source: e })
     }
 
-    fn parse_string(&mut self) -> Result<Vec<u8>, ParseError> {
+    fn parse_string(&mut self) -> Result<Cow<'a, [u8]>, ParseError> {
         self.expect_char('"')?;
 
         let start = self.pos;
@@ -325,14 +321,14 @@ impl<'a> Parser<'a> {
         let end_offset = memchr(b'"', &self.bytes[start..])
             .ok_or(ParseError::UnterminatedString { pos: start })?;
 
-        // Fast path: no escapes in the string
+        // Fast path: no escapes — borrow directly from input
         if memchr(b'\\', &self.bytes[start..start + end_offset]).is_none() {
-            let result = self.bytes[start..start + end_offset].to_vec();
+            let result = &self.bytes[start..start + end_offset];
             self.pos = start + end_offset + 1; // skip closing quote
-            return Ok(result);
+            return Ok(Cow::Borrowed(result));
         }
 
-        // Slow path: handle escape sequences
+        // Slow path: handle escape sequences — must allocate
         let mut result = Vec::with_capacity(end_offset);
         let mut cur = self.pos;
 
@@ -346,7 +342,7 @@ impl<'a> Parser<'a> {
 
                     if self.bytes[cur] == b'"' {
                         self.pos = cur + 1;
-                        return Ok(result);
+                        return Ok(Cow::Owned(result));
                     }
 
                     // Backslash escape
@@ -369,7 +365,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_string_list(&mut self) -> Result<Vec<Vec<u8>>, ParseError> {
+    fn parse_string_list(&mut self) -> Result<Vec<Cow<'a, [u8]>>, ParseError> {
         self.expect_char('[')?;
         let mut items = Vec::new();
 
@@ -413,61 +409,6 @@ impl<'a> Parser<'a> {
             self.pos += 1;
         }
     }
-}
-
-fn resolve_outputs(
-    raw: Vec<RawOutput>,
-    store_dir: &StoreDir,
-) -> Result<DerivationOutputs, ParseError> {
-    let mut outputs = DerivationOutputs::new();
-
-    for r in raw {
-        let output_name: OutputName = r.name.parse()?;
-
-        let variant = if !r.hash_algo.is_empty() && r.hash == b"impure" {
-            // Impure: hashAlgo present, hash is literal "impure"
-            let algo_str = std::str::from_utf8(&r.hash_algo)
-                .map_err(|_| ParseError::InvalidUtf8 { pos: 0 })?;
-            let cama: ContentAddressMethodAlgorithm = algo_str.parse()?;
-            DerivationOutput::Impure(cama)
-        } else if !r.hash_algo.is_empty() && !r.hash.is_empty() {
-            // CAFixed: both hashAlgo and hash present (hash is actual hash value)
-            let algo_str = std::str::from_utf8(&r.hash_algo)
-                .map_err(|_| ParseError::InvalidUtf8 { pos: 0 })?;
-            let cama: ContentAddressMethodAlgorithm = algo_str.parse()?;
-            let hash_str =
-                std::str::from_utf8(&r.hash).map_err(|_| ParseError::InvalidUtf8 { pos: 0 })?;
-            let hash: Hash = NonSRI::<Hash>::parse(cama.algorithm(), hash_str)
-                .map_err(|e| ParseError::Hash(e.to_string()))?;
-            let ca = ContentAddress::from_hash(cama.method(), hash)
-                .map_err(|e| ParseError::Hash(e.to_string()))?;
-            DerivationOutput::CAFixed(ca)
-        } else if !r.hash_algo.is_empty() {
-            // hashAlgo present, hash empty → CAFloating
-            let algo_str = std::str::from_utf8(&r.hash_algo)
-                .map_err(|_| ParseError::InvalidUtf8 { pos: 0 })?;
-            let cama: ContentAddressMethodAlgorithm = algo_str.parse()?;
-            DerivationOutput::CAFloating(cama)
-        }
-        // path present, hashAlgo and hash empty → InputAddressed
-        else if !r.path.is_empty() {
-            let path_str =
-                std::str::from_utf8(&r.path).map_err(|_| ParseError::InvalidUtf8 { pos: 0 })?;
-            let base_name = store_dir
-                .strip_prefix(path_str)
-                .map_err(|e| ParseError::store_path_error(0, path_str, e))?;
-            let path = base_name
-                .parse::<StorePath>()
-                .map_err(|e| ParseError::StorePath { pos: 0, source: e })?;
-            DerivationOutput::InputAddressed(path)
-        } else {
-            DerivationOutput::Deferred
-        };
-
-        outputs.insert(output_name, variant);
-    }
-
-    Ok(outputs)
 }
 
 #[cfg(test)]

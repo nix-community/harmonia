@@ -2,14 +2,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use harmonia_store_core::ByteString;
 use harmonia_store_core::derivation::{
-    DerivationInputs, DerivationOutput, DerivationT, OutputInputs, StructuredAttrs,
+    DerivationInputs, DerivationT, OutputInputs, StructuredAttrs,
 };
 use harmonia_store_core::derived_path::OutputName;
 use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
-use harmonia_utils_hash::fmt::CommonHash as _;
+
+use crate::raw_output::AtermOutput;
 
 /// Print a derivation in Nix ATerm format.
-pub fn print_derivation_aterm<I>(store_dir: &StoreDir, drv: &DerivationT<I>) -> Vec<u8>
+pub fn print_derivation_aterm<I, O: AtermOutput>(
+    store_dir: &StoreDir,
+    drv: &DerivationT<I, O>,
+) -> Vec<u8>
 where
     for<'a> DerivationInputs: From<&'a I>,
 {
@@ -19,8 +23,11 @@ where
 }
 
 /// Write a derivation in Nix ATerm format to a string buffer.
-pub fn write_derivation<I>(store_dir: &StoreDir, drv: &DerivationT<I>, out: &mut Vec<u8>)
-where
+pub fn write_derivation<I, O: AtermOutput>(
+    store_dir: &StoreDir,
+    drv: &DerivationT<I, O>,
+    out: &mut Vec<u8>,
+) where
     for<'a> DerivationInputs: From<&'a I>,
 {
     let inputs = DerivationInputs::from(&drv.inputs);
@@ -70,10 +77,10 @@ where
     out.push(b')');
 }
 
-fn write_outputs(
+fn write_outputs<O: AtermOutput>(
     store_dir: &StoreDir,
     drv_name: &StorePathName,
-    outputs: &BTreeMap<OutputName, DerivationOutput>,
+    outputs: &BTreeMap<OutputName, O>,
     out: &mut Vec<u8>,
 ) {
     out.push(b'[');
@@ -83,51 +90,15 @@ fn write_outputs(
         }
         out.push(b'(');
 
-        // Output name
         write_escaped(out, name.as_ref().as_bytes());
         out.push(b',');
 
-        // (path, hashAlgo, hash) depend on the variant
-        match output {
-            DerivationOutput::InputAddressed(path) => {
-                // path present, hashAlgo and hash empty
-                let abs = path.to_absolute_path(store_dir);
-                write_escaped(out, abs.to_string_lossy().as_bytes());
-                out.extend_from_slice(b",\"\",\"\"");
-            }
-            DerivationOutput::CAFixed(ca) => {
-                // Nix includes the computed path for CA fixed outputs
-                let cama = ca.method_algorithm();
-                let hash = ca.hash();
-                if let Ok(Some(path)) = output.path(store_dir, drv_name, name) {
-                    let abs = path.to_absolute_path(store_dir);
-                    write_escaped(out, abs.to_string_lossy().as_bytes());
-                } else {
-                    out.extend_from_slice(b"\"\"");
-                }
-                out.push(b',');
-                write_escaped(out, cama.to_string().as_bytes());
-                out.push(b',');
-                let hash_hex = hash.as_base16().as_bare().to_string();
-                write_escaped(out, hash_hex.as_bytes());
-            }
-            DerivationOutput::CAFloating(cama) => {
-                // path empty, hashAlgo present, hash empty
-                out.extend_from_slice(b"\"\",");
-                write_escaped(out, cama.to_string().as_bytes());
-                out.extend_from_slice(b",\"\"");
-            }
-            DerivationOutput::Impure(cama) => {
-                // path empty, hashAlgo present, hash is literal "impure"
-                out.extend_from_slice(b"\"\",");
-                write_escaped(out, cama.to_string().as_bytes());
-                out.extend_from_slice(b",\"impure\"");
-            }
-            DerivationOutput::Deferred => {
-                // All empty
-                out.extend_from_slice(b"\"\",\"\",\"\"");
-            }
-        }
+        let raw = output.to_raw(store_dir, drv_name, name);
+        write_escaped(out, &raw.path);
+        out.push(b',');
+        write_escaped(out, &raw.hash_algo);
+        out.push(b',');
+        write_escaped(out, &raw.hash);
 
         out.push(b')');
     }

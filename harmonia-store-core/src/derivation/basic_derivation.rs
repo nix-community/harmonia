@@ -8,7 +8,7 @@ use crate::ByteString;
 use crate::derived_path::SingleDerivedPath;
 use crate::store_path::{StorePathName, StorePathSet};
 
-use super::{DerivationInputs, DerivationOutputs};
+use super::{DerivationInputs, DerivationOutput, DerivationOutputs};
 
 /// Structured attributes for a derivation.
 ///
@@ -26,10 +26,10 @@ pub struct StructuredAttrs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DerivationT<Inputs> {
+pub struct DerivationT<Inputs, Output = DerivationOutput> {
     /// The name of the derivation
     pub name: StorePathName,
-    pub outputs: DerivationOutputs,
+    pub outputs: DerivationOutputs<Output>,
     pub inputs: Inputs,
     pub platform: ByteString,
     pub builder: ByteString,
@@ -53,7 +53,7 @@ fn default_version() -> u32 {
 pub type BasicDerivation = DerivationT<StorePathSet>;
 pub type Derivation = DerivationT<BTreeSet<SingleDerivedPath>>;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 pub mod arbitrary {
     use super::*;
     use crate::{
@@ -268,6 +268,22 @@ impl<'de> Deserialize<'de> for Derivation {
     {
         let helper = DerivationHelperT::<DerivationInputs>::deserialize(deserializer)?;
         helper_to_derivation::<BTreeSet<SingleDerivedPath>, D>(helper)
+    }
+}
+
+impl<Inputs, Output> DerivationT<Inputs, Output> {
+    /// Transform outputs, keeping everything else the same.
+    pub fn map_outputs<T>(self, mut f: impl FnMut(Output) -> T) -> DerivationT<Inputs, T> {
+        DerivationT {
+            name: self.name,
+            outputs: self.outputs.into_iter().map(|(k, v)| (k, f(v))).collect(),
+            inputs: self.inputs,
+            platform: self.platform,
+            builder: self.builder,
+            args: self.args,
+            env: self.env,
+            structured_attrs: self.structured_attrs,
+        }
     }
 }
 
