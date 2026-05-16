@@ -41,11 +41,11 @@ use harmonia_protocol::version::{FeatureSet, supported_features};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
-use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
 use harmonia_utils_io::{AsyncBufReadCompat, BytesReader};
+use harmonia_utils_signature::Signature;
 
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::from_parts(1, 38);
 const NIX_VERSION: &str = "2.24.0 (Harmonia)";

@@ -8,6 +8,7 @@ members = [
     "harmonia-utils-hash",
     "harmonia-store-core",
     "harmonia-store-db",
+    "harmonia-utils-signature",
     "harmonia-store-nar-info",
     "harmonia-store-path-info",
     "harmonia-store-remote",
@@ -105,6 +106,7 @@ harmonia-store-remote        = { path = "harmonia-store-remote" }
 harmonia-utils-base-encoding = { path = "harmonia-utils-base-encoding" }
 harmonia-utils-hash          = { path = "harmonia-utils-hash" }
 harmonia-utils-io            = { path = "harmonia-utils-io" }
+harmonia-utils-signature     = { path = "harmonia-utils-signature" }
 harmonia-utils-test          = { path = "harmonia-utils-test" }
 
 [workspace.lints.rust]

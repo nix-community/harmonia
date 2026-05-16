@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::derived_path::OutputName;
-use crate::signature::Signature;
 use crate::store_path::{ParseStorePathError, StorePath, StorePathNameError};
+use harmonia_utils_signature::Signature;
 
 /// Identifies a specific output of a derivation.
 ///
@@ -109,13 +109,13 @@ impl UnkeyedRealisation {
 
     /// Sign this realisation, returning the signature without modifying `self`.
     #[must_use]
-    pub fn sign(&self, key: &DrvOutput, signer: &crate::signature::SecretKey) -> Signature {
+    pub fn sign(&self, key: &DrvOutput, signer: &harmonia_utils_signature::SecretKey) -> Signature {
         signer.sign(self.fingerprint(key).as_bytes())
     }
 
     /// Sign this realisation with the given secret keys, adding the resulting
     /// signatures to the `signatures` set.
-    pub fn sign_mut(&mut self, key: &DrvOutput, keys: &[crate::signature::SecretKey]) {
+    pub fn sign_mut(&mut self, key: &DrvOutput, keys: &[harmonia_utils_signature::SecretKey]) {
         for k in keys {
             self.signatures.insert(self.sign(key, k));
         }
@@ -124,7 +124,7 @@ impl UnkeyedRealisation {
 
 #[cfg(any(test, feature = "test"))]
 pub mod arbitrary {
-    use crate::signature::proptests::arb_signatures;
+    use harmonia_utils_signature::proptests::arb_signatures;
 
     use super::*;
     use ::proptest::prelude::*;
@@ -328,7 +328,7 @@ mod unittests {
                 signatures: Default::default(),
             },
         };
-        let sk = crate::signature::SecretKey::generate("test-key".to_string()).unwrap();
+        let sk = harmonia_utils_signature::SecretKey::generate("test-key".to_string()).unwrap();
         let pk = sk.to_public_key();
         let key = r.key.clone();
         r.value.sign_mut(&key, &[sk]);

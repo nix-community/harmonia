@@ -24,10 +24,10 @@ use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
-use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::{
     ContentAddressMethodAlgorithm, StorePath, StorePathHash, StorePathSet,
 };
+use harmonia_utils_signature::Signature;
 
 pub type DaemonString = Bytes;
 pub type DaemonPath = Bytes;

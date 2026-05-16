@@ -16,11 +16,9 @@
 //!
 //! # Key Modules
 //!
-//! - `hash` - Content addressing, hash types, hash computation
 //! - `store_path` - Store path types, parsing, validation
-//! - `derivation` - Derivation (.drv) file format and semantics
-//! - `signature` - Cryptographic signatures for store paths
-//! - `realisation` - Store path realisation tracking
+//! - `derivation` - Derivation (.drv) file format and semantics (feature-gated)
+//! - `realisation` - Store path realisation tracking (feature-gated)
 //!
 //! # Design Principles
 //!
@@ -61,8 +59,6 @@ pub mod derived_path;
 pub mod placeholder;
 #[cfg(feature = "derivation")]
 pub mod realisation;
-#[cfg(feature = "signature")]
-pub mod signature;
 pub mod store_path;
 
 #[cfg(any(test, feature = "test"))]

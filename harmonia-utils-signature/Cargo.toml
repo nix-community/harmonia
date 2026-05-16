@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
+# SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+# SPDX-License-Identifier: MIT
+
+[package]
+name                 = "harmonia-utils-signature"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
+repository.workspace = true
+description          = "Cryptographic signing of Nix store paths (Ed25519 NAR signatures)"
+
+[dependencies]
+data-encoding                = { workspace = true }
+ed25519-dalek                = { workspace = true }
+getrandom                    = { workspace = true }
+harmonia-utils-base-encoding = { workspace = true }
+proptest                     = { workspace = true, optional = true }
+proptest-derive              = { workspace = true, optional = true }
+serde                        = { workspace = true }
+serde_json                   = { workspace = true, optional = true }
+subtle                       = { version = "2", default-features = false }
+thiserror                    = { workspace = true }
+zeroize                      = { version = "1" }
+
+[dev-dependencies]
+harmonia-utils-signature = { path = ".", features = [ "test" ] }
+serde_json               = { workspace = true }
+
+[features]
+test = [ "proptest", "proptest-derive" ]
+
+[lints]
+workspace = true

@@ -30,13 +30,13 @@ composed.
 │  Core (pure)                                         │
 │  harmonia-store-core · harmonia-store-aterm          │
 │  harmonia-store-path-info                            │
-│  store paths, derivations, references, signatures    │
+│  store paths, derivations, references                │
 │  no I/O, no async                                    │
 └──────────────────────────────────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────┐
 │  Utilities (harmonia-utils-*)                        │
-│  io · base-encoding · hash · test                    │
+│  io · base-encoding · hash · signature · test        │
 │  protocol-specific building blocks, not Nix-specific │
 └──────────────────────────────────────────────────────┘
 ```
@@ -45,7 +45,7 @@ composed.
 
 | Crate | Purpose |
 |-------|---------|
-| [harmonia-store-core](../../harmonia-store-core/README.md) | Store paths, derivations, signatures (pure) |
+| [harmonia-store-core](../../harmonia-store-core/README.md) | Store paths, derivations (pure) |
 | [harmonia-store-aterm](../../harmonia-store-aterm/) | ATerm derivation parser |
 | [harmonia-store-path-info](../../harmonia-store-path-info/) | ValidPathInfo types (pure) |
 | [harmonia-store-db](../../harmonia-store-db/README.md) | SQLite store metadata |
@@ -62,6 +62,7 @@ composed.
 | [harmonia-utils-io](../../harmonia-utils-io/README.md) | Async byte streams, wire padding |
 | [harmonia-utils-base-encoding](../../harmonia-utils-base-encoding/README.md) | Nix base32, hex, base64 |
 | [harmonia-utils-hash](../../harmonia-utils-hash/README.md) | Hash types, algorithms, formatting |
+| [harmonia-utils-signature](../../harmonia-utils-signature/) | Ed25519 NAR signatures (no store dep) |
 | [harmonia-utils-test](../../harmonia-utils-test/README.md) | Proptest strategies (dev-only) |
 
 The `harmonia-utils-*` crates are the inverse of `harmonia-store-core`: they
@@ -82,6 +83,7 @@ graph BT
         utils-base-encoding
         utils-hash
         utils-io
+        utils-signature
         utils-test
     end
     subgraph File
@@ -94,6 +96,7 @@ graph BT
     file-nar --> file-core
     file-nar --> utils-io
     utils-hash --> utils-base-encoding
+    utils-signature --> utils-base-encoding
     store-core --> utils-base-encoding
     store-core --> utils-hash
     store-aterm --> store-core
@@ -101,6 +104,7 @@ graph BT
     store-build-result --> store-core
     store-path-info --> store-core
     store-path-info --> utils-hash
+    store-path-info --> utils-signature
     protocol --> file-nar
     protocol --> protocol-derive
     protocol --> store-build-result
@@ -108,12 +112,15 @@ graph BT
     protocol --> store-path-info
     protocol --> utils-hash
     protocol --> utils-io
+    protocol --> utils-signature
     store-db --> store-core
     store-db --> store-path-info
     store-db --> utils-hash
+    store-db --> utils-signature
     store-nar-info --> store-core
     store-nar-info --> store-path-info
     store-nar-info --> utils-hash
+    store-nar-info --> utils-signature
     cache --> file-core
     cache --> file-nar
     cache --> store-core
@@ -121,15 +128,18 @@ graph BT
     cache --> store-nar-info
     cache --> store-path-info
     cache --> utils-hash
+    cache --> utils-signature
     daemon --> protocol
     daemon --> store-core
     daemon --> store-db
     daemon --> utils-hash
     daemon --> utils-io
+    daemon --> utils-signature
     store-remote --> file-nar
     store-remote --> protocol
     store-remote --> store-core
     store-remote --> utils-io
+    store-remote --> utils-signature
 ```
 
 ```mermaid
@@ -141,6 +151,7 @@ graph BT
         utils-base-encoding
         utils-hash
         utils-io
+        utils-signature
         utils-test
     end
     subgraph File
@@ -153,10 +164,12 @@ graph BT
     file-nar --> file-core
     file-nar --> utils-io
     utils-hash --> utils-base-encoding
+    utils-signature --> utils-base-encoding
     store-core --> utils-hash
     store-aterm --> store-core
     store-build-result --> store-core
     store-path-info --> store-core
+    store-path-info --> utils-signature
     protocol --> file-nar
     protocol --> protocol-derive
     protocol --> store-build-result

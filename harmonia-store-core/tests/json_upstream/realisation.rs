@@ -4,7 +4,7 @@ use crate::libstore_test_data_path;
 use crate::read_upstream_json;
 use crate::test_upstream_json;
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
-use harmonia_store_core::signature::{RawSignature, SIGNATURE_BYTES, SecretKey, Signature};
+use harmonia_utils_signature::{RawSignature, SIGNATURE_BYTES, SecretKey, Signature};
 
 fn drv_output() -> DrvOutput {
     DrvOutput {

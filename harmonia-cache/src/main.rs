@@ -122,7 +122,6 @@ impl actix_web::error::ResponseError for ServerError {
             | CacheError::Config(_)
             | CacheError::Server(_)
             | CacheError::Signing(_)
-            | CacheError::Fingerprint(_)
             // `ServeError::AccessDenied` is a server-side store anomaly (path
             // without a file name), not client authz, hence 500 not 403.
             | CacheError::Serve(_) => StatusCode::INTERNAL_SERVER_ERROR,
