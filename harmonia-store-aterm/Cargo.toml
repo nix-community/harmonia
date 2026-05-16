@@ -14,7 +14,7 @@ readme               = "README.md"
 
 [dependencies]
 bytes                          = { workspace = true }
-harmonia-store-content-address = { workspace = true }
+harmonia-store-content-address = { workspace = true, public = true }
 harmonia-store-derivation      = { workspace = true, public = true }
 harmonia-store-path            = { workspace = true, public = true }
 harmonia-utils-hash            = { workspace = true, public = true }
