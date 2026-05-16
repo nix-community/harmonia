@@ -46,12 +46,11 @@ use harmonia_protocol::{FEATURE_REALISATION_WITH_PATH, ProtocolVersion};
 
 // From harmonia-store-core
 use harmonia_protocol::log::{LogMessage, Message, Verbosity};
+use harmonia_store_core::content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::derived_path::{DerivedPath, OutputName};
 use harmonia_store_core::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
-use harmonia_store_core::store_path::{
-    ContentAddressMethodAlgorithm, StoreDir, StorePath, StorePathHash, StorePathSet,
-};
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathSet};
 use harmonia_utils_io::{AsyncBufReadCompat, BytesReader, Lending};
 use harmonia_utils_signature::Signature;
 

@@ -4,7 +4,7 @@ use std::{fmt, io};
 
 use super::ProtocolVersion;
 use crate::version::FeatureSet;
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_path::StoreDir;
 
 mod bytes;
 mod collections;

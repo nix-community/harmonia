@@ -1,7 +1,7 @@
 use crate::error::{CacheError, StoreError};
 use actix_web::{HttpResponse, http, web};
-use harmonia_store_core::store_path::StorePathHash;
 use harmonia_store_nar_info::{build_narinfo, format_narinfo_txt};
+use harmonia_store_path::StorePathHash;
 use harmonia_store_path_info::StorePathKeyed;
 use serde::Deserialize;
 

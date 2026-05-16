@@ -1,6 +1,6 @@
 use crate::error::{CacheError, ConfigError, Result};
 use crate::store::Store;
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_path::StoreDir;
 use harmonia_utils_signature::SecretKey;
 use serde::Deserialize;
 use std::fs::read_to_string;

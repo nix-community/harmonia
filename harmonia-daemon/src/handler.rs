@@ -19,8 +19,8 @@ use harmonia_protocol::daemon::{
 };
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
 use harmonia_store_core::realisation::{DrvOutput, UnkeyedRealisation};
-use harmonia_store_core::store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_store_db::StoreDb;
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 
 use crate::error::DaemonError;
 
@@ -148,10 +148,9 @@ impl DaemonStore for LocalStoreHandler {
 
     fn query_valid_paths<'a>(
         &'a mut self,
-        paths: &'a harmonia_store_core::store_path::StorePathSet,
+        paths: &'a harmonia_store_path::StorePathSet,
         _substitute: bool,
-    ) -> impl ResultLog<Output = DaemonResult<harmonia_store_core::store_path::StorePathSet>> + Send + 'a
-    {
+    ) -> impl ResultLog<Output = DaemonResult<harmonia_store_path::StorePathSet>> + Send + 'a {
         async move {
             let mut valid = BTreeSet::new();
             for path in paths {

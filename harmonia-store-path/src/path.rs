@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use harmonia_utils_base_encoding::base32;
-use harmonia_utils_hash;
+use harmonia_utils_hash::Sha256;
 
 use super::FromStoreDirStr;
 use super::StoreDir;
@@ -43,7 +43,7 @@ impl StorePath {
         Ok(StorePath { hash, name })
     }
 
-    pub fn from_hash(hash: &harmonia_utils_hash::Sha256, name: StorePathName) -> Self {
+    pub fn from_hash(hash: &Sha256, name: StorePathName) -> Self {
         StorePath {
             hash: StorePathHash::new_from_hash(hash),
             name,
@@ -224,7 +224,7 @@ impl StorePathHash {
         StorePathHash(value)
     }
 
-    pub fn new_from_hash(hash: &harmonia_utils_hash::Sha256) -> Self {
+    pub fn new_from_hash(hash: &Sha256) -> Self {
         let mut digest = [0u8; STORE_PATH_HASH_SIZE];
         for (i, item) in hash.as_ref().iter().enumerate() {
             let idx = i % STORE_PATH_HASH_SIZE;
@@ -383,7 +383,7 @@ const NAME_LOOKUP: [bool; 256] = {
 };
 pub(crate) const MAX_NAME_LEN: usize = 211;
 
-pub(crate) fn into_name<V: AsRef<[u8]>>(s: &V) -> Result<&str, StorePathNameError> {
+pub fn into_name<V: AsRef<[u8]>>(s: &V) -> Result<&str, StorePathNameError> {
     let s = s.as_ref();
     if s.is_empty() || s.len() > MAX_NAME_LEN {
         return Err(StorePathNameError::NameLength);
@@ -930,7 +930,7 @@ mod unittests {
 mod proptests {
     use proptest::prelude::*;
 
-    use crate::store_path::{StoreDir, StorePath, StorePathName};
+    use crate::{StoreDir, StorePath, StorePathName};
 
     proptest! {
         #[test]

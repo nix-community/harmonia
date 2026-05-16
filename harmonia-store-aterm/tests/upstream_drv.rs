@@ -7,7 +7,7 @@
 
 use harmonia_store_aterm::{parse_derivation_aterm, print_derivation_aterm};
 use harmonia_store_core::derivation::Derivation;
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_path::StoreDir;
 use harmonia_utils_test::json_upstream::libstore_test_data_path;
 use rstest::rstest;
 

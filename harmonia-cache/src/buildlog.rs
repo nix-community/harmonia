@@ -4,7 +4,7 @@ use actix_web::Responder;
 use actix_web::http::header::HeaderValue;
 use actix_web::{HttpRequest, HttpResponse, http, web};
 use async_compression::tokio::bufread::BzDecoder;
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_path::StorePath;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;

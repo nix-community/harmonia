@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use crate::derivation::OutputPathName;
 use crate::derived_path::{OutputName, SingleDerivedPath};
-use crate::store_path::{StoreDir, StoreDirDisplay, StorePath};
+use harmonia_store_path::{StoreDir, StoreDirDisplay, StorePath};
 use harmonia_utils_base_encoding::base32;
 use harmonia_utils_hash::Sha256;
 

@@ -16,7 +16,7 @@
 //!
 //! # Key Modules
 //!
-//! - `store_path` - Store path types, parsing, validation
+//! - `content_address` - Content addressing and store path computation
 //! - `derivation` - Derivation (.drv) file format and semantics (feature-gated)
 //! - `realisation` - Store path realisation tracking (feature-gated)
 //!
@@ -51,6 +51,7 @@ macro_rules! impl_serde_via_string {
     };
 }
 
+pub mod content_address;
 #[cfg(feature = "derivation")]
 pub mod derivation;
 #[cfg(feature = "derivation")]
@@ -59,7 +60,6 @@ pub mod derived_path;
 pub mod placeholder;
 #[cfg(feature = "derivation")]
 pub mod realisation;
-pub mod store_path;
 
 #[cfg(any(test, feature = "test"))]
 pub mod test;

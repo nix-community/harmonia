@@ -1,15 +1,18 @@
+// SPDX-FileCopyrightText: 2024 griff
+// SPDX-FileCopyrightText: 2025 Jörg Thalheim
+// SPDX-License-Identifier: EUPL-1.2 OR MIT
+//
+// This crate is derived from Nix.rs (https://github.com/griff/Nix.rs)
+// Upstream commit: f5d129b71bb30b476ce21e6da2a53dcb28607a89
+
+//! Nix store path types, parsing, and validation.
+
 use std::collections::BTreeSet;
 
-mod content_address;
-mod create;
 mod path;
 mod store_dir;
 
-pub use content_address::{
-    ContentAddress, ContentAddressMethod, ContentAddressMethodAlgorithm, ParseContentAddressError,
-};
-#[cfg(feature = "derivation")]
-pub(crate) use path::into_name;
+pub use path::into_name;
 pub use path::{
     ParseStorePathError, StorePath, StorePathError, StorePathHash, StorePathName,
     StorePathNameError,

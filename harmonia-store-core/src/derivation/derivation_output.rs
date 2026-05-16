@@ -2,10 +2,9 @@ use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::content_address::{ContentAddress, ContentAddressMethod, ContentAddressMethodAlgorithm};
 use crate::derived_path::OutputName;
-use crate::store_path::ContentAddressMethod;
-use crate::store_path::ContentAddressMethodAlgorithm;
-use crate::store_path::{ContentAddress, StoreDir, StorePath, StorePathName, StorePathNameError};
+use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathNameError};
 use harmonia_utils_hash::Hash;
 
 /// Helper for formatting output path names.
@@ -161,7 +160,9 @@ impl DerivationOutput {
                 }
                 .to_string()
                 .parse()?;
-                Ok(Some(store_dir.make_store_path_from_ca(name, *ca)))
+                Ok(Some(crate::content_address::make_store_path_from_ca(
+                    store_dir, name, *ca,
+                )))
             }
             _ => Ok(None),
         }
@@ -287,7 +288,7 @@ pub mod arbitrary {
     pub fn arb_output_name_for_drv(
         drv_name: &StorePathName,
     ) -> impl Strategy<Value = OutputName> + use<> {
-        use crate::store_path::proptest::arb_output_name;
+        use harmonia_store_path::proptest::arb_output_name;
 
         // "out" output uses just drv_name (no suffix), so always fits.
         // Non-default: "{drv_name}-{output_name}" must fit in 211 chars.
@@ -318,7 +319,7 @@ mod unittests {
 
     use super::DerivationOutput;
     use crate::derived_path::OutputName;
-    use crate::store_path::{StorePath, StorePathName, StorePathNameError};
+    use harmonia_store_path::{StorePath, StorePathName, StorePathNameError};
 
     #[rstest]
     #[case::deffered(DerivationOutput::Deferred, "a", "a", Ok(None))]

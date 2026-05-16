@@ -988,6 +988,7 @@ dependencies = [
  "harmonia-store-core",
  "harmonia-store-db",
  "harmonia-store-nar-info",
+ "harmonia-store-path",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-signature",
@@ -1026,6 +1027,7 @@ dependencies = [
  "harmonia-protocol",
  "harmonia-store-core",
  "harmonia-store-db",
+ "harmonia-store-path",
  "harmonia-utils-hash",
  "harmonia-utils-io",
  "harmonia-utils-signature",
@@ -1091,6 +1093,7 @@ dependencies = [
  "harmonia-protocol-derive",
  "harmonia-store-build-result",
  "harmonia-store-core",
+ "harmonia-store-path",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-io",
@@ -1131,6 +1134,7 @@ version = "0.0.0-alpha.0"
 dependencies = [
  "harmonia-store-aterm",
  "harmonia-store-core",
+ "harmonia-store-path",
  "harmonia-utils-hash",
  "harmonia-utils-test",
  "memchr",
@@ -1162,6 +1166,7 @@ dependencies = [
  "data-encoding",
  "derive_more",
  "harmonia-store-core",
+ "harmonia-store-path",
  "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
  "harmonia-utils-signature",
@@ -1182,6 +1187,7 @@ name = "harmonia-store-db"
 version = "3.1.0"
 dependencies = [
  "harmonia-store-core",
+ "harmonia-store-path",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-signature",
@@ -1196,6 +1202,7 @@ name = "harmonia-store-nar-info"
 version = "3.1.0"
 dependencies = [
  "harmonia-store-core",
+ "harmonia-store-path",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-signature",
@@ -1206,10 +1213,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "harmonia-store-path"
+version = "3.1.0"
+dependencies = [
+ "derive_more",
+ "harmonia-store-path",
+ "harmonia-utils-base-encoding",
+ "harmonia-utils-hash",
+ "harmonia-utils-test",
+ "hex-literal",
+ "proptest",
+ "proptest-derive",
+ "rstest",
+ "serde",
+ "thiserror",
+ "zerocopy",
+]
+
+[[package]]
 name = "harmonia-store-path-info"
 version = "3.1.0"
 dependencies = [
  "harmonia-store-core",
+ "harmonia-store-path",
  "harmonia-store-path-info",
  "harmonia-utils-hash",
  "harmonia-utils-signature",
@@ -1231,6 +1257,7 @@ dependencies = [
  "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-core",
+ "harmonia-store-path",
  "harmonia-utils-io",
  "harmonia-utils-signature",
  "prometheus",

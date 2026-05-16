@@ -1,8 +1,7 @@
 use thiserror::Error;
 
-use harmonia_store_core::store_path::{
-    ParseContentAddressError, ParseStorePathError, StorePathNameError,
-};
+use harmonia_store_core::content_address::ParseContentAddressError;
+use harmonia_store_path::{ParseStorePathError, StorePathNameError};
 
 #[derive(Debug, Error)]
 pub enum ParseError {

@@ -1,8 +1,7 @@
+use harmonia_store_core::content_address::{ContentAddress, ContentAddressMethodAlgorithm};
 use harmonia_store_core::derivation::DerivationOutput;
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::store_path::{
-    ContentAddress, ContentAddressMethodAlgorithm, StoreDir, StorePath, StorePathName,
-};
+use harmonia_store_path::{StoreDir, StorePath, StorePathName};
 use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::CommonHash as _;
 use harmonia_utils_hash::fmt::NonSRI;

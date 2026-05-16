@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
+use harmonia_store_core::content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_core::derivation::{
     BasicDerivation, Derivation, DerivationOutput, StructuredAttrs,
 };
 use harmonia_store_core::derived_path::{OutputName, SingleDerivedPath};
 use harmonia_store_core::placeholder::Placeholder;
-use harmonia_store_core::store_path::ContentAddressMethodAlgorithm;
 use harmonia_utils_hash::Algorithm;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -390,9 +390,9 @@ test_upstream_json!(
             "h1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep2.drv".parse().unwrap(),
         ));
 
-        let dep1_drv_path: harmonia_store_core::store_path::StorePath =
+        let dep1_drv_path: harmonia_store_path::StorePath =
             "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep1.drv".parse().unwrap();
-        let dep2_drv_path: harmonia_store_core::store_path::StorePath =
+        let dep2_drv_path: harmonia_store_path::StorePath =
             "h1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-dep2.drv".parse().unwrap();
 
         let placeholder1_out =

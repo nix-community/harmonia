@@ -13,7 +13,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::ProtocolVersion;
 use crate::version::FeatureSet;
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_path::StoreDir;
 use harmonia_utils_io::wire::{ZEROS, calc_padding};
 use harmonia_utils_io::{DEFAULT_BUF_SIZE, RESERVED_BUF_SIZE};
 

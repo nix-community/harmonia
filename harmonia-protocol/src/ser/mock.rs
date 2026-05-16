@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::ProtocolVersion;
 use crate::version::FeatureSet;
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_path::StoreDir;
 
 use super::NixWrite;
 

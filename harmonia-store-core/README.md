@@ -28,7 +28,7 @@ This is the "business logic" of Nix, pure and simple. It should be usable with a
 ## Example
 
 ```rust
-use harmonia_store_core::store_path::{StorePath, StoreDir};
+use harmonia_store_path::{StorePath, StoreDir};
 use harmonia_store_core::derivation::Derivation;
 
 // Pure computation - no IO

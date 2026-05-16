@@ -2,8 +2,8 @@
 
 use crate::libstore_test_data_path;
 use crate::test_upstream_json;
+use harmonia_store_core::content_address::{ContentAddress, ContentAddressMethodAlgorithm};
 use harmonia_store_core::derivation::DerivationOutput;
-use harmonia_store_core::store_path::{ContentAddress, ContentAddressMethodAlgorithm};
 use harmonia_utils_hash::{Algorithm, Hash};
 use hex_literal::hex;
 

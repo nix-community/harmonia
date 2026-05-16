@@ -7,7 +7,7 @@
 
 use rusqlite::params;
 
-use harmonia_store_core::store_path::{StoreDir, StorePath};
+use harmonia_store_path::{StoreDir, StorePath};
 
 use crate::connection::StoreDb;
 use crate::error::Result;

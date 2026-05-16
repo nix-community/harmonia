@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::derived_path::{OutputName, SingleDerivedPath};
-use crate::store_path::{StorePath, StorePathSet};
+use harmonia_store_path::{StorePath, StorePathSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

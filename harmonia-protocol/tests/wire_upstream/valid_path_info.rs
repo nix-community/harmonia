@@ -7,7 +7,7 @@
 //! `ValidPathInfo` (`StorePathKeyed<UnkeyedValidPathInfo>`) doesn't impl
 //! serde `Deserialize`, so we parse the JSON manually.
 
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_path::StorePath;
 use harmonia_store_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 
 use crate::no_features;

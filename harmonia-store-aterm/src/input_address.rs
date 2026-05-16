@@ -5,9 +5,7 @@ use harmonia_store_core::derivation::{
     BasicDerivation, DerivationOutput, DerivationT, OutputPathName,
 };
 use harmonia_store_core::derived_path::OutputName;
-use harmonia_store_core::store_path::{
-    StoreDir, StorePath, StorePathName, StorePathNameError, StorePathSet,
-};
+use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathNameError, StorePathSet};
 
 use crate::error::ParseError;
 use crate::print_derivation_aterm;

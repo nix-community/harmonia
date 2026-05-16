@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
-"""Generate Mermaid dependency diagrams of intra-workspace crate dependencies.
+"""Generate a Mermaid dependency diagram of intra-workspace crate dependencies.
 
-Produces two diagrams: the full dependency graph and its transitive reduction.
+Produces the transitive reduction of the dependency graph.
 """
 
 import json
@@ -137,9 +137,40 @@ def generate_mermaid(
 
     order = topo_order(edges)
 
+    # Store crates that perform I/O (blacklist — excluded from the pure group).
+    STORE_IMPURE = {
+        "store-db",
+        "store-remote",
+    }
+    # Store crates that are I/O-free (whitelist — included in the pure group).
+    STORE_PURE = {
+        "store-aterm",
+        "store-build-result",
+        "store-core",
+        "store-nar-info",
+        "store-path",
+        "store-path-info",
+    }
+
+    # Sanity check: every store-* crate must be in exactly one list.
+    overlap = STORE_PURE & STORE_IMPURE
+    if overlap:
+        raise SystemExit(
+            f"Store crate(s) in both STORE_PURE and STORE_IMPURE: {', '.join(sorted(overlap))}. "
+            f"Each crate must be in exactly one set."
+        )
+    store_crates = {n for n in nodes if n.startswith("store-")}
+    uncategorized = store_crates - STORE_PURE - STORE_IMPURE
+    if uncategorized:
+        raise SystemExit(
+            f"Store crate(s) not categorized: {', '.join(sorted(uncategorized))}. "
+            f"Add to STORE_PURE or STORE_IMPURE in {__file__}."
+        )
+
     # Group crates by prefix so Mermaid clusters them.
     groups = {
         "Utilities": sorted(n for n in nodes if n.startswith("utils-")),
+        "Store (pure)": sorted(n for n in nodes if n in STORE_PURE),
         "File": sorted(n for n in nodes if n.startswith("file-")),
     }
     grouped = {n for members in groups.values() for n in members}
@@ -152,7 +183,7 @@ def generate_mermaid(
     lines.append("graph BT")
     for label, members in groups.items():
         if members:
-            lines.append(f"    subgraph {label}")
+            lines.append(f'    subgraph "{label}"')
             for n in members:
                 lines.append(f"        {n}")
             lines.append("    end")
@@ -181,8 +212,7 @@ def main() -> None:
     all_members, edges = get_workspace_info(manifest_path)
     reduced = transitive_reduction(edges)
 
-    full_mermaid = generate_mermaid(all_members, edges, title="Full dependency graph")
-    reduced_mermaid = generate_mermaid(all_members, reduced, title="Transitive reduction")
+    mermaid = generate_mermaid(all_members, reduced, title="Transitive reduction")
 
     # --doc PATH: specify the doc file (default: auto-detected from script location).
     if "--doc" in sys.argv:
@@ -194,11 +224,8 @@ def main() -> None:
     if doc_file.exists():
         text = doc_file.read_text()
         blocks = list(re.finditer(r"```mermaid\n.*?```", text, flags=re.DOTALL))
-        if len(blocks) >= 2:
-            text = text[: blocks[1].start()] + reduced_mermaid + text[blocks[1].end() :]
-            text = text[: blocks[0].start()] + full_mermaid + text[blocks[0].end() :]
-        elif len(blocks) == 1:
-            text = text[: blocks[0].start()] + full_mermaid + "\n\n" + reduced_mermaid + text[blocks[0].end() :]
+        if blocks:
+            text = text[: blocks[0].start()] + mermaid + text[blocks[-1].end() :]
         else:
             print("No mermaid blocks found in doc file", file=sys.stderr)
             sys.exit(1)
@@ -209,9 +236,7 @@ def main() -> None:
         else:
             print(text, end="")
     else:
-        print(full_mermaid)
-        print()
-        print(reduced_mermaid)
+        print(mermaid)
 
 
 if __name__ == "__main__":

@@ -72,7 +72,7 @@ impl NixDeserializeTrait for BuildResult {
                         None => continue,
                     };
                     // Value is JSON: {"outPath": "/nix/store/...", ...}
-                    let out_path = (|| -> Option<harmonia_store_core::store_path::StorePath> {
+                    let out_path = (|| -> Option<harmonia_store_path::StorePath> {
                         let obj: serde_json::Value = serde_json::from_str(&json_str).ok()?;
                         let path_str = obj.get("outPath")?.as_str()?;
                         path_str.parse().ok()

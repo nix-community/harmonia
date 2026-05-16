@@ -1,6 +1,7 @@
 //! Tests that verify JSON serialization matches upstream Nix format
 
-use harmonia_store_core::store_path::{ContentAddress, StoreDir};
+use harmonia_store_core::content_address::ContentAddress;
+use harmonia_store_path::StoreDir;
 use harmonia_store_path_info::{NarHash, Pure, UnkeyedValidPathInfo};
 use harmonia_utils_hash::Sha256;
 use harmonia_utils_signature::Signature;

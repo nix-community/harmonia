@@ -2,7 +2,7 @@
 //! variants and edge cases.
 
 use harmonia_store_aterm::{parse_derivation_aterm, print_derivation_aterm};
-use harmonia_store_core::store_path::StoreDir;
+use harmonia_store_path::StoreDir;
 use rstest::rstest;
 
 #[rstest]

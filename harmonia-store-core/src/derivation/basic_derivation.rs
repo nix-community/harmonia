@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ByteString;
 use crate::derived_path::SingleDerivedPath;
-use crate::store_path::{StorePathName, StorePathSet};
+use harmonia_store_path::{StorePathName, StorePathSet};
 
 use super::{DerivationInputs, DerivationOutput, DerivationOutputs};
 

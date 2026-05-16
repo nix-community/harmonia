@@ -3,8 +3,8 @@
 
 use crate::handler::LocalStoreHandler;
 use harmonia_protocol::daemon::{DaemonStore, HandshakeDaemonStore};
-use harmonia_store_core::store_path::{StoreDir, StorePath};
 use harmonia_store_db::StoreDb;
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_utils_test::CanonicalTempDir;
 use std::process::Command;
 
@@ -176,7 +176,7 @@ async fn test_handler_with_nix_store() {
 
     // Test query_path_from_hash_part with non-existent hash
     // Create a fake hash with arbitrary bytes (20 bytes for store path hash)
-    let fake_hash = harmonia_store_core::store_path::StorePathHash::copy_from_slice(&[0u8; 20]);
+    let fake_hash = StorePathHash::copy_from_slice(&[0u8; 20]);
     let result = store.query_path_from_hash_part(&fake_hash).await.unwrap();
     assert!(
         result.is_none(),

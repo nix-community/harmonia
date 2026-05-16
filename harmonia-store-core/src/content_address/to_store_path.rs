@@ -18,9 +18,10 @@
 //! ```
 //!
 
+use harmonia_store_path::{StoreDir, StoreDirDisplay, StorePathSet};
 use harmonia_utils_hash::{self, Algorithm};
 
-use super::{ContentAddress, StoreDirDisplay, StorePathSet};
+use super::ContentAddress;
 
 pub struct Fingerprint<N> {
     pub path_type: PathType,
@@ -31,11 +32,7 @@ impl<N> StoreDirDisplay for Fingerprint<N>
 where
     N: std::fmt::Display,
 {
-    fn fmt(
-        &self,
-        store_dir: &super::StoreDir,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, store_dir: &StoreDir, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{}:{}:{}",
@@ -86,11 +83,7 @@ impl From<ContentAddress> for PathType {
 }
 
 impl StoreDirDisplay for PathType {
-    fn fmt(
-        &self,
-        store_dir: &super::StoreDir,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, store_dir: &StoreDir, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PathType::Text { references, digest } => {
                 f.write_str("text")?;
