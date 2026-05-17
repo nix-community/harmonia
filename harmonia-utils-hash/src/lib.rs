@@ -167,6 +167,7 @@ enum InnerContext {
     SHA1(sha1::Sha1),
     SHA256(sha2::Sha256),
     SHA512(sha2::Sha512),
+    BLAKE3(Box<blake3::Hasher>),
 }
 
 /// A context for multi-step (Init-Update-Finish) digest calculation.
@@ -197,6 +198,7 @@ impl Context {
             Algorithm::SHA1 => InnerContext::SHA1(sha1::Sha1::new()),
             Algorithm::SHA256 => InnerContext::SHA256(sha2::Sha256::new()),
             Algorithm::SHA512 => InnerContext::SHA512(sha2::Sha512::new()),
+            Algorithm::BLAKE3 => InnerContext::BLAKE3(Box::new(blake3::Hasher::new())),
         };
         Context(algorithm, inner)
     }
@@ -210,6 +212,9 @@ impl Context {
             InnerContext::SHA1(ctx) => ctx.update(data),
             InnerContext::SHA256(ctx) => ctx.update(data),
             InnerContext::SHA512(ctx) => ctx.update(data),
+            InnerContext::BLAKE3(ctx) => {
+                ctx.update(data);
+            }
         }
     }
 
@@ -223,6 +228,7 @@ impl Context {
             InnerContext::SHA1(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
             InnerContext::SHA256(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
             InnerContext::SHA512(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
+            InnerContext::BLAKE3(ctx) => Hash::new(self.0, ctx.finalize().as_bytes()),
         }
     }
 
@@ -326,7 +332,8 @@ mod proptests {
                 1 => Just(Algorithm::MD5),
                 2 => Just(Algorithm::SHA1),
                 5 => Just(Algorithm::SHA256),
-                2 => Just(Algorithm::SHA512)
+                2 => Just(Algorithm::SHA512),
+                2 => Just(Algorithm::BLAKE3)
             ]
             .boxed()
         }
@@ -400,11 +407,23 @@ mod unittests {
         ),
     );
 
+    /// value cross-checked against NixOS/nix PR #12379 BLAKE3 test vectors
+    const BLAKE3_ABC: Hash = Hash::new(
+        Algorithm::BLAKE3,
+        &hex!("6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"),
+    );
+    /// value cross-checked against NixOS/nix PR #12379 BLAKE3 test vectors
+    const BLAKE3_LONG: Hash = Hash::new(
+        Algorithm::BLAKE3,
+        &hex!("c19012cc2aaf0dc3d8e5c45a1b79114d2df42abb2a410bf54be09e891af06ff8"),
+    );
+
     #[rstest]
     #[case::md5(Algorithm::MD5, 16, 32, 26, 24, 18)]
     #[case::sha1(Algorithm::SHA1, 20, 40, 32, 28, 21)]
     #[case::sha256(Algorithm::SHA256, 32, 64, 52, 44, 33)]
     #[case::sha512(Algorithm::SHA512, 64, 128, 103, 88, 66)]
+    #[case::blake3(Algorithm::BLAKE3, 32, 64, 52, 44, 33)]
     fn algorithm_size(
         #[case] algorithm: Algorithm,
         #[case] size: usize,
@@ -441,14 +460,17 @@ mod unittests {
     #[case::sha1("sha1", Algorithm::SHA1)]
     #[case::sha256("sha256", Algorithm::SHA256)]
     #[case::sha512("sha512", Algorithm::SHA512)]
+    #[case::blake3("blake3", Algorithm::BLAKE3)]
     #[case::md5_upper("MD5", Algorithm::MD5)]
     #[case::sha1_upper("SHA1", Algorithm::SHA1)]
     #[case::sha256_upper("SHA256", Algorithm::SHA256)]
     #[case::sha512_upper("SHA512", Algorithm::SHA512)]
+    #[case::blake3_upper("BLAKE3", Algorithm::BLAKE3)]
     #[case::md5_mixed("mD5", Algorithm::MD5)]
     #[case::sha1_mixed("ShA1", Algorithm::SHA1)]
     #[case::sha256_mixed("ShA256", Algorithm::SHA256)]
     #[case::sha512_mixed("ShA512", Algorithm::SHA512)]
+    #[case::blake3_mixed("BlAkE3", Algorithm::BLAKE3)]
     fn algorithm_from_str(#[case] input: &str, #[case] expected: Algorithm) {
         let actual = input.parse().unwrap();
         assert_eq!(expected, actual);
@@ -463,6 +485,8 @@ mod unittests {
     #[case::sha256_long(&SHA256_LONG, "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")]
     #[case::sha512_abc(&SHA512_ABC, "abc")]
     #[case::sha512_long(&SHA512_LONG, "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu")]
+    #[case::blake3_abc(&BLAKE3_ABC, "abc")]
+    #[case::blake3_long(&BLAKE3_LONG, "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")]
     fn test_digest(#[case] expected: &Hash, #[case] input: &str) {
         let actual = expected.algorithm().digest(input);
         assert_eq!(actual, *expected);
@@ -481,6 +505,7 @@ mod unittests {
     #[case::sha1(&SHA1_ABC, "sha1-qZk+NkcGgWq6PiVxeFDCbJzQ2J0=")]
     #[case::md5(&MD5_ABC, "md5-kAFQmDzST7DWlj99KOF/cg==")]
     #[case::sha512(&SHA512_ABC, "sha512-3a81oZNherrMQXNJriBBMRLm+k6JqX6iCp7u5ktV05ohkpkqJ0/BqDa6PCOj/uu9RU1EI2Q86A4qmslPpUyknw==")]
+    #[case::blake3(&BLAKE3_ABC, "blake3-ZDezrDhGUTP/tjt1JzqNtUjFWEZdedsD/TWcbNW9nYU=")]
     fn test_serde_hash_sri(#[case] hash: &Hash, #[case] sri_str: &str) {
         // Test serialization - should produce SRI string
         let serialized = serde_json::to_value(hash).unwrap();

@@ -1205,6 +1205,30 @@ mod unittests {
         base64: "jpWbddrjE9qM9PcoFPwUP493ecbrn3+hcpmurbaIkBhQHSieSQD35DMbmd7EtUM6x9Mp7rbdJlReluVbh0vpCQ==",
     };
 
+    /// value cross-checked against NixOS/nix PR #12379 BLAKE3 test vectors
+    const BLAKE3_ABC: HashFormats = HashFormats {
+        hash: Hash::new(
+            Algorithm::BLAKE3,
+            &hex!("6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"),
+        ),
+        algorithm: "blake3",
+        base16: "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85",
+        base32: "11cxppanr71mzl1xnyax8rccaj5milx2fx9vnvzk6la672nb6dv4",
+        base64: "ZDezrDhGUTP/tjt1JzqNtUjFWEZdedsD/TWcbNW9nYU=",
+    };
+
+    /// value cross-checked against NixOS/nix PR #12379 BLAKE3 test vectors
+    const BLAKE3_LONG: HashFormats = HashFormats {
+        hash: Hash::new(
+            Algorithm::BLAKE3,
+            &hex!("c19012cc2aaf0dc3d8e5c45a1b79114d2df42abb2a410bf54be09e891af06ff8"),
+        ),
+        algorithm: "blake3",
+        base16: "c19012cc2aaf0dc3d8e5c45a1b79114d2df42abb2a410bf54be09e891af06ff8",
+        base32: "1y3gy0d8k7p09gshnh9apcmg8bad25winnn4wpcc63dg5b615461",
+        base64: "wZASzCqvDcPY5cRaG3kRTS30KrsqQQv1S+CeiRrwb/g=",
+    };
+
     const ALL_HASHES: &[(&str, &HashFormats)] = &[
         ("md5_empty", &MD5_EMPTY),
         ("md5_abc", &MD5_ABC),
@@ -1214,6 +1238,8 @@ mod unittests {
         ("sha256_long", &SHA256_LONG),
         ("sha512_abc", &SHA512_ABC),
         ("sha512_long", &SHA512_LONG),
+        ("blake3_abc", &BLAKE3_ABC),
+        ("blake3_long", &BLAKE3_LONG),
     ];
 
     macro_rules! for_all_hashes {

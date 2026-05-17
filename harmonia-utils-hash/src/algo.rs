@@ -10,6 +10,7 @@ const MD5_SIZE: usize = 128 / 8;
 const SHA1_SIZE: usize = 160 / 8;
 const SHA256_SIZE: usize = 256 / 8;
 const SHA512_SIZE: usize = 512 / 8;
+const BLAKE3_SIZE: usize = 256 / 8;
 
 /// A digest algorithm.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Display, Default)]
@@ -23,6 +24,8 @@ pub enum Algorithm {
     SHA256,
     #[display("sha512")]
     SHA512,
+    #[display("blake3")]
+    BLAKE3,
 }
 
 impl Algorithm {
@@ -37,6 +40,7 @@ impl Algorithm {
             Algorithm::SHA1 => SHA1_SIZE,
             Algorithm::SHA256 => SHA256_SIZE,
             Algorithm::SHA512 => SHA512_SIZE,
+            Algorithm::BLAKE3 => BLAKE3_SIZE,
         }
     }
 
@@ -71,6 +75,8 @@ impl FromStr for Algorithm {
             Ok(Algorithm::SHA1)
         } else if s.eq_ignore_ascii_case("md5") {
             Ok(Algorithm::MD5)
+        } else if s.eq_ignore_ascii_case("blake3") {
+            Ok(Algorithm::BLAKE3)
         } else {
             Err(UnknownAlgorithm(s.to_owned()))
         }

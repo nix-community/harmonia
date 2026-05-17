@@ -41,6 +41,7 @@ version = "3.1.0"
 
 [workspace.dependencies]
 async-stream = "0.3"
+blake3 = "1.8"
 bstr = "1.11"
 bytes = "1.11"
 data-encoding = "2.11"
