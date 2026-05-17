@@ -1362,9 +1362,12 @@ dependencies = [
  "bytes",
  "futures-util",
  "hex-literal",
+ "libc",
+ "nix",
  "pin-project-lite",
  "proptest",
  "rstest",
+ "tempfile",
  "tokio",
  "tokio-test",
 ]

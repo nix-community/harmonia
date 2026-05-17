@@ -18,7 +18,6 @@ use std::pin::{Pin, pin};
 use futures_core::Stream;
 use futures_util::{FutureExt, StreamExt as _, TryFutureExt};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt, copy_buf};
-use tokio::net::UnixListener;
 use tracing::{Instrument, debug, error, info, instrument, trace};
 
 use harmonia_protocol::ProtocolVersion;
@@ -1105,7 +1104,7 @@ where
             std::fs::create_dir_all(parent)?;
         }
 
-        let listener = UnixListener::bind(&self.socket_path)?;
+        let listener = harmonia_utils_io::unix_socket::bind_unix_long(&self.socket_path)?;
 
         // Make socket world-accessible so other users can connect
         #[cfg(unix)]

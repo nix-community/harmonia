@@ -14,6 +14,8 @@ mod lending;
 mod read_u64;
 mod tee;
 mod try_read_bytes_limited;
+#[cfg(unix)]
+pub mod unix_socket;
 
 pub use async_bytes_read::AsyncBytesRead;
 pub use bytes_reader::{BytesReader, DEFAULT_MAX_BUF_SIZE, DEFAULT_RESERVED_BUF_SIZE};

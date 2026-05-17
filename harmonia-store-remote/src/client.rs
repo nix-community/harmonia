@@ -17,7 +17,6 @@ use std::io::Cursor;
 use futures_core::Stream;
 use futures_util::future::Either;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt as _, copy_buf};
-use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::oneshot;
 use tracing::{debug, info, trace};
@@ -153,7 +152,7 @@ impl DaemonClientBuilder {
     where
         P: AsRef<Path>,
     {
-        let stream = UnixStream::connect(path).await?;
+        let stream = harmonia_utils_io::unix_socket::connect_unix_long(path).await?;
         let (reader, writer) = stream.into_split();
         Ok(self.build(reader, writer))
     }

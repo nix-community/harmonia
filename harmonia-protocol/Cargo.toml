@@ -20,7 +20,7 @@ bytes            = { workspace = true }
 derive_more      = { workspace = true }
 futures-core     = { workspace = true }
 futures-util     = { workspace = true }
-libc             = "0.2"
+libc             = { workspace = true }
 num_enum         = { workspace = true }
 pin-project-lite = { workspace = true }
 proptest         = { workspace = true, optional = true }
