@@ -3,7 +3,8 @@
 //! Bind and connect AF_UNIX sockets at paths longer than `sockaddr_un.sun_path`.
 //! FreeBSD reaches them through bindat and connectat. Linux routes plain bind
 //! and connect through `/proc/self/fd/<N>/<base>`, as it's just a  magic symlink
-//! the kernel resolves via an open dirfd.
+//! the kernel resolves via an open dirfd. macOS uses the per-thread cwd
+//! (`__pthread_fchdir`) plus a relative basename.
 
 use std::io;
 use std::path::Path;
@@ -34,6 +35,18 @@ pub async fn connect_unix_long(path: impl AsRef<Path>) -> io::Result<UnixStream>
         return UnixStream::connect(path).await;
     }
     long_path::connect(path).await
+}
+
+/// Split a socket path into its parent directory and basename.
+#[cfg(any(target_os = "freebsd", target_os = "macos"))]
+fn split_path(path: &Path) -> io::Result<(&Path, &std::ffi::OsStr)> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| io::Error::other("socket path has no parent directory"))?;
+    let base = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("socket path has no file name"))?;
+    Ok((dir, base))
 }
 
 #[cfg(target_os = "linux")]
@@ -94,9 +107,8 @@ mod long_path {
 #[cfg(target_os = "freebsd")]
 #[allow(unsafe_code)]
 mod long_path {
-    use super::{Path, UnixListener, UnixStream, io};
+    use super::{Path, UnixListener, UnixStream, io, split_path};
 
-    use std::ffi::OsStr;
     use std::os::fd::{AsRawFd, OwnedFd};
     use std::os::unix::net::{UnixListener as StdUnixListener, UnixStream as StdUnixStream};
 
@@ -128,16 +140,6 @@ mod long_path {
         // `O_SEARCH` matches chdir's search-bit semantics.
         let flags = OFlag::O_SEARCH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC;
         open(dir, flags, Mode::empty()).map_err(io::Error::from)
-    }
-
-    fn split_path(path: &Path) -> io::Result<(&Path, &OsStr)> {
-        let dir = path
-            .parent()
-            .ok_or_else(|| io::Error::other("socket path has no parent directory"))?;
-        let base = path
-            .file_name()
-            .ok_or_else(|| io::Error::other("socket path has no file name"))?;
-        Ok((dir, base))
     }
 
     pub fn bind(path: &Path) -> io::Result<UnixListener> {
@@ -212,7 +214,79 @@ mod long_path {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod long_path {
+    use super::{Path, UnixListener, UnixStream, io, split_path};
+
+    use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+    use std::os::unix::net::UnixStream as StdUnixStream;
+
+    use nix::fcntl::{OFlag, open};
+    use nix::sys::stat::Mode;
+
+    /// Darwin's `__pthread_fchdir` syscall: per-thread cwd override. Private SPI,
+    /// but long-stable and relied on by Go's runtime for `*at()` emulation.
+    /// `fd == -1` clears the override and falls back to the process cwd.
+    const SYS___PTHREAD_FCHDIR: libc::c_int = 349;
+
+    fn pthread_fchdir(fd: RawFd) -> io::Result<()> {
+        // SAFETY: __pthread_fchdir takes a single int fd and returns 0/-1.
+        let rc = unsafe { libc::syscall(SYS___PTHREAD_FCHDIR, fd) };
+        if rc < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Pins the calling thread's cwd to a dirfd; clears it on drop so tokio's
+    /// reusable pool threads don't leak a stale override.
+    struct ThreadCwd;
+
+    impl ThreadCwd {
+        fn enter(dirfd: &OwnedFd) -> io::Result<Self> {
+            pthread_fchdir(dirfd.as_raw_fd())?;
+            Ok(Self)
+        }
+    }
+
+    impl Drop for ThreadCwd {
+        fn drop(&mut self) {
+            let _ = pthread_fchdir(-1);
+        }
+    }
+
+    fn open_dir(dir: &Path) -> io::Result<OwnedFd> {
+        let flags = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC;
+        open(dir, flags, Mode::empty()).map_err(io::Error::from)
+    }
+
+    pub fn bind(path: &Path) -> io::Result<UnixListener> {
+        let (dir, base) = split_path(path)?;
+        let dirfd = open_dir(dir)?;
+        let _cwd = ThreadCwd::enter(&dirfd)?;
+        UnixListener::bind(base)
+    }
+
+    pub async fn connect(path: &Path) -> io::Result<UnixStream> {
+        // The per-thread cwd must stay pinned to one OS thread and connect()
+        // can block, so do the whole thing on the blocking pool.
+        let path = path.to_owned();
+        let std_stream = tokio::task::spawn_blocking(move || -> io::Result<StdUnixStream> {
+            let (dir, base) = split_path(&path)?;
+            let dirfd = open_dir(dir)?;
+            let _cwd = ThreadCwd::enter(&dirfd)?;
+            let stream = StdUnixStream::connect(base)?;
+            stream.set_nonblocking(true)?;
+            Ok(stream)
+        })
+        .await
+        .map_err(|e| io::Error::other(format!("connect task panicked: {e}")))??;
+        UnixStream::from_std(std_stream)
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "macos")))]
 mod long_path {
     use super::{Path, UnixListener, UnixStream, io};
 
@@ -232,7 +306,10 @@ mod long_path {
     }
 }
 
-#[cfg(all(test, any(target_os = "linux", target_os = "freebsd")))]
+#[cfg(all(
+    test,
+    any(target_os = "linux", target_os = "freebsd", target_os = "macos")
+))]
 mod tests {
     use std::fs;
     use std::path::PathBuf;

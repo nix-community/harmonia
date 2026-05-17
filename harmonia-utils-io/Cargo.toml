@@ -28,6 +28,11 @@ nix = { workspace = true, features = [ "fs" ] }
 libc = { workspace = true }
 nix  = { workspace = true, features = [ "fs", "socket" ] }
 
+# macOS uses per-thread chdir (__pthread_fchdir)
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }
+nix  = { workspace = true, features = [ "fs" ] }
+
 [dev-dependencies]
 hex-literal = { workspace = true }
 proptest    = { workspace = true }
