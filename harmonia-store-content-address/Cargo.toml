@@ -14,8 +14,8 @@ description          = "Content addressing for the Nix store"
 
 [dependencies]
 derive_more         = { workspace = true }
-harmonia-store-path = { workspace = true, public = true }
-harmonia-utils-hash = { workspace = true, public = true }
+harmonia-store-path = { workspace = true }
+harmonia-utils-hash = { workspace = true }
 proptest            = { workspace = true, optional = true }
 proptest-derive     = { workspace = true, optional = true }
 serde               = { workspace = true }
