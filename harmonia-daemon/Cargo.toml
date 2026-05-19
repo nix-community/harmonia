@@ -18,6 +18,7 @@ harmonia-store-path            = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-io              = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
+nix                            = { version = "0.31", features = [ "user", "fs", "sched", "mount" ] }
 serde                          = { workspace = true }
 thiserror                      = { workspace = true }
 tokio                          = { workspace = true }
