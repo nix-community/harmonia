@@ -2,19 +2,23 @@ use thiserror::Error;
 
 mod algo;
 mod borrowed;
+mod context;
 pub mod fmt;
 mod owned;
+mod reader;
 mod sha256;
-mod sink;
 mod view;
+mod writer;
 
 pub use algo::{Algorithm, UnknownAlgorithm};
 pub use borrowed::BorrowedHash;
+pub use context::Context;
 pub use fmt::HashFormat;
 pub use owned::Hash;
+pub use reader::{HashReader, HashState};
 pub use sha256::Sha256;
-pub use sink::{Context, HashSink};
 pub use view::HashView;
+pub use writer::HashWriter;
 
 #[derive(Error, Debug, PartialEq, Eq, Clone, Copy)]
 #[error("hash has wrong length {length} != {} for hash type '{algorithm}'", algorithm.size())]
