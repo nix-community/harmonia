@@ -1066,6 +1066,7 @@ dependencies = [
  "harmonia-utils-io",
  "harmonia-utils-signature",
  "harmonia-utils-test",
+ "nix",
  "serde",
  "tempfile",
  "thiserror",
