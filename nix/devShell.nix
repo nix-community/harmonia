@@ -18,12 +18,15 @@
       cargo-nextest
       # LLVM tools needed for cargo-llvm-cov
       llvmPackages.bintools-unwrapped
+      # compress-tools-rs links against libarchive via pkg-config
+      pkg-config
     ];
 
     buildInputs = with pkgs; [
       rust-analyzer
       rustfmt
       clippy
+      libarchive
     ];
 
     # provide a dummy configuration for testing
