@@ -1342,6 +1342,7 @@ dependencies = [
  "data-encoding",
  "derive_more",
  "harmonia-utils-base-encoding",
+ "harmonia-utils-hash",
  "hex-literal",
  "md5",
  "proptest",

@@ -41,7 +41,7 @@ pub fn build_narinfo(
     hash: &str,
     sign_keys: &[SecretKey],
 ) -> NarInfo {
-    use harmonia_utils_hash::fmt::CommonHash as _;
+    use harmonia_utils_hash::HashFormat as _;
 
     let nar_hash_obj: Hash = info.info.nar_hash.into();
     let nar_hash_bare = format!("{}", nar_hash_obj.as_base32().as_bare());
@@ -83,7 +83,7 @@ macro_rules! push_line {
 
 /// Format a `NarInfo` as the textual narinfo format used by the binary cache protocol.
 pub fn format_narinfo_txt(store_dir: &StoreDir, narinfo: &NarInfo) -> Vec<u8> {
-    use harmonia_utils_hash::fmt::CommonHash as _;
+    use harmonia_utils_hash::HashFormat as _;
 
     let path = &narinfo.path;
     let ni = &narinfo.info;

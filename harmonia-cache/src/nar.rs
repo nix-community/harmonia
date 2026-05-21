@@ -6,7 +6,7 @@ use actix_web::{HttpRequest, HttpResponse, http, web};
 use harmonia_file_nar::NarByteStream;
 use harmonia_store_path::StorePathHash;
 use harmonia_utils_hash::Hash;
-use harmonia_utils_hash::fmt::CommonHash;
+use harmonia_utils_hash::HashFormat as _;
 use serde::Deserialize;
 
 /// Represents the query string of a NAR URL.

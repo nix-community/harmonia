@@ -7,8 +7,10 @@ use proptest_derive::Arbitrary;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use harmonia_utils_hash::fmt::{CommonHash, NonSRI, ParseHashError, ParseHashErrorKind};
-use harmonia_utils_hash::{Algorithm, Hash, Sha256, UnknownAlgorithm};
+use harmonia_utils_hash::fmt::{NonSRI, ParseHashError, ParseHashErrorKind};
+use harmonia_utils_hash::{
+    Algorithm, BorrowedHash, Hash, HashFormat as _, HashView as _, Sha256, UnknownAlgorithm,
+};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize,
@@ -131,11 +133,7 @@ impl ContentAddress {
         self.method_algorithm().algorithm()
     }
     pub fn method(&self) -> ContentAddressMethod {
-        match self {
-            ContentAddress::Text(_) => ContentAddressMethod::Text,
-            ContentAddress::Flat(_) => ContentAddressMethod::Flat,
-            ContentAddress::NixArchive(_) => ContentAddressMethod::NixArchive,
-        }
+        self.method_algorithm().method()
     }
 
     pub fn method_algorithm(&self) -> ContentAddressMethodAlgorithm {
@@ -148,11 +146,11 @@ impl ContentAddress {
         }
     }
 
-    pub fn hash(&self) -> Hash {
-        match *self {
-            ContentAddress::Text(sha256) => sha256.into(),
-            ContentAddress::Flat(hash) => hash,
-            ContentAddress::NixArchive(hash) => hash,
+    pub fn hash(&self) -> BorrowedHash<'_> {
+        match self {
+            ContentAddress::Text(sha256) => BorrowedHash::SHA256(sha256),
+            ContentAddress::Flat(hash) => hash.borrow(),
+            ContentAddress::NixArchive(hash) => hash.borrow(),
         }
     }
 }
@@ -172,7 +170,7 @@ impl Serialize for ContentAddress {
     {
         let raw = RawContentAddress {
             method: self.method(),
-            hash: self.hash(),
+            hash: self.hash().to_owned(),
         };
         raw.serialize(serializer)
     }

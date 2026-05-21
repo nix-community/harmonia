@@ -19,7 +19,7 @@
 //!
 
 use harmonia_store_path::{StoreDir, StoreDirDisplay, StorePathSet};
-use harmonia_utils_hash::{self, Algorithm};
+use harmonia_utils_hash::{self, Algorithm, HashView as _};
 
 use super::ContentAddress;
 
