@@ -28,11 +28,12 @@ thiserror                    = { workspace = true }
 tokio                        = { workspace = true, features = [ "io-util" ] }
 
 [dev-dependencies]
-hex-literal     = { workspace = true }
-proptest        = { workspace = true }
-proptest-derive = { workspace = true }
-rstest          = { workspace = true }
-serde_json      = { workspace = true }
+harmonia-utils-hash = { path = ".", features = [ "test" ] }
+hex-literal         = { workspace = true }
+proptest            = { workspace = true }
+proptest-derive     = { workspace = true }
+rstest              = { workspace = true }
+serde_json          = { workspace = true }
 
 [features]
 test = [ "proptest", "proptest-derive" ]

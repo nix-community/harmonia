@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use proptest_derive::Arbitrary;
 
 use harmonia_utils_hash::fmt::{self, CommonHash};
-use harmonia_utils_hash::{Algorithm, InvalidHashError, Sha256};
+use harmonia_utils_hash::{Algorithm, HashFormat as _, HashView, InvalidHashError, Sha256};
 
 /// A NAR hash - always SHA256.
 #[derive(Clone, Copy, Eq, Hash, PartialEq, PartialOrd, Ord)]
@@ -81,7 +81,9 @@ impl CommonHash for NarHash {
     fn implied_algorithm() -> Option<Algorithm> {
         Some(Algorithm::SHA256)
     }
+}
 
+impl HashView for NarHash {
     #[inline]
     fn algorithm(&self) -> Algorithm {
         Algorithm::SHA256

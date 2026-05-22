@@ -21,7 +21,7 @@ pub use nar_hash::NarHash;
 
 use harmonia_store_content_address::ContentAddress;
 use harmonia_store_path::{StoreDir, StorePath};
-use harmonia_utils_hash::fmt::CommonHash as _;
+use harmonia_utils_hash::HashFormat as _;
 use harmonia_utils_signature::Signature;
 #[cfg(any(test, feature = "test"))]
 use harmonia_utils_signature::proptests::arb_signatures;

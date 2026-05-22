@@ -9,7 +9,8 @@ use thiserror::Error;
 use harmonia_utils_base_encoding::base32;
 use harmonia_utils_base_encoding::{Base, decode_for_base};
 
-use crate as hash;
+use crate::Algorithm;
+use crate::HashView;
 use crate::InvalidHashError;
 use crate::UnknownAlgorithm;
 
@@ -30,25 +31,22 @@ pub enum Encoding {
 #[derive(derive_more::Display, Debug, PartialEq, Clone)]
 pub enum ParseHashErrorKind {
     #[display("has {_0}")]
-    Algorithm(hash::UnknownAlgorithm),
+    Algorithm(crate::UnknownAlgorithm),
     #[display("is not SRI")]
     NotSRI,
     #[display("should have type '{expected}' but got '{actual}'")]
     TypeMismatch {
-        expected: hash::Algorithm,
-        actual: hash::Algorithm,
+        expected: Algorithm,
+        actual: Algorithm,
     },
     #[display("does not include a type, nor is the type otherwise known from context")]
     MissingType,
     #[display("has {_1} when decoding as {_0}")]
     BadEncoding(Encoding, data_encoding::DecodeError),
     #[display("has wrong length for hash type '{_0}'")]
-    WrongHashLength(hash::Algorithm),
+    WrongHashLength(Algorithm),
     #[display("has wrong length {length} != {} for hash type '{algorithm}'", algorithm.size())]
-    WrongHashLength2 {
-        algorithm: hash::Algorithm,
-        length: usize,
-    },
+    WrongHashLength2 { algorithm: Algorithm, length: usize },
 }
 
 impl ParseHashErrorKind {
@@ -109,12 +107,7 @@ impl From<UnknownAlgorithm> for ParseHashErrorKind {
     }
 }
 
-pub trait CommonHash: Sized {
-    fn from_slice(algorithm: hash::Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind>;
-    fn implied_algorithm() -> Option<hash::Algorithm>;
-    fn algorithm(&self) -> hash::Algorithm;
-    fn digest_bytes(&self) -> &[u8];
-
+pub trait HashFormat: HashView + Sized {
     #[inline]
     fn as_base16(&self) -> &Base16<Self> {
         Base16::from_hash_ref(self)
@@ -156,54 +149,54 @@ pub trait CommonHash: Sized {
     }
 }
 
-impl CommonHash for hash::Hash {
+impl<H: HashView + Sized> HashFormat for H {}
+
+/// Extension of [`HashView`] for hash types that can be parsed from a
+/// byte slice. Not implemented by [`BorrowedHash`](crate::BorrowedHash)
+/// since it cannot own the data.
+pub trait CommonHash: HashFormat {
+    fn from_slice(algorithm: Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind>;
+    fn implied_algorithm() -> Option<Algorithm>;
+}
+
+impl CommonHash for crate::Hash {
     #[inline]
-    fn from_slice(algorithm: hash::Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind> {
-        Ok(hash::Hash::from_slice(algorithm, hash)?)
+    fn from_slice(algorithm: Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind> {
+        Ok(crate::Hash::from_slice(algorithm, hash)?)
     }
 
     #[inline]
-    fn implied_algorithm() -> Option<hash::Algorithm> {
+    fn implied_algorithm() -> Option<Algorithm> {
         None
-    }
-
-    #[inline]
-    fn algorithm(&self) -> hash::Algorithm {
-        self.algorithm
-    }
-
-    #[inline]
-    fn digest_bytes(&self) -> &[u8] {
-        self.as_ref()
     }
 }
 
 /*
-impl FromStr for hash::Hash {
-    type Err = hash::ParseHashError;
+impl FromStr for crate::Hash {
+    type Err = crate::ParseHashError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse::<Any<Self>>().map(From::from)
     }
 }
 
-impl sfmt::Display for hash::Hash {
+impl sfmt::Display for crate::Hash {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         self.as_base32().fmt(f)
     }
 }
 */
 
-impl sfmt::Debug for hash::Hash {
+impl sfmt::Debug for crate::Hash {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         f.debug_struct("Hash")
-            .field("algorithm", &self.algorithm)
+            .field("algorithm", &self.algorithm())
             .field("data", &format_args!("{}", self.as_base32()))
             .finish()
     }
 }
 
-impl sfmt::LowerHex for hash::Hash {
+impl sfmt::LowerHex for crate::Hash {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         if !f.alternate() {
             write!(f, "{}:", self.algorithm())?;
@@ -215,7 +208,7 @@ impl sfmt::LowerHex for hash::Hash {
     }
 }
 
-impl sfmt::UpperHex for hash::Hash {
+impl sfmt::UpperHex for crate::Hash {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         if !f.alternate() {
             write!(f, "{}:", self.algorithm())?;
@@ -227,51 +220,41 @@ impl sfmt::UpperHex for hash::Hash {
     }
 }
 
-impl CommonHash for hash::Sha256 {
+impl CommonHash for crate::Sha256 {
     #[inline]
-    fn from_slice(algorithm: hash::Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind> {
-        if algorithm != hash::Algorithm::SHA256 {
+    fn from_slice(algorithm: Algorithm, hash: &[u8]) -> Result<Self, ParseHashErrorKind> {
+        if algorithm != Algorithm::SHA256 {
             return Err(ParseHashErrorKind::TypeMismatch {
-                expected: hash::Algorithm::SHA256,
+                expected: Algorithm::SHA256,
                 actual: algorithm,
             });
         }
-        hash::Sha256::from_slice(hash).map_err(From::from)
+        crate::Sha256::from_slice(hash).map_err(From::from)
     }
 
     #[inline]
-    fn implied_algorithm() -> Option<hash::Algorithm> {
-        Some(hash::Algorithm::SHA256)
-    }
-
-    #[inline]
-    fn algorithm(&self) -> hash::Algorithm {
-        hash::Algorithm::SHA256
-    }
-
-    #[inline]
-    fn digest_bytes(&self) -> &[u8] {
-        self.as_ref()
+    fn implied_algorithm() -> Option<Algorithm> {
+        Some(Algorithm::SHA256)
     }
 }
 
 /*
-impl FromStr for hash::Sha256 {
-    type Err = hash::ParseHashError;
+impl FromStr for crate::Sha256 {
+    type Err = crate::ParseHashError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse::<Bare<NonSRI<Self>>>().map(From::from)
     }
 }
 
-impl sfmt::Display for hash::Sha256 {
+impl sfmt::Display for crate::Sha256 {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         self.as_base32().as_bare().fmt(f)
     }
 }
  */
 
-impl sfmt::Debug for hash::Sha256 {
+impl sfmt::Debug for crate::Sha256 {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         f.debug_tuple("Sha256")
             .field(&format_args!("{}", self.as_base32().as_bare()))
@@ -279,7 +262,7 @@ impl sfmt::Debug for hash::Sha256 {
     }
 }
 
-impl sfmt::LowerHex for hash::Sha256 {
+impl sfmt::LowerHex for crate::Sha256 {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         for val in self.digest_bytes() {
             write!(f, "{val:02x}")?;
@@ -288,7 +271,7 @@ impl sfmt::LowerHex for hash::Sha256 {
     }
 }
 
-impl sfmt::UpperHex for hash::Sha256 {
+impl sfmt::UpperHex for crate::Sha256 {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         for val in self.digest_bytes() {
             write!(f, "{val:02X}")?;
@@ -299,7 +282,7 @@ impl sfmt::UpperHex for hash::Sha256 {
 
 /// Helper function for parsing hash strings with a given base encoding
 pub(crate) fn parse_with_base<H, const SCRATCH_SIZE: usize>(
-    algorithm: hash::Algorithm,
+    algorithm: Algorithm,
     s: &str,
     base: Base,
 ) -> Result<H, ParseHashError>
@@ -342,7 +325,7 @@ where
 
 pub trait Format: private::Sealed {
     type Hash;
-    fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError>;
+    fn parse(algorithm: Algorithm, s: &str) -> Result<Self::Hash, ParseHashError>;
     fn into_inner(self) -> Self::Hash;
     fn from_inner(inner: Self::Hash) -> Self;
 }
@@ -350,7 +333,7 @@ pub trait Format: private::Sealed {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Base16<H>(H);
-impl<H: CommonHash + Sized> Base16<H> {
+impl<H: HashView + Sized> Base16<H> {
     pub const fn from_hash(hash: H) -> Self {
         Self(hash)
     }
@@ -369,16 +352,15 @@ impl<H: CommonHash + Sized> Base16<H> {
         &self.0
     }
 
-    /// Consumes the [`Base16`], returning the underlying [`Hash`](hash::Hash).
+    /// Consumes the [`Base16`], returning the underlying [`Hash`](crate::Hash).
     ///
     /// # Examples
     ///
     /// ```rust
-    /// use harmonia_utils_hash as hash;
-    /// use hash::fmt::CommonHash;
+    /// use harmonia_utils_hash::{Algorithm, HashFormat as _};
     ///
-    /// let hex = hash::Algorithm::SHA256.digest(b"Hello World!").base16();
-    /// assert_eq!(hex.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
+    /// let hex = Algorithm::SHA256.digest(b"Hello World!").base16();
+    /// assert_eq!(hex.into_hash(), Algorithm::SHA256.digest(b"Hello World!"));
     /// ```
     #[inline]
     pub fn into_hash(self) -> H {
@@ -397,7 +379,7 @@ impl<H: CommonHash + Sized> Base16<H> {
     }
 }
 impl<H: CommonHash> Base16<H> {
-    pub fn parse(algorithm: hash::Algorithm, s: &str) -> Result<H, ParseHashError> {
+    pub fn parse(algorithm: Algorithm, s: &str) -> Result<H, ParseHashError> {
         <Self as Format>::parse(algorithm, s)
     }
 }
@@ -405,8 +387,8 @@ impl<H> private::Sealed for Base16<H> {}
 impl<H: CommonHash> Format for Base16<H> {
     type Hash = H;
 
-    fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        parse_with_base::<_, { Base::Hex.scratch_len(hash::LARGEST_ALGORITHM.size()) }>(
+    fn parse(algorithm: Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
+        parse_with_base::<_, { Base::Hex.scratch_len(Algorithm::LARGEST.size()) }>(
             algorithm,
             s,
             Base::Hex,
@@ -422,7 +404,7 @@ impl<H: CommonHash> Format for Base16<H> {
     }
 }
 
-impl<H: CommonHash> sfmt::Display for Base16<H> {
+impl<H: HashView> sfmt::Display for Base16<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         if !f.alternate() {
             write!(f, "{}:", self.0.algorithm())?;
@@ -443,7 +425,7 @@ impl<H: CommonHash> FromStr for Base16<H> {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some((prefix, rest)) = s.split_once(':') {
             let algorithm = prefix
-                .parse::<hash::Algorithm>()
+                .parse::<Algorithm>()
                 .map_err(|err| ParseHashError::new(s, err.into()))?;
             Self::parse(algorithm, rest).map(Self).map_err(|mut err| {
                 err.hash = s.into();
@@ -459,7 +441,7 @@ impl<H: CommonHash> FromStr for Base16<H> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Base32<H>(H);
-impl<H: CommonHash + Sized> Base32<H> {
+impl<H: HashView + Sized> Base32<H> {
     pub const fn from_hash(hash: H) -> Self {
         Self(hash)
     }
@@ -478,16 +460,15 @@ impl<H: CommonHash + Sized> Base32<H> {
         &self.0
     }
 
-    /// Consumes the [`Base32`], returning the underlying [`Hash`](hash::Hash).
+    /// Consumes the [`Base32`], returning the underlying [`Hash`](crate::Hash).
     ///
     /// # Examples
     ///
     /// ```rust
-    /// use harmonia_utils_hash as hash;
-    /// use hash::fmt::CommonHash;
+    /// use harmonia_utils_hash::{Algorithm, HashFormat as _};
     ///
-    /// let base32 = hash::Algorithm::SHA256.digest(b"Hello World!").base32();
-    /// assert_eq!(base32.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
+    /// let base32 = Algorithm::SHA256.digest(b"Hello World!").base32();
+    /// assert_eq!(base32.into_hash(), Algorithm::SHA256.digest(b"Hello World!"));
     /// ```
     #[inline]
     pub fn into_hash(self) -> H {
@@ -506,7 +487,7 @@ impl<H: CommonHash + Sized> Base32<H> {
     }
 }
 impl<H: CommonHash> Base32<H> {
-    pub fn parse(algorithm: hash::Algorithm, s: &str) -> Result<H, ParseHashError> {
+    pub fn parse(algorithm: Algorithm, s: &str) -> Result<H, ParseHashError> {
         <Self as Format>::parse(algorithm, s)
     }
 }
@@ -514,8 +495,8 @@ impl<H> private::Sealed for Base32<H> {}
 impl<H: CommonHash> Format for Base32<H> {
     type Hash = H;
 
-    fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        parse_with_base::<_, { Base::NixBase32.scratch_len(hash::LARGEST_ALGORITHM.size()) }>(
+    fn parse(algorithm: Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
+        parse_with_base::<_, { Base::NixBase32.scratch_len(Algorithm::LARGEST.size()) }>(
             algorithm,
             s,
             Base::NixBase32,
@@ -531,9 +512,9 @@ impl<H: CommonHash> Format for Base32<H> {
     }
 }
 
-impl<H: CommonHash> sfmt::Display for Base32<H> {
+impl<H: HashView> sfmt::Display for Base32<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        let mut buf = [0u8; Base::NixBase32.input_len(hash::LARGEST_ALGORITHM.size())];
+        let mut buf = [0u8; Base::NixBase32.input_len(Algorithm::LARGEST.size())];
         let output = &mut buf[..Base::NixBase32.input_len(self.0.algorithm().size())];
         base32::encode_mut(self.0.digest_bytes(), output);
 
@@ -556,7 +537,7 @@ impl<H: CommonHash> FromStr for Base32<H> {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some((prefix, rest)) = s.split_once(':') {
             let algorithm = prefix
-                .parse::<hash::Algorithm>()
+                .parse::<Algorithm>()
                 .map_err(|err| ParseHashError::new(s, err.into()))?;
             Self::parse(algorithm, rest).map(Self).map_err(|mut err| {
                 err.hash = s.into();
@@ -572,7 +553,7 @@ impl<H: CommonHash> FromStr for Base32<H> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Base64<H>(H);
-impl<H: CommonHash> Base64<H> {
+impl<H: HashView> Base64<H> {
     pub const fn from_hash(hash: H) -> Self {
         Self(hash)
     }
@@ -591,16 +572,15 @@ impl<H: CommonHash> Base64<H> {
         &self.0
     }
 
-    /// Consumes the [`Base64`], returning the underlying [`Hash`](hash::Hash).
+    /// Consumes the [`Base64`], returning the underlying [`Hash`](crate::Hash).
     ///
     /// # Examples
     ///
     /// ```rust
-    /// use harmonia_utils_hash as hash;
-    /// use hash::fmt::CommonHash;
+    /// use harmonia_utils_hash::{Algorithm, HashFormat as _};
     ///
-    /// let base64 = hash::Algorithm::SHA256.digest(b"Hello World!").base64();
-    /// assert_eq!(base64.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
+    /// let base64 = Algorithm::SHA256.digest(b"Hello World!").base64();
+    /// assert_eq!(base64.into_hash(), Algorithm::SHA256.digest(b"Hello World!"));
     /// ```
     pub fn into_hash(self) -> H {
         self.0
@@ -618,16 +598,16 @@ impl<H: CommonHash> Base64<H> {
     }
 }
 impl<H: CommonHash> Base64<H> {
-    pub fn parse(algorithm: hash::Algorithm, s: &str) -> Result<H, ParseHashError> {
+    pub fn parse(algorithm: Algorithm, s: &str) -> Result<H, ParseHashError> {
         <Self as Format>::parse(algorithm, s)
     }
 }
-impl<H: CommonHash> private::Sealed for Base64<H> {}
+impl<H: HashView> private::Sealed for Base64<H> {}
 impl<H: CommonHash> Format for Base64<H> {
     type Hash = H;
 
-    fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
-        parse_with_base::<_, { Base::Base64.scratch_len(hash::LARGEST_ALGORITHM.size()) }>(
+    fn parse(algorithm: Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
+        parse_with_base::<_, { Base::Base64.scratch_len(Algorithm::LARGEST.size()) }>(
             algorithm,
             s,
             Base::Base64,
@@ -643,9 +623,9 @@ impl<H: CommonHash> Format for Base64<H> {
     }
 }
 
-impl<H: CommonHash> sfmt::Display for Base64<H> {
+impl<H: HashView> sfmt::Display for Base64<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        let mut buf = [0u8; Base::Base64.input_len(hash::LARGEST_ALGORITHM.size())];
+        let mut buf = [0u8; Base::Base64.input_len(Algorithm::LARGEST.size())];
         let output = &mut buf[..Base::Base64.input_len(self.0.algorithm().size())];
         BASE64.encode_mut(self.0.digest_bytes(), output);
 
@@ -669,7 +649,7 @@ impl<H: CommonHash> FromStr for Base64<H> {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some((prefix, rest)) = s.split_once(':') {
             let algorithm = prefix
-                .parse::<hash::Algorithm>()
+                .parse::<Algorithm>()
                 .map_err(|err| ParseHashError::new(s, err.into()))?;
             Self::parse(algorithm, rest).map(Self).map_err(|mut err| {
                 err.hash = s.into();
@@ -704,7 +684,7 @@ impl<H> Any<H> {
     }
 }
 impl<H: CommonHash> Any<H> {
-    pub fn parse(algorithm: hash::Algorithm, s: &str) -> Result<H, ParseHashError> {
+    pub fn parse(algorithm: Algorithm, s: &str) -> Result<H, ParseHashError> {
         <Self as Format>::parse(algorithm, s)
     }
 }
@@ -712,7 +692,7 @@ impl<H> private::Sealed for Any<H> {}
 impl<H: CommonHash> Format for Any<H> {
     type Hash = H;
 
-    fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
+    fn parse(algorithm: Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
         if s.len() == Base::Hex.input_len(algorithm.size()) {
             Ok(Base16::parse(algorithm, s)?)
         } else if s.len() == Base::NixBase32.input_len(algorithm.size()) {
@@ -742,7 +722,7 @@ impl<H: CommonHash> FromStr for Any<H> {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some((prefix, rest)) = s.split_once(':') {
             let algorithm = prefix
-                .parse::<hash::Algorithm>()
+                .parse::<Algorithm>()
                 .map_err(|err| ParseHashError::new(s, err.into()))?;
             let hash = Self::parse(algorithm, rest).map_err(|mut err| {
                 err.hash = s.into();
@@ -752,7 +732,7 @@ impl<H: CommonHash> FromStr for Any<H> {
             Ok(Self(hash))
         } else if let Some((prefix, rest)) = s.split_once('-') {
             let algorithm = prefix
-                .parse::<hash::Algorithm>()
+                .parse::<Algorithm>()
                 .map_err(|err| ParseHashError::new(s, err.into()))?;
             if rest.len() == Base::Base64.input_len(algorithm.size()) {
                 let hash = Base64::parse(algorithm, rest).map_err(|mut err| {
@@ -782,7 +762,7 @@ impl<H: CommonHash> FromStr for Any<H> {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(transparent)]
 pub struct SRI<H>(H);
-impl<H: CommonHash + Sized> SRI<H> {
+impl<H: HashView + Sized> SRI<H> {
     pub const fn from_hash(hash: H) -> Self {
         Self(hash)
     }
@@ -801,23 +781,22 @@ impl<H: CommonHash + Sized> SRI<H> {
         &self.0
     }
 
-    /// Consumes the [`SRI`], returning the underlying [`Hash`](hash::Hash).
+    /// Consumes the [`SRI`], returning the underlying [`Hash`](crate::Hash).
     ///
     /// # Examples
     ///
     /// ```rust
-    /// use harmonia_utils_hash as hash;
-    /// use hash::fmt::CommonHash;
+    /// use harmonia_utils_hash::{Algorithm, HashFormat as _};
     ///
-    /// let sri = hash::Algorithm::SHA256.digest(b"Hello World!").sri();
-    /// assert_eq!(sri.into_hash(), hash::Algorithm::SHA256.digest(b"Hello World!"));
+    /// let sri = Algorithm::SHA256.digest(b"Hello World!").sri();
+    /// assert_eq!(sri.into_hash(), Algorithm::SHA256.digest(b"Hello World!"));
     /// ```
     pub fn into_hash(self) -> H {
         self.0
     }
 }
 
-impl<H: CommonHash> sfmt::Display for SRI<H> {
+impl<H: HashView> sfmt::Display for SRI<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
         write!(f, "{}-{}", self.0.algorithm(), self.0.as_base64().as_bare())
     }
@@ -832,7 +811,7 @@ impl<H: CommonHash> FromStr for SRI<H> {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some((prefix, rest)) = s.split_once('-') {
             let algorithm = prefix
-                .parse::<hash::Algorithm>()
+                .parse::<Algorithm>()
                 .map_err(|err| ParseHashError::new(s, err.into()))?;
             Base64::parse(algorithm, rest).map(Self).map_err(|mut err| {
                 err.hash = s.into();
@@ -846,7 +825,7 @@ impl<H: CommonHash> FromStr for SRI<H> {
     }
 }
 
-impl<H: CommonHash> serde::Serialize for SRI<H> {
+impl<H: HashView> serde::Serialize for SRI<H> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -882,7 +861,7 @@ impl<H> NonSRI<H> {
     }
 }
 impl<H: CommonHash> NonSRI<H> {
-    pub fn parse(algorithm: hash::Algorithm, s: &str) -> Result<H, ParseHashError> {
+    pub fn parse(algorithm: Algorithm, s: &str) -> Result<H, ParseHashError> {
         <Self as Format>::parse(algorithm, s)
     }
 }
@@ -890,7 +869,7 @@ impl<H> private::Sealed for NonSRI<H> {}
 impl<H: CommonHash> Format for NonSRI<H> {
     type Hash = H;
 
-    fn parse(algorithm: hash::Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
+    fn parse(algorithm: Algorithm, s: &str) -> Result<Self::Hash, ParseHashError> {
         if s.len() == Base::Hex.input_len(algorithm.size()) {
             Ok(Base16::parse(algorithm, s)?)
         } else if s.len() == Base::NixBase32.input_len(algorithm.size()) {
@@ -920,7 +899,7 @@ impl<H: CommonHash> FromStr for NonSRI<H> {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some((prefix, rest)) = s.split_once(':') {
             let algorithm = prefix
-                .parse::<hash::Algorithm>()
+                .parse::<Algorithm>()
                 .map_err(|err| ParseHashError::new(s, err.into()))?;
             let hash = Self::parse(algorithm, rest).map_err(|mut err| {
                 err.hash = s.into();
@@ -1068,18 +1047,18 @@ macro_rules! impl_hash_format_from {
     };
 }
 
-impl_hash_format_from!(SRI<hash::Hash>);
-impl_hash_format_from!(SRI<hash::Sha256>);
-impl_hash_format_from!(Base64<hash::Hash>);
-impl_hash_format_from!(Base64<hash::Sha256>);
-impl_hash_format_from!(Base32<hash::Hash>);
-impl_hash_format_from!(Base32<hash::Sha256>);
-impl_hash_format_from!(Base16<hash::Hash>);
-impl_hash_format_from!(Base16<hash::Sha256>);
-impl_hash_format_from!(Any<hash::Hash>);
-impl_hash_format_from!(Any<hash::Sha256>);
-impl_hash_format_from!(NonSRI<hash::Hash>);
-impl_hash_format_from!(NonSRI<hash::Sha256>);
+impl_hash_format_from!(SRI<crate::Hash>);
+impl_hash_format_from!(SRI<crate::Sha256>);
+impl_hash_format_from!(Base64<crate::Hash>);
+impl_hash_format_from!(Base64<crate::Sha256>);
+impl_hash_format_from!(Base32<crate::Hash>);
+impl_hash_format_from!(Base32<crate::Sha256>);
+impl_hash_format_from!(Base16<crate::Hash>);
+impl_hash_format_from!(Base16<crate::Sha256>);
+impl_hash_format_from!(Any<crate::Hash>);
+impl_hash_format_from!(Any<crate::Sha256>);
+impl_hash_format_from!(NonSRI<crate::Hash>);
+impl_hash_format_from!(NonSRI<crate::Sha256>);
 
 #[cfg(test)]
 mod unittests {
@@ -1475,25 +1454,25 @@ mod unittests {
 
         for_all_hashes!(hash_from_str_base16, |hash| {
             let s = hash.prefix_base16();
-            let actual = s.parse::<Any<hash::Hash>>().unwrap().into_hash();
+            let actual = s.parse::<Any<crate::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
         });
 
         for_all_hashes!(hash_from_str_base32, |hash| {
             let s = hash.prefix_base32();
-            let actual = s.parse::<Any<hash::Hash>>().unwrap().into_hash();
+            let actual = s.parse::<Any<crate::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
         });
 
         for_all_hashes!(hash_from_str_base64, |hash| {
             let s = hash.prefix_base64();
-            let actual = s.parse::<Any<hash::Hash>>().unwrap().into_hash();
+            let actual = s.parse::<Any<crate::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
         });
 
         for_all_hashes!(hash_from_str_sri, |hash| {
             let s = hash.sri();
-            let actual = s.parse::<Any<hash::Hash>>().unwrap().into_hash();
+            let actual = s.parse::<Any<crate::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
         });
 
@@ -1525,19 +1504,19 @@ mod unittests {
 
         for_all_hashes!(hash_from_str_base16, |hash| {
             let s = hash.prefix_base16();
-            let actual = s.parse::<NonSRI<hash::Hash>>().unwrap().into_hash();
+            let actual = s.parse::<NonSRI<crate::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
         });
 
         for_all_hashes!(hash_from_str_base32, |hash| {
             let s = hash.prefix_base32();
-            let actual = s.parse::<NonSRI<hash::Hash>>().unwrap().into_hash();
+            let actual = s.parse::<NonSRI<crate::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
         });
 
         for_all_hashes!(hash_from_str_base64, |hash| {
             let s = hash.prefix_base64();
-            let actual = s.parse::<NonSRI<hash::Hash>>().unwrap().into_hash();
+            let actual = s.parse::<NonSRI<crate::Hash>>().unwrap().into_hash();
             assert_eq!(hash.hash, actual);
         });
 

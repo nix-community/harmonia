@@ -72,7 +72,7 @@ impl Serialize for DerivationOutput {
             },
             DerivationOutput::CAFixed(ca) => RawDerivationOutput {
                 path: None,
-                hash: Some(ca.hash()),
+                hash: Some(ca.hash().to_owned()),
                 method: Some(ca.method()),
                 hash_algo: None,
                 impure: false,

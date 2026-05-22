@@ -25,7 +25,7 @@ use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, S
 use harmonia_store_derivation::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
 use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_path::{StorePath, StorePathName};
-use harmonia_utils_hash::fmt::CommonHash;
+use harmonia_utils_hash::HashFormat as _;
 
 // ========== BasicDerivation ==========
 
