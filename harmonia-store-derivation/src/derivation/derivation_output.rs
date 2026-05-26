@@ -18,6 +18,12 @@ pub struct OutputPathName<'b> {
     pub output_name: &'b OutputName,
 }
 
+impl OutputPathName<'_> {
+    pub fn to_store_path_name(&self) -> Result<StorePathName, StorePathNameError> {
+        self.to_string().parse()
+    }
+}
+
 impl fmt::Display for OutputPathName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.output_name.is_default() {
@@ -155,17 +161,17 @@ impl DerivationOutput {
     ) -> Result<Option<StorePath>, StorePathNameError> {
         match self {
             DerivationOutput::InputAddressed(store_path) => Ok(Some(store_path.clone())),
-            DerivationOutput::CAFixed(ca) => {
-                let name = OutputPathName {
-                    drv_name,
-                    output_name,
-                }
-                .to_string()
-                .parse()?;
-                Ok(Some(
-                    harmonia_store_content_address::make_store_path_from_ca(store_dir, name, *ca),
-                ))
-            }
+            DerivationOutput::CAFixed(ca) => Ok(Some(
+                harmonia_store_content_address::make_store_path_from_ca(
+                    store_dir,
+                    OutputPathName {
+                        drv_name,
+                        output_name,
+                    }
+                    .to_store_path_name()?,
+                    *ca,
+                ),
+            )),
             _ => Ok(None),
         }
     }

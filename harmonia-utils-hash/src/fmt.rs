@@ -49,6 +49,8 @@ pub enum ParseHashErrorKind {
     WrongHashLength2 { algorithm: Algorithm, length: usize },
 }
 
+impl std::error::Error for ParseHashErrorKind {}
+
 impl ParseHashErrorKind {
     fn adjust_position(&mut self, amt: usize) {
         match self {

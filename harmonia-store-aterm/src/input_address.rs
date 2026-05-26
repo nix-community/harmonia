@@ -83,8 +83,7 @@ pub fn make_output_path(
         drv_name,
         output_name,
     }
-    .to_string()
-    .parse::<StorePathName>()?;
+    .to_store_path_name()?;
 
     let fingerprint = format!(
         "output:{}:sha256:{:x}:{}:{}",

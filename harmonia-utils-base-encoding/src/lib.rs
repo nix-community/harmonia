@@ -70,6 +70,16 @@ impl Base {
         }
     }
 
+    /// Calculate the decoded byte size for a given encoded string length
+    #[inline]
+    pub const fn decode_len(&self, encoded_size: usize) -> usize {
+        match self {
+            Base::Hex => encoded_size / 2,
+            Base::NixBase32 => base32::decode_len(encoded_size),
+            Base::Base64 => encoded_size / 4 * 3,
+        }
+    }
+
     /// Calculate the scratch buffer size needed for decoding
     #[inline]
     pub const fn scratch_len(&self, decoded_size: usize) -> usize {
