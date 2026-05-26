@@ -35,11 +35,13 @@ tracing          = { workspace = true }
 # Internal dependencies
 harmonia-file-nar              = { workspace = true }
 harmonia-protocol-derive       = { workspace = true }
+harmonia-store-aterm           = { workspace = true }
 harmonia-store-build-result    = { workspace = true }
 harmonia-store-content-address = { workspace = true }
 harmonia-store-derivation      = { workspace = true }
 harmonia-store-path            = { workspace = true }
 harmonia-store-path-info       = { workspace = true }
+harmonia-utils-base-encoding   = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-io              = { workspace = true }
 harmonia-utils-signature       = { workspace = true }

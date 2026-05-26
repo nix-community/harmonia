@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2024 griff (original Nix.rs)
-// SPDX-FileCopyrightText: 2025 Jörg Thalheim (Harmonia adaptation)
+// SPDX-FileCopyrightText: 2026 Jörg Thalheim (Harmonia adaptation)
 // SPDX-License-Identifier: EUPL-1.2 OR MIT
 
 //! Hand-written NixSerialize/NixDeserialize implementations for harmonia-store-derivation types.
@@ -11,7 +11,6 @@
 //! but protocol can impl traits for external store-core types.
 
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 use bytes::Bytes;
 
@@ -20,12 +19,11 @@ use crate::de::{NixDeserialize, NixRead};
 use crate::log::{Activity, ActivityResult, LogMessage, StopActivity};
 use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
-use harmonia_store_content_address::{ContentAddress, ContentAddressMethodAlgorithm};
+use harmonia_store_aterm::raw_output::{AtermOutput as _, BorrowedRawOutput};
 use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, StructuredAttrs};
 use harmonia_store_derivation::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
 use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_path::{StorePath, StorePathName};
-use harmonia_utils_hash::HashFormat as _;
 
 // ========== BasicDerivation ==========
 
@@ -119,53 +117,29 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
 
 // ========== DerivationOutput ==========
 
-fn output_path_name(drv_name: &StorePathName, output_name: &OutputName) -> String {
-    if output_name.is_default() {
-        drv_name.to_string()
-    } else {
-        format!("{}-{}", drv_name, output_name)
-    }
-}
-
 async fn read_derivation_output<R>(
     reader: &mut R,
-    _drv_name: &StorePathName,
-    _output_name: &OutputName,
+    drv_name: &StorePathName,
+    output_name: &OutputName,
 ) -> Result<DerivationOutput, R::Error>
 where
     R: ?Sized + NixRead + Send,
 {
     use crate::de::Error;
-    use harmonia_utils_hash::fmt::Base32;
+    use harmonia_utils_base_encoding::Base;
 
-    let store_path_str = reader.read_value::<String>().await?;
-    let method_str = reader.read_value::<String>().await?;
-    let hash_str = reader.read_value::<String>().await?;
+    let path = reader.read_value::<Bytes>().await?;
+    let hash_algo = reader.read_value::<Bytes>().await?;
+    let hash = reader.read_value::<Bytes>().await?;
 
-    if hash_str == "impure" {
-        let algo = method_str.parse().map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::Impure(algo))
-    } else if store_path_str.is_empty() && !method_str.is_empty() {
-        let algo = method_str.parse().map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::CAFloating(algo))
-    } else if store_path_str.is_empty() && method_str.is_empty() && hash_str.is_empty() {
-        Ok(DerivationOutput::Deferred)
-    } else if method_str.is_empty() && hash_str.is_empty() {
-        let store_path = reader
-            .store_dir()
-            .parse(&store_path_str)
-            .map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::InputAddressed(store_path))
-    } else {
-        // CAFixed
-        let method_algo = method_str
-            .parse::<ContentAddressMethodAlgorithm>()
-            .map_err(R::Error::invalid_data)?;
-        let hash = Base32::from_str(&hash_str).map_err(R::Error::invalid_data)?;
-        let ca = ContentAddress::from_hash(method_algo.method(), *hash.as_hash())
-            .map_err(R::Error::invalid_data)?;
-        Ok(DerivationOutput::CAFixed(ca))
-    }
+    let store_dir = reader.store_dir();
+    let raw = BorrowedRawOutput {
+        path: &path,
+        hash_algo: &hash_algo,
+        hash: &hash,
+    };
+    DerivationOutput::from_raw(raw, store_dir, drv_name, output_name, Base::NixBase32)
+        .map_err(R::Error::invalid_data)
 }
 
 async fn write_derivation_output<W>(
@@ -178,43 +152,15 @@ where
     W: NixWrite,
 {
     use crate::ser::Error;
+    use harmonia_utils_base_encoding::Base;
 
-    match output {
-        DerivationOutput::InputAddressed(store_path) => {
-            writer.write_value(store_path).await?;
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-        }
-        DerivationOutput::CAFixed(ca) => {
-            let name = output_path_name(drv_name, output_name)
-                .to_string()
-                .parse()
-                .map_err(Error::unsupported_data)?;
-            let path = harmonia_store_content_address::make_store_path_from_ca(
-                writer.store_dir(),
-                name,
-                *ca,
-            );
-            writer.write_value(&path).await?;
-            writer.write_value(&ca.method_algorithm()).await?;
-            writer.write_display(ca.hash().base32().bare()).await?;
-        }
-        DerivationOutput::Deferred => {
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-            writer.write_value("").await?;
-        }
-        DerivationOutput::CAFloating(algo) => {
-            writer.write_value("").await?;
-            writer.write_value(algo).await?;
-            writer.write_value("").await?;
-        }
-        DerivationOutput::Impure(algo) => {
-            writer.write_value("").await?;
-            writer.write_value(algo).await?;
-            writer.write_value("impure").await?;
-        }
-    }
+    let store_dir = writer.store_dir().clone();
+    let raw = output
+        .to_raw(&store_dir, drv_name, output_name, Base::NixBase32)
+        .map_err(W::Error::unsupported_data)?;
+    writer.write_value(&raw.path.as_slice()).await?;
+    writer.write_value(&raw.hash_algo.as_slice()).await?;
+    writer.write_value(&raw.hash.as_slice()).await?;
     Ok(())
 }
 

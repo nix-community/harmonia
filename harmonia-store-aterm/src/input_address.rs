@@ -7,9 +7,9 @@ use harmonia_store_derivation::derivation::{
 use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathNameError, StorePathSet};
 
-use crate::error::ParseError;
 use crate::print_derivation_aterm;
-use crate::raw_output::{AtermOutput, BorrowedRawOutput, RawOutput};
+use crate::raw_output::{AtermOutput, BorrowedRawOutput, InvalidCombination, RawOutput};
+use harmonia_utils_base_encoding::Base;
 
 /// A placeholder output type for derivations whose output paths have
 /// not yet been computed. Prints as all-empty fields in ATerm format,
@@ -27,26 +27,37 @@ impl From<UnfilledOutput> for DerivationOutput {
 }
 
 impl AtermOutput for UnfilledOutput {
+    type Error = InvalidCombination;
+
     fn to_raw(
         &self,
         _store_dir: &StoreDir,
         _drv_name: &StorePathName,
         _output_name: &OutputName,
-    ) -> RawOutput {
-        RawOutput {
+        _base: Base,
+    ) -> Result<RawOutput, StorePathNameError> {
+        Ok(RawOutput {
             path: Vec::new(),
             hash_algo: Vec::new(),
             hash: Vec::new(),
-        }
+        })
     }
 
     fn from_raw(
-        _raw: BorrowedRawOutput,
+        raw: BorrowedRawOutput,
         _store_dir: &StoreDir,
         _drv_name: &StorePathName,
         _output_name: &OutputName,
-    ) -> Result<Self, ParseError> {
-        Ok(UnfilledOutput)
+        _base: Base,
+    ) -> Result<Self, InvalidCombination> {
+        match raw {
+            BorrowedRawOutput {
+                path: [],
+                hash_algo: [],
+                hash: [],
+            } => Ok(UnfilledOutput),
+            r => Err(InvalidCombination(r.to_owned())),
+        }
     }
 }
 
@@ -175,12 +186,12 @@ mod tests {
             output_name: OutputName,
         ) {
             let store_dir = StoreDir::default();
-            let raw = UnfilledOutput.to_raw(&store_dir, &drv_name, &output_name);
+            let raw = UnfilledOutput.to_raw(&store_dir, &drv_name, &output_name, Base::Hex).unwrap();
             prop_assert!(raw.path.is_empty());
             prop_assert!(raw.hash_algo.is_empty());
             prop_assert!(raw.hash.is_empty());
             let roundtripped = UnfilledOutput::from_raw(
-                raw.borrow(), &store_dir, &drv_name, &output_name,
+                raw.borrow(), &store_dir, &drv_name, &output_name, Base::Hex,
             ).unwrap();
             prop_assert_eq!(UnfilledOutput, roundtripped);
         }
