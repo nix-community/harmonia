@@ -19,7 +19,7 @@
 //!
 
 use harmonia_store_path::{StoreDir, StoreDirDisplay, StorePathSet};
-use harmonia_utils_hash::{self, Algorithm, HashView as _};
+use harmonia_utils_hash::{self, Hash};
 
 use super::ContentAddress;
 
@@ -68,14 +68,11 @@ impl From<ContentAddress> for PathType {
                 references: StorePathSet::new(),
                 digest,
             },
-            ContentAddress::NixArchive(hash) if hash.algorithm() == Algorithm::SHA256 => {
-                let digest = hash.try_into().unwrap();
-                PathType::Source {
-                    references: StorePathSet::new(),
-                    self_ref: false,
-                    digest,
-                }
-            }
+            ContentAddress::NixArchive(Hash::SHA256(digest)) => PathType::Source {
+                references: StorePathSet::new(),
+                self_ref: false,
+                digest,
+            },
             ContentAddress::NixArchive(hash) => PathType::Output { hash },
             ContentAddress::Flat(hash) => PathType::FlatOutput { hash },
         }
