@@ -1,7 +1,8 @@
 use thiserror::Error;
 
-use harmonia_store_content_address::ParseContentAddressError;
 use harmonia_store_path::{ParseStorePathError, StorePathNameError};
+
+use crate::raw_output::FromRawOutputError;
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -23,10 +24,8 @@ pub enum ParseError {
     },
     #[error("invalid output name: {0}")]
     OutputName(#[from] StorePathNameError),
-    #[error("invalid content address: {0}")]
-    ContentAddress(#[from] ParseContentAddressError),
-    #[error("invalid hash: {0}")]
-    Hash(String),
+    #[error("invalid output: {0}")]
+    Output(#[from] FromRawOutputError),
     #[error("invalid UTF-8 in string at position {pos}")]
     InvalidUtf8 { pos: usize },
 }

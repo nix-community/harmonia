@@ -124,6 +124,7 @@ graph BT
     cache --> store-nar-info
     protocol --> file-nar
     protocol --> protocol-derive
+    protocol --> store-aterm
     protocol --> store-build-result
     protocol --> store-path-info
     daemon --> protocol

@@ -7,6 +7,8 @@ use harmonia_store_derivation::derivation::{
 use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 
+use harmonia_utils_base_encoding::Base;
+
 use crate::raw_output::AtermOutput;
 
 /// Print a derivation in Nix ATerm format.
@@ -93,7 +95,9 @@ fn write_outputs<O: AtermOutput>(
         write_escaped(out, name.as_ref().as_bytes());
         out.push(b',');
 
-        let raw = output.to_raw(store_dir, drv_name, name);
+        let raw = output
+            .to_raw(store_dir, drv_name, name, Base::Hex)
+            .expect("output path name should be valid");
         write_escaped(out, &raw.path);
         out.push(b',');
         write_escaped(out, &raw.hash_algo);
