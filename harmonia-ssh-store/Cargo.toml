@@ -11,7 +11,6 @@ license.workspace    = true
 homepage.workspace   = true
 repository.workspace = true
 description          = "SSH remote store implementation (optional - pending Phase 3 assessment)"
-readme               = "README.md"
 
 [dependencies]
 # SSH dependencies (will be added if imported)

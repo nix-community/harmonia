@@ -10,7 +10,6 @@ license.workspace    = true
 homepage.workspace   = true
 repository.workspace = true
 description          = "BuildResult types and JSON serialization for Nix build results"
-readme               = "README.md"
 
 [dependencies]
 harmonia-store-derivation = { workspace = true }

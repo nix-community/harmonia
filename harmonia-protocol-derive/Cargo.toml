@@ -11,7 +11,6 @@ license.workspace    = true
 homepage.workspace   = true
 repository.workspace = true
 description          = "Procedural macros for Harmonia daemon wire protocol"
-readme               = "README.md"
 
 [lib]
 proc-macro = true
