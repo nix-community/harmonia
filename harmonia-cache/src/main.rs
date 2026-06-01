@@ -187,23 +187,35 @@ async fn inner_main() -> Result<()> {
             .app_data(config_data.clone())
             .app_data(metrics_data.clone())
             .route("/", web::get().to(root::get))
+            .route("/", web::head().to(root::get))
             .route("/{hash}.ls", web::get().to(narlist::get))
             .route("/{hash}.ls", web::head().to(narlist::get))
             .route("/{hash}.narinfo", web::get().to(narinfo::get))
             .route("/{hash}.narinfo", web::head().to(narinfo::get))
             .route(&nar_route, web::get().to(nar::get))
+            .route(&nar_route, web::head().to(nar::get))
             .route(&nix_serve_nar_route, web::get().to(nar::get))
+            .route(&nix_serve_nar_route, web::head().to(nar::get))
             .route("/serve/{hash}{path:.*}", web::get().to(serve::get))
             .route("/serve/{hash}{path:.*}", web::head().to(serve::get))
             .route("/log/{drv}", web::get().to(buildlog::get))
+            .route("/log/{drv}", web::head().to(buildlog::get))
             .route("/version", web::get().to(version::get))
+            .route("/version", web::head().to(version::get))
             .route("/health", web::get().to(health::get))
+            .route("/health", web::head().to(health::get))
             .route("/nix-cache-info", web::get().to(cacheinfo::get))
+            .route("/nix-cache-info", web::head().to(cacheinfo::get))
             .route(
                 "/build-trace-v2/{drv_path}/{output}",
                 web::get().to(realisations::get),
             )
+            .route(
+                "/build-trace-v2/{drv_path}/{output}",
+                web::head().to(realisations::get),
+            )
             .route("/metrics", web::get().to(prometheus::metrics_handler))
+            .route("/metrics", web::head().to(prometheus::metrics_handler))
     })
     // default is 5 seconds, which is too small when doing mass requests on slow machines
     .client_request_timeout(Duration::from_secs(30))
