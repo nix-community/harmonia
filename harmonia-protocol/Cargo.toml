@@ -10,7 +10,7 @@ edition.workspace    = true
 license.workspace    = true
 homepage.workspace   = true
 repository.workspace = true
-description          = "Nix daemon wire protocol types and serialization"
+description          = "Nix daemon wire protocol types, serialization, and store operations"
 
 [dependencies]
 async-stream     = { workspace = true }

@@ -8,7 +8,9 @@
 //! Nix daemon wire protocol.
 //!
 //! This crate defines the types and serialization format for the Nix daemon protocol,
-//! enabling communication between clients and the daemon server.
+//! enabling communication between clients and the daemon server. It also defines the
+//! [`DaemonStore`](`daemon::DaemonStore`) operation interface and higher-level store
+//! operations built on it.
 //!
 //! **Architecture**: This is the Protocol Layer in Harmonia's store architecture.
 //! See `docs/architecture/harmonia-store-structure.md` for details.
@@ -59,6 +61,9 @@ pub mod store_path {
 // Hand-written serialization impls for harmonia-store-derivation types
 mod store_impls;
 
+/// Higher-level store operations built on the [`DaemonStore`](`daemon::DaemonStore`) trait.
+pub mod store_ops;
+
 #[cfg(test)]
 mod wire_roundtrip;
 
@@ -69,6 +74,7 @@ pub mod daemon {
     pub use crate::daemon_wire::{IgnoredTrue, IgnoredZero};
     pub use crate::de;
     pub use crate::ser;
+    pub use crate::store_ops::write_derivation;
     pub use crate::types::*;
     pub use crate::version::*;
 }
