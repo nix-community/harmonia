@@ -56,10 +56,3 @@ pub struct FileTree<C>(pub FileSystemObject<C, Box<FileTree<C>>>);
 
 /// An in-memory file tree with byte-vector contents.
 pub type MemoryTree = FileTree<Vec<u8>>;
-
-/// An opaque placeholder used in shallow listings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Opaque;
-
-/// A shallow (one-level) file tree — directory children are [`Opaque`].
-pub type ShallowTree<C> = FileSystemObject<C, Opaque>;

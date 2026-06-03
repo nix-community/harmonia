@@ -13,23 +13,25 @@ repository.workspace = true
 description          = "NAR (Nix ARchive) format packing and unpacking"
 
 [dependencies]
-bstr               = { workspace = true }
-bytes              = { workspace = true }
-derive_more        = { workspace = true }
-futures-core       = { workspace = true }
-futures-sink       = { workspace = true }
-futures-util       = { workspace = true }
-harmonia-file-core = { workspace = true }
-harmonia-utils-io  = { workspace = true }
-nix.workspace      = true
-pin-project-lite   = { workspace = true }
-serde              = { workspace = true }
-serde_json         = { workspace = true }
-thiserror          = { workspace = true }
-tokio              = { workspace = true, features = [ "fs", "io-util" ] }
-tokio-util         = { workspace = true, features = [ "io", "io-util" ] }
-tracing            = { workspace = true }
-walkdir            = "2.5"
+bstr                  = { workspace = true }
+bytes                 = { workspace = true }
+cap-tokio             = { workspace = true }
+derive_more           = { workspace = true }
+futures-core          = { workspace = true }
+futures-sink          = { workspace = true }
+futures-util          = { workspace = true }
+harmonia-file-core    = { workspace = true }
+harmonia-file-fd      = { workspace = true }
+harmonia-file-io-pure = { workspace = true }
+harmonia-utils-io     = { workspace = true }
+nix.workspace         = true
+pin-project-lite      = { workspace = true }
+serde                 = { workspace = true }
+serde_json            = { workspace = true }
+thiserror             = { workspace = true }
+tokio                 = { workspace = true, features = [ "fs", "io-util", "sync" ] }
+tokio-util            = { workspace = true, features = [ "io", "io-util" ] }
+tracing               = { workspace = true }
 
 [dev-dependencies]
 harmonia-utils-test = { workspace = true }

@@ -1,0 +1,23 @@
+[package]
+name                 = "harmonia-file-fd"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
+repository.workspace = true
+description          = "Filesystem-backed FileSystemSource and FileSystemSink via cap-tokio"
+
+[dependencies]
+cap-tokio             = { workspace = true }
+futures-core          = { workspace = true }
+harmonia-file-io-pure = { workspace = true }
+nix                   = { workspace = true }
+thiserror             = { workspace = true }
+tokio                 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
