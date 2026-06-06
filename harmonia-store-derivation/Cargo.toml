@@ -33,7 +33,6 @@ zerocopy                       = { version = "0.8", features = [ "derive" ] }
 harmonia-store-derivation = { path = ".", features = [ "test" ] }
 hex-literal               = { workspace = true }
 rstest                    = { workspace = true }
-tempfile                  = { workspace = true }
 
 [features]
 test = [
