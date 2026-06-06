@@ -12,7 +12,8 @@ This crate provides hash types and algorithms used for content addressing in Nix
 - `Algorithm` - Hash algorithm enum with size and digest operations
 - `Sha256` / `NarHash` - Specialized hash types for common use cases
 - `Context` - Multi-step (Init-Update-Finish) digest calculation
-- `HashSink` - Async writer that computes hash of written data
+- `HashReader` - Async reader adapter that computes hash of read data
+- `HashWriter` - Async writer that computes hash of written data
 - `fmt` - Hash formatting (Base16, Base32, Base64, SRI)
 
 ## Example
@@ -34,11 +35,27 @@ let base32 = hash.as_base32().to_string();  // "1b8m03r63zqh..."
 let sri = hash.sri().to_string();           // "sha256-ungWv48B..."
 let hex = hash.as_base16().to_string();     // "ba7816bf8f01..."
 
-// Async hashing with HashSink
-use tokio::io;
-let mut sink = harmonia_utils_hash::HashSink::new(Algorithm::SHA256);
-io::copy(&mut reader, &mut sink).await?;
-let (size, hash) = sink.finish();
+// Async hashing with HashWriter
+async {
+    let mut reader: &[u8] = b"hello, world";
+    let mut writer = harmonia_utils_hash::HashWriter::new(Algorithm::SHA256);
+    tokio::io::copy(&mut reader, &mut writer).await?;
+    let (size, hash) = writer.finish();
+    Ok::<_, std::io::Error>(())
+};
+
+// Async hashing with HashReader
+async {
+    use tokio::io::AsyncReadExt;
+    let data: &[u8] = b"hello, world";
+    let (mut reader, state) = harmonia_utils_hash::HashReader::new(std::io::Cursor::new(data));
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).await?;
+    drop(reader);
+    let hash_state = std::sync::Arc::try_unwrap(state).unwrap().into_inner().unwrap();
+    let hash = hash_state.finish();
+    Ok::<_, std::io::Error>(())
+};
 ```
 
 ## Supported Algorithms
