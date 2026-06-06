@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Jörg Thalheim
+# SPDX-License-Identifier: MIT
+
+[package]
+name                 = "harmonia-store-ref-scan"
+version              = "0.0.0-alpha.0"
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
+repository.workspace = true
+description          = "Streaming reference scanner for Nix store path outputs"
+readme               = "README.md"
+
+[dependencies]
+harmonia-store-path          = { workspace = true }
+harmonia-utils-base-encoding = { workspace = true }
+
+[dev-dependencies]
+futures-util      = { workspace = true }
+harmonia-file-nar = { workspace = true }
+tempfile          = { workspace = true }
+tokio             = { workspace = true, features = [ "macros", "rt-multi-thread" ] }
+
+[lints]
+workspace = true

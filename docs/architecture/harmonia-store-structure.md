@@ -96,6 +96,7 @@ graph BT
         store-nar-info
         store-path
         store-path-info
+        store-ref-scan
     end
     subgraph "File"
         file-core
@@ -110,6 +111,7 @@ graph BT
     utils-signature --> utils-base-encoding
     store-path --> utils-hash
     store-content-address --> store-path
+    store-ref-scan --> store-path
     store-derivation --> store-content-address
     store-derivation --> utils-signature
     store-path-info --> store-content-address
