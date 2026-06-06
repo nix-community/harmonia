@@ -8,6 +8,7 @@ members = [
     "harmonia-utils-hash",
     "harmonia-store-content-address",
     "harmonia-store-derivation",
+    "harmonia-store-ref-scan",
     "harmonia-store-db",
     "harmonia-store-path",
     "harmonia-utils-signature",
@@ -108,6 +109,7 @@ harmonia-store-derivation      = { path = "harmonia-store-derivation" }
 harmonia-store-nar-info        = { path = "harmonia-store-nar-info" }
 harmonia-store-path            = { path = "harmonia-store-path" }
 harmonia-store-path-info       = { path = "harmonia-store-path-info" }
+harmonia-store-ref-scan        = { path = "harmonia-store-ref-scan" }
 harmonia-store-remote          = { path = "harmonia-store-remote" }
 harmonia-utils-base-encoding   = { path = "harmonia-utils-base-encoding" }
 harmonia-utils-hash            = { path = "harmonia-utils-hash" }

@@ -1250,7 +1250,6 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror",
  "zerocopy",
 ]
@@ -1303,6 +1302,18 @@ dependencies = [
  "proptest-derive",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "harmonia-store-ref-scan"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "futures-util",
+ "harmonia-file-nar",
+ "harmonia-store-path",
+ "harmonia-utils-base-encoding",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

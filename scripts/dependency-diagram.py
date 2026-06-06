@@ -151,6 +151,7 @@ def generate_mermaid(
         "store-nar-info",
         "store-path",
         "store-path-info",
+        "store-ref-scan",
     }
 
     # Sanity check: every store-* crate must be in exactly one list.
