@@ -25,9 +25,26 @@ pin_project! {
         #[pin]
         reader: Lending<R, PaddedReader<R>>,
         name: Option<ByteString>,
+        // Last entry name per open directory; entries must be strictly
+        // increasing like Nix requires, which also rules out duplicates.
+        // Empty means no entry seen yet (valid names are never empty).
+        prev_names: Vec<ByteString>,
         parsed: usize,
         state: Inner<false>,
     }
+}
+
+/// Reject names that Nix's NAR parser also refuses; unpacking them to disk
+/// would allow path traversal.
+fn validate_entry_name(name: &[u8]) -> io::Result<()> {
+    if name.is_empty() || name == b"." || name == b".." || name.contains(&b'/') || name.contains(&0)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "NAR contains invalid file name",
+        ));
+    }
+    Ok(())
 }
 
 impl<R> NarParser<R>
@@ -39,6 +56,7 @@ where
             reader: Lending::new(reader),
             parsed: 0,
             name: None,
+            prev_names: Vec::new(),
             state: Inner {
                 level: 0,
                 state: InnerState::Root(0),
@@ -131,6 +149,16 @@ where
                     }
                     let name_buf = buf.split_to(len);
                     trace!(len = buf.len(), ?name_buf, "Read name");
+                    validate_entry_name(&name_buf)?;
+                    if let Some(prev) = this.prev_names.last_mut() {
+                        if name_buf <= *prev {
+                            return Poll::Ready(Some(Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "NAR directory entries are not sorted or contain duplicates",
+                            ))));
+                        }
+                        *prev = name_buf.clone();
+                    }
                     *this.name = Some(name_buf);
                     buf.advance(aligned - len);
                     reader.as_mut().consume(aligned);
@@ -138,9 +166,11 @@ where
                 }
                 InnerState::ReadDir => {
                     let name = this.name.take().unwrap_or_default();
+                    this.prev_names.push(ByteString::new());
                     return Poll::Ready(Some(Ok(NarEvent::StartDirectory { name })));
                 }
                 InnerState::FinishReadEntry => {
+                    this.prev_names.pop();
                     return Poll::Ready(Some(Ok(NarEvent::EndDirectory)));
                 }
                 InnerState::Eof => return Poll::Ready(None),
@@ -176,6 +206,8 @@ where
 mod unittests {
     use std::io::{self, Cursor};
 
+    use bytes::Bytes;
+
     use rstest::rstest;
     use tokio::fs::File;
 
@@ -209,6 +241,51 @@ mod unittests {
         nar.extend_from_slice(&[0u8; 64]); // enough for one drive() iteration
 
         let err = read_nar(Cursor::new(nar)).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// Build a NAR of a directory containing one empty file per name.
+    fn dir_nar(names: &[&'static [u8]]) -> Bytes {
+        let mut events: test_data::TestNarEvents =
+            vec![NarEvent::StartDirectory { name: Bytes::new() }];
+        for name in names {
+            events.push(NarEvent::File {
+                name: Bytes::from_static(name),
+                executable: false,
+                size: 0,
+                reader: Cursor::new(Bytes::new()),
+            });
+        }
+        events.push(NarEvent::EndDirectory);
+        write_nar(events.iter())
+    }
+
+    /// Hostile entry names must be rejected: they would otherwise allow
+    /// path traversal when a NAR is restored to disk.
+    #[tokio::test]
+    #[rstest]
+    #[case::dot_dot(b"..")]
+    #[case::dot(b".")]
+    #[case::slash(b"foo/bar")]
+    #[case::nul(b"foo\x00bar")]
+    #[case::empty(b"")]
+    async fn reject_invalid_entry_name(#[case] name: &'static [u8]) {
+        let err = read_nar(Cursor::new(dir_nar(&[name]))).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// Duplicate or unsorted entries must be rejected, matching Nix's parser.
+    #[tokio::test]
+    #[rstest]
+    #[case::duplicate(b"foo", b"foo")]
+    #[case::unsorted(b"foo", b"bar")]
+    async fn reject_duplicate_or_unsorted_entries(
+        #[case] first: &'static [u8],
+        #[case] second: &'static [u8],
+    ) {
+        let err = read_nar(Cursor::new(dir_nar(&[first, second])))
+            .await
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 
