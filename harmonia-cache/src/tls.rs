@@ -39,10 +39,6 @@ pub fn load_tls_config(cert_path: &Path, key_path: &Path) -> Result<ServerConfig
 }
 
 /// Warn (not fail) when a secret file is group/other-readable.
-///
-/// Skips the check if the file lives under `$CREDENTIALS_DIRECTORY`:
-/// systemd exposes credentials with restrictive ACLs but mode 0440, and the
-/// chmod bits alone are not meaningful there (systemd/systemd#29435).
 pub(crate) fn warn_insecure_permissions(path: &Path) {
     if let Some(mode) = insecure_permissions(path, std::env::var_os("CREDENTIALS_DIRECTORY")) {
         tracing::warn!(
@@ -54,14 +50,16 @@ pub(crate) fn warn_insecure_permissions(path: &Path) {
 }
 
 /// Returns the file mode if it is group/other-readable, `None` otherwise.
+///
+/// Files under `$CREDENTIALS_DIRECTORY` are exempt: systemd provisions
+/// credentials with mode 0440 but restricts access via ACLs, so the mode bits
+/// alone are not meaningful (systemd/systemd#29435).
 fn insecure_permissions(path: &Path, credentials_dir: Option<OsString>) -> Option<u32> {
-    if let Some(dir) = credentials_dir {
-        let dir = Path::new(&dir);
-        if let (Ok(p), Ok(d)) = (path.canonicalize(), dir.canonicalize())
-            && p.starts_with(&d)
-        {
-            return None;
-        }
+    if let Some(dir) = credentials_dir
+        && let (Ok(p), Ok(d)) = (path.canonicalize(), Path::new(&dir).canonicalize())
+        && p.starts_with(&d)
+    {
+        return None;
     }
 
     let meta = std::fs::metadata(path).ok()?;
@@ -82,17 +80,16 @@ mod tests {
     }
 
     #[test]
-    fn warns_on_group_or_other_readable() {
+    fn flags_group_or_other_readable() {
         let dir = tempfile::tempdir().unwrap();
-        let path = key_file(dir.path(), 0o644);
-        assert_eq!(insecure_permissions(&path, None), Some(0o644));
-    }
-
-    #[test]
-    fn accepts_owner_only() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = key_file(dir.path(), 0o600);
-        assert_eq!(insecure_permissions(&path, None), None);
+        assert_eq!(
+            insecure_permissions(&key_file(dir.path(), 0o644), None),
+            Some(0o644)
+        );
+        assert_eq!(
+            insecure_permissions(&key_file(dir.path(), 0o600), None),
+            None
+        );
     }
 
     #[test]
