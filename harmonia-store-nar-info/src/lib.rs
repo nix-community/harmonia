@@ -11,7 +11,7 @@ use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_store_path_info::{
     NarHash, StorePathKeyed, UnkeyedValidPathInfo, ValidPathInfo, fingerprint_path,
 };
-use harmonia_utils_hash::Hash;
+use harmonia_utils_hash::{Hash, fmt::Base32};
 use harmonia_utils_signature::{SecretKey, Signature};
 
 /// A keyed NarInfo: store path plus narinfo metadata.
@@ -143,6 +143,146 @@ pub fn format_narinfo_txt(store_dir: &StoreDir, narinfo: &NarInfo) -> Vec<u8> {
     }
 
     result
+}
+
+/// Errors from parsing the textual narinfo format.
+#[derive(Debug, thiserror::Error)]
+pub enum NarInfoParseError {
+    #[error("line {line}: expected 'Key: value'")]
+    MalformedLine { line: usize },
+    #[error("line {line}: invalid {field} ({message})")]
+    InvalidField {
+        line: usize,
+        field: &'static str,
+        message: String,
+    },
+    #[error("duplicate {field} field")]
+    Duplicate { field: &'static str },
+    #[error("missing required {field} field")]
+    Missing { field: &'static str },
+}
+
+/// Parses the textual narinfo format, reading `StorePath` as a full path and `References`/`Deriver` as base names.
+pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarInfoParseError> {
+    let mut path = Option::<StorePath>::None;
+    let mut url = Option::<String>::None;
+    let mut compression = Option::<String>::None;
+    let mut download_hash = Option::<Hash>::None;
+    let mut download_size = Option::<u64>::None;
+    let mut nar_hash = Option::<NarHash>::None;
+    let mut nar_size = Option::<u64>::None;
+    let mut references = BTreeSet::<StorePath>::new();
+    let mut have_references = false;
+    let mut deriver = Option::<StorePath>::None;
+    let mut signatures = BTreeSet::<Signature>::new();
+    let mut ca = Option::<ContentAddress>::None;
+
+    for (i, line) in s.lines().enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+        let line_no = i + 1;
+        let (key, value) = line
+            .split_once(": ")
+            .ok_or(NarInfoParseError::MalformedLine { line: line_no })?;
+        let invalid =
+            |field: &'static str, e: &dyn std::fmt::Display| NarInfoParseError::InvalidField {
+                line: line_no,
+                field,
+                message: e.to_string(),
+            };
+        match key {
+            "StorePath" => {
+                if path.is_some() {
+                    return Err(NarInfoParseError::Duplicate { field: "StorePath" });
+                }
+                path = Some(
+                    store_dir
+                        .parse::<StorePath>(value)
+                        .map_err(|e| invalid("StorePath", &e))?,
+                );
+            }
+            "URL" => url = Some(value.to_owned()),
+            "Compression" => compression = Some(value.to_owned()),
+            "FileHash" => {
+                download_hash = Some(
+                    value
+                        .parse::<Base32<Hash>>()
+                        .map_err(|e| invalid("FileHash", &e))?
+                        .into_hash(),
+                );
+            }
+            "FileSize" => {
+                download_size = Some(value.parse::<u64>().map_err(|e| invalid("FileSize", &e))?);
+            }
+            "NarHash" => {
+                nar_hash = Some(
+                    value
+                        .parse::<Base32<NarHash>>()
+                        .map_err(|e| invalid("NarHash", &e))?
+                        .into_hash(),
+                );
+            }
+            "NarSize" => {
+                nar_size = Some(value.parse::<u64>().map_err(|e| invalid("NarSize", &e))?);
+            }
+            "References" => {
+                if have_references {
+                    return Err(NarInfoParseError::Duplicate {
+                        field: "References",
+                    });
+                }
+                have_references = true;
+                for r in value.split_whitespace() {
+                    references.insert(
+                        StorePath::from_bytes(r.as_bytes())
+                            .map_err(|e| invalid("References", &e))?,
+                    );
+                }
+            }
+            "Deriver" if value != "unknown-deriver" => {
+                deriver = Some(
+                    StorePath::from_bytes(value.as_bytes()).map_err(|e| invalid("Deriver", &e))?,
+                );
+            }
+            "Sig" => {
+                signatures.insert(value.parse::<Signature>().map_err(|e| invalid("Sig", &e))?);
+            }
+            "CA" => {
+                if ca.is_some() {
+                    return Err(NarInfoParseError::Duplicate { field: "CA" });
+                }
+                ca = Some(
+                    value
+                        .parse::<ContentAddress>()
+                        .map_err(|e| invalid("CA", &e))?,
+                );
+            }
+            // Unknown keys are ignored
+            _ => {}
+        }
+    }
+
+    Ok(NarInfo {
+        path: path.ok_or(NarInfoParseError::Missing { field: "StorePath" })?,
+        info: UnkeyedNarInfo {
+            info: UnkeyedValidPathInfo {
+                deriver,
+                nar_hash: nar_hash.ok_or(NarInfoParseError::Missing { field: "NarHash" })?,
+                references,
+                registration_time: None,
+                nar_size: nar_size.ok_or(NarInfoParseError::Missing { field: "NarSize" })?,
+                ultimate: false,
+                signatures,
+                ca,
+                store_dir: store_dir.clone(),
+            },
+            url: Some(url.ok_or(NarInfoParseError::Missing { field: "URL" })?),
+            compression,
+            download_hash,
+            download_size,
+        },
+    })
 }
 
 // -- JSON serialization (version 3) ------------------------------------------
@@ -294,5 +434,82 @@ mod tests {
         assert!(lines[5].starts_with("NarHash: sha256:"));
         assert_eq!(lines[6], "NarSize: 1234");
         assert_eq!(lines.len(), 7);
+    }
+
+    fn sample_nar_hash() -> NarHash {
+        use harmonia_utils_hash::fmt::Base32;
+        "sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0"
+            .parse::<Base32<NarHash>>()
+            .unwrap()
+            .into_hash()
+    }
+
+    #[test]
+    fn test_narinfo_text_round_trip() {
+        let store_dir = StoreDir::default();
+        let path: StorePath = "55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3"
+            .parse()
+            .unwrap();
+        let dep: StorePath = "0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0"
+            .parse()
+            .unwrap();
+        let nar_hash = sample_nar_hash();
+        let mut references = BTreeSet::new();
+        references.insert(dep.clone());
+
+        let original = NarInfo {
+            path,
+            info: UnkeyedNarInfo {
+                info: UnkeyedValidPathInfo {
+                    deriver: Some(dep),
+                    nar_hash,
+                    references,
+                    registration_time: None,
+                    nar_size: 196_040,
+                    ultimate: false,
+                    signatures: BTreeSet::new(),
+                    ca: None,
+                    store_dir: store_dir.clone(),
+                },
+                url: Some("nar/abc.nar.xz".into()),
+                compression: Some("xz".into()),
+                download_hash: Some(Hash::from(nar_hash)),
+                download_size: Some(12_345),
+            },
+        };
+
+        let text = format_narinfo_txt(&store_dir, &original);
+        let parsed = parse_narinfo_txt(&store_dir, std::str::from_utf8(&text).unwrap()).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn test_parse_full_store_path_field() {
+        let store_dir = StoreDir::default();
+        let text = "StorePath: /nix/store/55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3
+URL: nar/abc.nar
+Compression: none
+NarHash: sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0
+NarSize: 196040
+";
+        let parsed = parse_narinfo_txt(&store_dir, text).unwrap();
+        assert_eq!(
+            parsed.path.to_string(),
+            "55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3"
+        );
+    }
+
+    #[test]
+    fn test_parse_missing_store_path() {
+        let store_dir = StoreDir::default();
+        let text = "URL: nar/abc.nar
+NarHash: sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0
+NarSize: 1
+";
+        let err = parse_narinfo_txt(&store_dir, text).unwrap_err();
+        assert!(matches!(
+            err,
+            NarInfoParseError::Missing { field: "StorePath" }
+        ));
     }
 }

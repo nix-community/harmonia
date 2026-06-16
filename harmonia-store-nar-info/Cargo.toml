@@ -15,6 +15,7 @@ harmonia-store-path-info       = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
 serde                          = { workspace = true }
+thiserror                      = { workspace = true }
 
 [dev-dependencies]
 harmonia-store-content-address = { workspace = true }
