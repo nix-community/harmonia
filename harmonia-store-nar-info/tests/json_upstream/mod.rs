@@ -1,12 +1,14 @@
 //! Tests that verify JSON serialization matches upstream Nix format
 
 use harmonia_store_content_address::ContentAddress;
-use harmonia_store_nar_info::UnkeyedNarInfo;
-use harmonia_store_path::StoreDir;
+use harmonia_store_nar_info::{NarInfo, UnkeyedNarInfo, format_narinfo_txt, parse_narinfo_txt};
+use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_store_path_info::{NarHash, Pure, UnkeyedValidPathInfo};
 use harmonia_utils_signature::Signature;
-use harmonia_utils_test::json_upstream::libstore_test_data_path;
-use harmonia_utils_test::test_upstream_json;
+use harmonia_utils_test::{
+    json_upstream::{libstore_test_data_path, read_upstream_json},
+    test_upstream_json,
+};
 use hex_literal::hex;
 use std::num::NonZero;
 
@@ -72,3 +74,29 @@ test_upstream_json!(
     libstore_test_data_path("nar-info/json-3/impure.json"),
     impure_info()
 );
+
+/// Re-rendering is the stable check because the text format drops `registrationTime` and `ultimate`.
+fn assert_text_round_trip(info: UnkeyedNarInfo) {
+    let store_dir = StoreDir::default();
+    let path: StorePath = "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap();
+    let narinfo = NarInfo { path, info };
+
+    let text = format_narinfo_txt(&store_dir, &narinfo);
+    let parsed = parse_narinfo_txt(&store_dir, std::str::from_utf8(&text).unwrap()).unwrap();
+
+    assert_eq!(parsed.info.info.references, narinfo.info.info.references);
+    assert_eq!(parsed.info.info.signatures, narinfo.info.info.signatures);
+    assert_eq!(parsed.info.info.ca, narinfo.info.info.ca);
+    assert_eq!(format_narinfo_txt(&store_dir, &parsed), text);
+}
+
+#[test]
+fn nar_info_text_round_trip() {
+    assert_text_round_trip(impure_info());
+}
+
+#[test]
+fn nar_info_text_round_trip_upstream() {
+    let info = read_upstream_json(&libstore_test_data_path("nar-info/json-3/impure.json"));
+    assert_text_round_trip(info);
+}

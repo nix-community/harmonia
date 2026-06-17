@@ -1267,6 +1267,7 @@ dependencies = [
  "hex-literal",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
