@@ -48,8 +48,6 @@ pub struct PoolConfig {
     pub max_size: usize,
     /// Maximum time a connection can be idle before being closed
     pub max_idle_time: Duration,
-    /// Timeout for acquiring a connection from the pool
-    pub acquire_timeout: Duration,
     /// Timeout for establishing a new connection
     pub connection_timeout: Duration,
     /// Optional metrics for monitoring
@@ -66,7 +64,6 @@ impl Default for PoolConfig {
         Self {
             max_size,
             max_idle_time: Duration::from_secs(300), // 5 minutes
-            acquire_timeout: Duration::from_secs(30),
             connection_timeout: Duration::from_secs(10),
             metrics: None,
         }
@@ -137,33 +134,21 @@ impl ConnectionPool {
 
     /// Acquire a connection from the pool, returning an RAII guard that
     /// releases it on drop.
+    ///
+    /// Waits for a free slot indefinitely; a caller that needs a
+    /// deadline wraps this in its own timeout (cancellation frees the
+    /// slot at once).
     pub async fn acquire(&self) -> DaemonResult<PooledConnectionGuard> {
         let start = Instant::now();
 
         // Hold a slot for the connection's lifetime.
-        let permit = match tokio::time::timeout(
-            self.config.acquire_timeout,
-            Arc::clone(&self.slots).acquire_owned(),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => permit,
+        let permit = Arc::clone(&self.slots)
+            .acquire_owned()
+            .await
             // The semaphore is never closed, but handle it rather than panic.
-            Ok(Err(_)) => return Err(timeout_error("pool closed")),
-            Err(_) => {
-                if let Some(metrics) = &self.config.metrics {
-                    metrics
-                        .connection_errors
-                        .with_label_values(&["timeout"])
-                        .inc();
-                    metrics
-                        .connection_acquire_duration
-                        .with_label_values(&["timeout"])
-                        .observe(start.elapsed().as_secs_f64());
-                }
-                return Err(timeout_error("acquiring connection from pool"));
-            }
-        };
+            .map_err(|_| {
+                DaemonError::from(DaemonErrorKind::Custom("connection pool closed".into()))
+            })?;
 
         // Reuse a live idle connection, discarding any that idled out.
         let reused = {
@@ -368,7 +353,6 @@ mod tests {
         let config = PoolConfig::default();
         assert!(config.max_size > 0);
         assert!(config.max_idle_time > Duration::ZERO);
-        assert!(config.acquire_timeout > Duration::ZERO);
         assert!(config.connection_timeout > Duration::ZERO);
     }
 
@@ -391,7 +375,6 @@ mod tests {
         let config = PoolConfig {
             max_size: 2,
             connection_timeout: Duration::from_millis(50),
-            acquire_timeout: Duration::from_millis(200),
             ..Default::default()
         };
         let pool = ConnectionPool::new("/nonexistent/socket", config);
