@@ -3,10 +3,13 @@
 
 //! Connection pool for Nix daemon clients.
 //!
-//! This module provides a connection pool with formally verified safety properties:
-//! - **Invariant**: `active + idle ≤ capacity` (proven in Dafny)
-//! - **Resource safety**: Connections are always returned via RAII guards
-//! - **Observability**: Full Prometheus metrics integration
+//! Capacity is bounded by a [`tokio::sync::Semaphore`]: a connection slot
+//! is a permit, so acquiring is cancellation-safe and a dropped acquire
+//! future can never leak a slot. The Nix daemon protocol is stateful, so
+//! a connection whose in-flight operation is cancelled would be left
+//! mid-frame; such connections are dropped instead of returned to the
+//! pool, where the next user would desync and hang. Use [`PooledConnectionGuard::execute`]
+//! for operations that must survive cancellation.
 //!
 //! # Example
 //!
@@ -14,9 +17,10 @@
 //! use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
 //!
 //! let pool = ConnectionPool::new("/nix/var/nix/daemon-socket/socket", PoolConfig::default());
-//! let guard = pool.acquire().await?;
-//! let result = guard.client().query_path_info(&path).await?;
-//! // Connection automatically returned when guard is dropped
+//! let mut guard = pool.acquire().await?;
+//! let result = guard.execute(|c| c.query_path_info(&path)).await?;
+//! // Connection returned to the pool when the guard is dropped, unless
+//! // an operation was interrupted, in which case it is discarded.
 //! ```
 
 use crate::metrics::PoolMetrics;
@@ -24,11 +28,12 @@ use crate::{DaemonClient, DaemonClientBuilder};
 use harmonia_protocol::types::{DaemonError, DaemonErrorKind, DaemonResult, HandshakeDaemonStore};
 use harmonia_store_path::StoreDir;
 use std::collections::VecDeque;
+use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, trace, warn};
 
 /// Create a timeout error.
@@ -83,79 +88,34 @@ impl PooledConnection {
     }
 }
 
-/// Pool state with formally verified invariant
-struct PoolState {
-    /// Idle connections available for reuse
-    idle: VecDeque<PooledConnection>,
-    /// Count of connections currently in use
-    active_count: usize,
-    /// Maximum pool capacity
-    capacity: usize,
-    /// Count of tasks waiting for a connection
-    waiting_count: usize,
-}
-
-impl PoolState {
-    /// Core invariant from Dafny proof: active + idle ≤ capacity
-    fn invariant(&self) -> bool {
-        self.active_count + self.idle.len() <= self.capacity && self.capacity > 0
-    }
-
-    /// Update metrics to reflect current state
-    fn update_metrics(&self, metrics: &PoolMetrics) {
-        metrics.idle_connections.set(self.idle.len() as i64);
-        metrics.active_connections.set(self.active_count as i64);
-    }
-}
-
-/// Result of an acquire attempt
-enum AcquireResult {
-    /// Successfully acquired a connection
-    Success(Box<PooledConnection>),
-    /// Must wait for a connection to become available
-    WaitRequired,
-}
-
 /// A connection pool for Nix daemon clients.
-///
-/// The pool maintains the invariant `active + idle ≤ capacity` at all times,
-/// ensuring bounded resource usage.
 #[derive(Clone)]
 pub struct ConnectionPool {
-    state: Arc<Mutex<PoolState>>,
+    /// One permit per connection slot.
+    slots: Arc<Semaphore>,
+    /// Idle connections available for reuse. A std mutex suffices: it is
+    /// only held to push or pop, never across an await, so Drop can
+    /// return a connection synchronously.
+    idle: Arc<Mutex<VecDeque<PooledConnection>>>,
     socket_path: PathBuf,
     store_dir: StoreDir,
     config: PoolConfig,
-    available_notify: Arc<Notify>,
 }
 
 impl ConnectionPool {
     /// Create a new connection pool.
-    ///
-    /// # Arguments
-    /// * `socket_path` - Path to the Nix daemon Unix socket
-    /// * `config` - Pool configuration
     ///
     /// # Panics
     /// Panics if `config.max_size` is 0.
     pub fn new<P: AsRef<Path>>(socket_path: P, config: PoolConfig) -> Self {
         assert!(config.max_size > 0, "Pool capacity must be positive");
 
-        let state = PoolState {
-            idle: VecDeque::new(),
-            active_count: 0,
-            capacity: config.max_size,
-            waiting_count: 0,
-        };
-
-        debug_assert!(state.invariant());
-
         Self {
-            state: Arc::new(Mutex::new(state)),
+            slots: Arc::new(Semaphore::new(config.max_size)),
+            idle: Arc::new(Mutex::new(VecDeque::new())),
             socket_path: socket_path.as_ref().to_path_buf(),
             store_dir: StoreDir::default(),
             config,
-            available_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -175,130 +135,58 @@ impl ConnectionPool {
         &self.store_dir
     }
 
-    /// Acquire a connection from the pool.
-    ///
-    /// Returns an RAII guard that automatically returns the connection
-    /// when dropped.
+    /// Acquire a connection from the pool, returning an RAII guard that
+    /// releases it on drop.
     pub async fn acquire(&self) -> DaemonResult<PooledConnectionGuard> {
         let start = Instant::now();
 
-        loop {
-            let result = self.try_acquire(start).await?;
-
-            match result {
-                AcquireResult::Success(conn) => {
-                    return Ok(PooledConnectionGuard {
-                        conn: Some(*conn),
-                        pool: Arc::clone(&self.state),
-                        metrics: self.config.metrics.clone(),
-                        notify: Arc::clone(&self.available_notify),
-                    });
+        // Hold a slot for the connection's lifetime.
+        let permit = match tokio::time::timeout(
+            self.config.acquire_timeout,
+            Arc::clone(&self.slots).acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            // The semaphore is never closed, but handle it rather than panic.
+            Ok(Err(_)) => return Err(timeout_error("pool closed")),
+            Err(_) => {
+                if let Some(metrics) = &self.config.metrics {
+                    metrics
+                        .connection_errors
+                        .with_label_values(&["timeout"])
+                        .inc();
+                    metrics
+                        .connection_acquire_duration
+                        .with_label_values(&["timeout"])
+                        .observe(start.elapsed().as_secs_f64());
                 }
-                AcquireResult::WaitRequired => {
-                    // Wait for notification with timeout
-                    match tokio::time::timeout(
-                        self.config.acquire_timeout,
-                        self.available_notify.notified(),
-                    )
-                    .await
-                    {
-                        Ok(_) => {
-                            // Decrement waiting count and retry
-                            let mut state = self.state.lock().await;
-                            state.waiting_count = state.waiting_count.saturating_sub(1);
-                            continue;
-                        }
-                        Err(_) => {
-                            // Timeout waiting for connection
-                            let mut state = self.state.lock().await;
-                            state.waiting_count = state.waiting_count.saturating_sub(1);
+                return Err(timeout_error("acquiring connection from pool"));
+            }
+        };
 
-                            if let Some(ref metrics) = self.config.metrics {
-                                metrics
-                                    .connection_errors
-                                    .with_label_values(&["timeout"])
-                                    .inc();
-                                metrics
-                                    .connection_acquire_duration
-                                    .with_label_values(&["timeout"])
-                                    .observe(start.elapsed().as_secs_f64());
-                            }
-
-                            return Err(timeout_error("acquiring connection from pool"));
-                        }
-                    }
+        // Reuse a live idle connection, discarding any that idled out.
+        let reused = {
+            let max_idle = self.config.max_idle_time;
+            let mut idle = self.idle.lock().unwrap();
+            loop {
+                match idle.pop_front() {
+                    Some(conn) if conn.is_expired(max_idle) => continue,
+                    other => break other,
                 }
             }
-        }
-    }
+        };
 
-    /// Try to acquire a connection without blocking.
-    async fn try_acquire(&self, start_time: Instant) -> DaemonResult<AcquireResult> {
-        let mut state = self.state.lock().await;
-        debug_assert!(state.invariant());
-
-        // Update metrics
-        if let Some(ref metrics) = self.config.metrics {
-            state.update_metrics(metrics);
-        }
-
-        // Remove expired connections
-        let max_idle = self.config.max_idle_time;
-        state.idle.retain(|conn| !conn.is_expired(max_idle));
-
-        // Try to reuse an idle connection
-        if let Some(mut conn) = state.idle.pop_front() {
-            state.active_count += 1;
-            conn.last_used = Instant::now();
-            debug_assert!(state.invariant());
-
-            if let Some(ref metrics) = self.config.metrics {
-                state.update_metrics(metrics);
-                metrics
-                    .connection_acquire_duration
-                    .with_label_values(&["reused"])
-                    .observe(start_time.elapsed().as_secs_f64());
+        let (conn, kind) = match reused {
+            Some(mut conn) => {
+                conn.last_used = Instant::now();
+                trace!("Reusing idle connection");
+                (conn, "reused")
             }
-
-            trace!("Reusing idle connection");
-            return Ok(AcquireResult::Success(Box::new(conn)));
-        }
-
-        // Try to create a new connection if under capacity
-        if state.active_count < state.capacity {
-            state.active_count += 1;
-            debug_assert!(state.invariant());
-
-            if let Some(ref metrics) = self.config.metrics {
-                state.update_metrics(metrics);
-            }
-
-            // Release lock before creating connection
-            drop(state);
-
-            match self.create_connection().await {
-                Ok(conn) => {
-                    if let Some(ref metrics) = self.config.metrics {
-                        metrics
-                            .total_connections_created
-                            .with_label_values(&["success"])
-                            .inc();
-                        metrics
-                            .connection_acquire_duration
-                            .with_label_values(&["created"])
-                            .observe(start_time.elapsed().as_secs_f64());
-                    }
-                    debug!("Created new connection");
-                    return Ok(AcquireResult::Success(Box::new(conn)));
-                }
-                Err(e) => {
-                    // Decrement active count on failure
-                    let mut state = self.state.lock().await;
-                    state.active_count = state.active_count.saturating_sub(1);
-                    debug_assert!(state.invariant());
-
-                    if let Some(ref metrics) = self.config.metrics {
-                        state.update_metrics(metrics);
+            None => {
+                // On error the permit drops here, releasing the slot.
+                let conn = self.create_connection().await.inspect_err(|e| {
+                    if let Some(metrics) = &self.config.metrics {
                         metrics
                             .total_connections_created
                             .with_label_values(&["error"])
@@ -308,20 +196,34 @@ impl ConnectionPool {
                             .with_label_values(&["creation_failed"])
                             .inc();
                     }
-
                     warn!("Failed to create connection: {e}");
-                    return Err(e);
+                })?;
+                if let Some(metrics) = &self.config.metrics {
+                    metrics
+                        .total_connections_created
+                        .with_label_values(&["success"])
+                        .inc();
                 }
+                debug!("Created new connection");
+                (conn, "created")
             }
+        };
+
+        if let Some(metrics) = &self.config.metrics {
+            metrics
+                .connection_acquire_duration
+                .with_label_values(&[kind])
+                .observe(start.elapsed().as_secs_f64());
+            self.update_metrics(metrics);
         }
 
-        // Pool is at capacity, must wait
-        state.waiting_count += 1;
-        trace!(
-            "Pool at capacity ({}/{}), waiting",
-            state.active_count, state.capacity
-        );
-        Ok(AcquireResult::WaitRequired)
+        Ok(PooledConnectionGuard {
+            conn: Some(conn),
+            idle: Arc::clone(&self.idle),
+            metrics: self.config.metrics.clone(),
+            dirty: false,
+            _permit: permit,
+        })
     }
 
     /// Create a new connection to the daemon.
@@ -351,36 +253,78 @@ impl ConnectionPool {
         })
     }
 
+    fn update_metrics(&self, metrics: &PoolMetrics) {
+        let idle = self.idle.lock().unwrap().len();
+        // Held permits are the guards in use; idle connections hold none.
+        let active = self.config.max_size - self.slots.available_permits();
+        metrics.idle_connections.set(idle as i64);
+        metrics.active_connections.set(active as i64);
+    }
+
     /// Get current pool statistics.
     ///
     /// Returns (idle_count, active_count, capacity).
     pub async fn stats(&self) -> (usize, usize, usize) {
-        let state = self.state.lock().await;
-        (state.idle.len(), state.active_count, state.capacity)
+        let idle = self.idle.lock().unwrap().len();
+        let capacity = self.config.max_size;
+        // Held permits are the guards in use; idle connections hold none.
+        let active = capacity - self.slots.available_permits();
+        (idle, active, capacity)
     }
 }
 
-/// RAII guard that ensures connections are returned to the pool.
+/// RAII guard that returns its connection to the pool when dropped,
+/// unless the connection was poisoned (see [`Self::execute`]) or marked
+/// broken via [`Self::mark_broken`], in which case it is discarded.
 pub struct PooledConnectionGuard {
     conn: Option<PooledConnection>,
-    pool: Arc<Mutex<PoolState>>,
+    idle: Arc<Mutex<VecDeque<PooledConnection>>>,
     metrics: Option<Arc<PoolMetrics>>,
-    notify: Arc<Notify>,
+    /// Set while an operation is in flight; poisons the connection if the
+    /// guard drops while set.
+    dirty: bool,
+    /// Releases the connection slot when the guard drops.
+    _permit: OwnedSemaphorePermit,
 }
 
 impl PooledConnectionGuard {
-    /// Get a reference to the underlying client.
-    pub fn client(&mut self) -> &mut UnixDaemonClient {
-        &mut self.conn.as_mut().expect("connection guard used after mark_broken() or invalid state - this indicates a bug in the caller").client
+    /// Run a daemon operation, discarding the connection unless it
+    /// completes successfully. The daemon protocol is a request/response
+    /// stream on one socket, so an operation that is cancelled or errors
+    /// mid-exchange leaves the connection in an unknown state that would
+    /// desync the next user; only a clean `Ok` returns it to the pool.
+    ///
+    /// This is the only way to reach the client, so an operation cannot
+    /// be run uncancellably. A multi-step exchange that must stay atomic
+    /// goes in a single closure.
+    pub async fn execute<'a, T, Fut>(
+        &'a mut self,
+        op: impl FnOnce(&'a mut UnixDaemonClient) -> Fut,
+    ) -> DaemonResult<T>
+    where
+        Fut: Future<Output = DaemonResult<T>> + 'a,
+    {
+        self.dirty = true;
+        // Borrow conn alone (not all of self) so dirty stays assignable.
+        let client = &mut self
+            .conn
+            .as_mut()
+            .expect("connection guard used after mark_broken()")
+            .client;
+        let out = op(client).await;
+        // Leave the connection poisoned on error: its protocol state is
+        // unknown, so Drop discards it rather than recirculating it.
+        if out.is_ok() {
+            self.dirty = false;
+        }
+        out
     }
 
-    /// Mark the connection as broken.
-    ///
-    /// A broken connection will not be returned to the pool.
+    /// Mark the connection as broken so it is not returned to the pool.
     /// Call this when an operation fails with a connection-level error.
     pub fn mark_broken(mut self) {
         self.conn = None;
-        if let Some(ref metrics) = self.metrics {
+        if let Some(metrics) = &self.metrics {
             metrics
                 .connection_errors
                 .with_label_values(&["broken"])
@@ -391,44 +335,27 @@ impl PooledConnectionGuard {
 
 impl Drop for PooledConnectionGuard {
     fn drop(&mut self) {
-        let conn = self.conn.take();
-        let pool = Arc::clone(&self.pool);
-        let metrics = self.metrics.clone();
-        let notify = Arc::clone(&self.notify);
-
-        // Use tokio::spawn to avoid blocking in drop
-        tokio::spawn(async move {
-            let mut state = pool.lock().await;
-            debug_assert!(state.invariant());
-
-            if let Some(mut conn) = conn {
-                // Return healthy connection to pool
-                if state.active_count > 0 {
-                    state.active_count -= 1;
-                    conn.last_used = Instant::now();
-                    state.idle.push_back(conn);
-
-                    if let Some(ref metrics) = metrics {
-                        state.update_metrics(metrics);
-                    }
+        if let Some(mut conn) = self.conn.take() {
+            if self.dirty {
+                // Interrupted mid-operation: the connection may have an
+                // unfinished request on the wire, so discard it.
+                if let Some(metrics) = &self.metrics {
+                    metrics
+                        .connection_errors
+                        .with_label_values(&["interrupted"])
+                        .inc();
                 }
-            } else if state.active_count > 0 {
-                // Broken connection, just decrement count
-                state.active_count -= 1;
-
-                if let Some(ref metrics) = metrics {
-                    state.update_metrics(metrics);
-                }
+                trace!("Discarding connection interrupted mid-operation");
+            } else {
+                conn.last_used = Instant::now();
+                self.idle.lock().unwrap().push_back(conn);
             }
-
-            debug_assert!(state.invariant());
-
-            // Notify waiters if any
-            if state.waiting_count > 0 {
-                drop(state);
-                notify.notify_one();
-            }
-        });
+        }
+        if let Some(metrics) = &self.metrics {
+            let idle = self.idle.lock().unwrap().len() as i64;
+            metrics.idle_connections.set(idle);
+        }
+        // _permit is released when this guard finishes dropping.
     }
 }
 
@@ -455,14 +382,33 @@ mod tests {
         let _ = ConnectionPool::new("/tmp/test.sock", config);
     }
 
-    #[test]
-    fn test_pool_state_invariant() {
-        let state = PoolState {
-            idle: VecDeque::new(),
-            active_count: 0,
-            capacity: 5,
-            waiting_count: 0,
+    /// A pool pointed at a non-existent socket should fail to create a
+    /// connection but must release the slot, so capacity is preserved
+    /// across repeated (including cancelled) acquire attempts rather than
+    /// draining to zero.
+    #[tokio::test]
+    async fn slot_released_on_failed_and_cancelled_acquire() {
+        let config = PoolConfig {
+            max_size: 2,
+            connection_timeout: Duration::from_millis(50),
+            acquire_timeout: Duration::from_millis(200),
+            ..Default::default()
         };
-        assert!(state.invariant());
+        let pool = ConnectionPool::new("/nonexistent/socket", config);
+
+        // Failed creations must not consume slots permanently.
+        for _ in 0..5 {
+            assert!(pool.acquire().await.is_err());
+        }
+        assert_eq!(pool.slots.available_permits(), 2);
+
+        // A cancelled acquire (future dropped) must also free its slot.
+        for _ in 0..5 {
+            let fut = pool.acquire();
+            tokio::pin!(fut);
+            // Poll once then drop without awaiting to completion.
+            let _ = tokio::time::timeout(Duration::from_millis(1), &mut fut).await;
+        }
+        assert_eq!(pool.slots.available_permits(), 2);
     }
 }
