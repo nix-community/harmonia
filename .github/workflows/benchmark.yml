@@ -12,7 +12,7 @@ jobs:
       (github.event.state == 'success' &&
        github.event.context == 'buildbot/nix-build')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # For status events, checkout the commit the status was reported on
           ref: ${{ github.event.sha || github.sha }}
