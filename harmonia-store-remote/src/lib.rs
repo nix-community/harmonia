@@ -49,7 +49,7 @@
 //!
 //!     // Acquire a connection from the pool
 //!     let mut guard = pool.acquire().await?;
-//!     let is_valid = guard.client().is_valid_path(&path).await?;
+//!     let is_valid = guard.execute(|c| c.is_valid_path(&path)).await?;
 //!     // Connection automatically returned when guard is dropped
 //!     Ok(())
 //! }
