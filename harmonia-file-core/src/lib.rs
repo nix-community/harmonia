@@ -20,10 +20,14 @@ use std::collections::BTreeMap;
 /// A regular file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Regular<C> {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub executable: bool,
     #[serde(flatten)]
     pub contents: C,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// A directory whose children are of type `Child`.
@@ -56,10 +60,3 @@ pub struct FileTree<C>(pub FileSystemObject<C, Box<FileTree<C>>>);
 
 /// An in-memory file tree with byte-vector contents.
 pub type MemoryTree = FileTree<Vec<u8>>;
-
-/// An opaque placeholder used in shallow listings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Opaque;
-
-/// A shallow (one-level) file tree — directory children are [`Opaque`].
-pub type ShallowTree<C> = FileSystemObject<C, Opaque>;

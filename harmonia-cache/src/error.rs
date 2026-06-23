@@ -71,6 +71,7 @@ pub enum ServeError {
     },
 
     #[error("Access denied: {path}")]
+    #[allow(dead_code)]
     AccessDenied { path: String },
 }
 

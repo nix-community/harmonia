@@ -22,8 +22,8 @@ composed.
 ┌────────────────────────────┬─────────────────────────┐
 │  Format / File             │  Database               │
 │  harmonia-file-nar         │  harmonia-store-db      │
-│  harmonia-file-core        │                         │
-│  NAR pack/unpack, types    │  SQLite store metadata  │
+│  harmonia-file-core/io/fd  │                         │
+│  NAR pack/unpack, file I/O │  SQLite store metadata  │
 └────────────────────────────┴─────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────┐
@@ -51,7 +51,9 @@ composed.
 | [harmonia-store-aterm](../../harmonia-store-aterm/) | ATerm derivation parser |
 | [harmonia-store-path-info](../../harmonia-store-path-info/) | ValidPathInfo types (pure) |
 | [harmonia-store-db](../../harmonia-store-db/README.md) | SQLite store metadata |
-| [harmonia-file-core](../../harmonia-file-core/) | File tree types and serde (pure) |
+| [harmonia-file-core](../../harmonia-file-core/) | File tree data types and serde |
+| [harmonia-file-io-pure](../../harmonia-file-io-pure/) | Async IO traits, in-memory impls, listing |
+| [harmonia-file-fd](../../harmonia-file-fd/) | Filesystem source/sink via cap-std |
 | [harmonia-file-nar](../../harmonia-file-nar/README.md) | NAR archive format |
 | [harmonia-protocol](../../harmonia-protocol/README.md) | Daemon wire protocol |
 | [harmonia-protocol-derive](../../harmonia-protocol-derive/README.md) | Derive macros for protocol types |
@@ -100,16 +102,20 @@ graph BT
     end
     subgraph "File"
         file-core
+        file-fd
+        file-io-pure
         file-nar
     end
     bench
     client
     ssh-store
-    file-nar --> file-core
-    file-nar --> utils-io
+    file-io-pure --> file-core
     utils-hash --> utils-base-encoding
     utils-signature --> utils-base-encoding
+    file-fd --> file-io-pure
     store-path --> utils-hash
+    file-nar --> file-fd
+    file-nar --> utils-io
     store-content-address --> store-path
     store-ref-scan --> store-path
     store-derivation --> store-content-address
@@ -155,9 +161,11 @@ intra-workspace dependencies.
 - `harmonia-store-derivation`: derivations, derived paths, placeholders, realisations — depends on `harmonia-store-content-address`.
 - `harmonia-store-aterm`, `harmonia-store-path-info`, `harmonia-store-build-result`, `harmonia-store-nar-info`: format/metadata crates kept separate to avoid coupling.
 
-**File** (`harmonia-file-core`, `harmonia-file-nar`)
-- `harmonia-file-core`: pure file tree types and serde matching nix's JSON format.
-- `harmonia-file-nar`: NAR pack/unpack against generic `AsyncRead`/`AsyncWrite`. Streaming; never requires the full input in memory. Knows nothing about derivations or signatures.
+**File** (`harmonia-file-core`, `harmonia-file-io-pure`, `harmonia-file-fd`, `harmonia-file-nar`)
+- `harmonia-file-core`: pure file tree data types (`FileTree`, `FileSystemObject`), serde matching nix's JSON format.
+- `harmonia-file-io-pure`: async IO traits (`FileSystemSource`/`FileSystemSink`), in-memory implementations, listing functions.
+- `harmonia-file-fd`: real filesystem source/sink via `cap-std` (openat, no symlink following).
+- `harmonia-file-nar`: NAR pack/unpack against generic `FileSystemSource`/`FileSystemSink` traits. Streaming; never requires the full input in memory. Knows nothing about derivations or signatures.
 
 **Database** (`harmonia-store-db`)
 - Schema matches Nix's `db.sqlite` exactly.

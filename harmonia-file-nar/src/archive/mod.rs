@@ -2,7 +2,6 @@ use crate::ByteString;
 
 mod byte_stream;
 mod dumper;
-pub(crate) mod mmap;
 mod parser;
 pub(crate) mod radix_tree;
 mod read_nar;
@@ -11,12 +10,12 @@ pub mod test_data;
 mod writer;
 
 pub use byte_stream::NarByteStream;
-pub use dumper::{DumpOptions, DumpedFile, NarDumper, dump};
+pub use dumper::dump_source;
 #[cfg(any(test, feature = "test"))]
 pub use parser::read_nar;
 pub use parser::{NarParser, parse_nar};
 pub use read_nar::{NarBytesReader, NarReader};
-pub use restorer::{NarRestorer, NarWriteError, RestoreOptions, restore};
+pub use restorer::restore_to_sink;
 pub use writer::NarWriter;
 #[cfg(any(test, feature = "test"))]
 pub use writer::write_nar;

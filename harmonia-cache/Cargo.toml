@@ -6,6 +6,7 @@ edition.workspace    = true
 license.workspace    = true
 homepage.workspace   = true
 repository.workspace = true
+readme               = "README.md"
 
 [[bin]]
 name = "harmonia-cache"
@@ -42,6 +43,8 @@ bytes                        = { workspace = true }
 futures-core                 = { workspace = true }
 futures-util                 = { workspace = true }
 harmonia-file-core           = { workspace = true }
+harmonia-file-fd             = { workspace = true }
+harmonia-file-io-pure        = { workspace = true }
 harmonia-file-nar            = { workspace = true }
 harmonia-store-db            = { workspace = true }
 harmonia-store-derivation    = { workspace = true }
