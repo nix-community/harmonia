@@ -175,12 +175,18 @@ fn search(data: &[u8], pending: &mut HashSet<[u8; HASH_LEN]>, seen: &mut HashSet
 
     let mut i = 0;
     while i + HASH_LEN <= data.len() {
+        // Fixed-size window: the single bounds check here lets the compiler
+        // elide the per-byte checks on `window[j]` (j < HASH_LEN) below.
+        let window: &[u8; HASH_LEN] = data[i..i + HASH_LEN]
+            .try_into()
+            .expect("slice length matches HASH_LEN");
+
         // Scan the window right-to-left for valid nix-base32 characters.
         let mut j = HASH_LEN;
         let mut invalid = false;
         while j > 0 {
             j -= 1;
-            if !NIX_BASE32_VALID[data[i + j] as usize] {
+            if !NIX_BASE32_VALID[window[j] as usize] {
                 i += j + 1;
                 invalid = true;
                 break;
@@ -192,13 +198,8 @@ fn search(data: &[u8], pending: &mut HashSet<[u8; HASH_LEN]>, seen: &mut HashSet
             continue;
         }
 
-        // All HASH_LEN characters are valid nix-base32. Check the HashSet.
-        let window: [u8; HASH_LEN] = data[i..i + HASH_LEN]
-            .try_into()
-            .expect("slice length matches HASH_LEN");
-
-        if pending.remove(&window) {
-            seen.insert(window);
+        if pending.remove(window) {
+            seen.insert(*window);
         }
 
         i += 1;
