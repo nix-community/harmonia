@@ -253,7 +253,7 @@ where
             }
             reader.set_features(features.clone());
             writer.set_features(features.clone());
-            info!(
+            debug!(
                 ?version,
                 ?server_version,
                 ?features,
@@ -278,7 +278,7 @@ where
             if version.minor() >= 33 {
                 writer.flush().await?;
                 let version = reader.read_value().await.with_field("nixVersion")?;
-                info!(version, "Nix Version {:?}", version);
+                debug!(version, "Nix Version {:?}", version);
                 daemon_nix_version = Some(version);
             }
 
