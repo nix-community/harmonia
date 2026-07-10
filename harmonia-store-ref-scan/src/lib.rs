@@ -175,30 +175,31 @@ fn search(data: &[u8], pending: &mut HashSet<[u8; HASH_LEN]>, seen: &mut HashSet
 
     let mut i = 0;
     while i + HASH_LEN <= data.len() {
-        // Scan the window right-to-left for valid nix-base32 characters.
-        let mut j = HASH_LEN;
-        loop {
-            if j == 0 {
-                break;
-            }
-            j -= 1;
-            if !NIX_BASE32_VALID[data[i + j] as usize] {
-                i += j + 1;
-                break;
-            }
-        }
-        if j > 0 {
-            // Broke out early due to invalid character, already advanced i.
-            continue;
-        }
-
-        // All HASH_LEN characters are valid nix-base32. Check the HashSet.
-        let window: [u8; HASH_LEN] = data[i..i + HASH_LEN]
+        // Fixed-size window: the single bounds check here lets the compiler
+        // elide the per-byte checks on `window[j]` (j < HASH_LEN) below.
+        let window: &[u8; HASH_LEN] = data[i..i + HASH_LEN]
             .try_into()
             .expect("slice length matches HASH_LEN");
 
-        if pending.remove(&window) {
-            seen.insert(window);
+        // Scan the window right-to-left for valid nix-base32 characters.
+        let mut j = HASH_LEN;
+        let mut invalid = false;
+        while j > 0 {
+            j -= 1;
+            if !NIX_BASE32_VALID[window[j] as usize] {
+                i += j + 1;
+                invalid = true;
+                break;
+            }
+        }
+        // `j` alone cannot signal this: an invalid char at j==0 leaves j==0,
+        // just like a fully-valid window.
+        if invalid {
+            continue;
+        }
+
+        if pending.remove(window) {
+            seen.insert(*window);
         }
 
         i += 1;
@@ -332,5 +333,38 @@ mod tests {
         let candidates = BTreeSet::new();
         let refs = scan_nar_for_references(&output_dir, &candidates, Some(&self_path)).await;
         assert!(refs.contains(&self_path), "Should detect self-reference");
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    /// An invalid nix-base32 byte just left of a hash that straddles a chunk
+    /// boundary used to overrun the overlap buffer: the leftmost-char skip
+    /// leaves j==0, which the old guard mistook for a fully-valid window.
+    #[test]
+    fn invalid_byte_before_boundary_straddling_hash() {
+        let sp = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-input").unwrap();
+        let mut cands = BTreeSet::new();
+        cands.insert(sp.clone());
+        let hash = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        // 'e' is not in the nix-base32 alphabet. Sweep every prefix length and
+        // split point so the hash lands on each possible chunk boundary.
+        for prefix in 1..=(2 * HASH_LEN) {
+            let mut data = vec![b'e'; prefix];
+            data.extend_from_slice(hash);
+
+            for split in 1..data.len() {
+                let mut sink = RefScanSink::new(&cands, None);
+                sink.feed(&data[..split]);
+                sink.feed(&data[split..]);
+                assert!(
+                    sink.found_paths().contains(&sp),
+                    "hash not found with prefix={prefix} split={split}",
+                );
+            }
+        }
     }
 }

@@ -985,6 +985,8 @@ name = "harmonia-bench"
 version = "3.1.0"
 dependencies = [
  "criterion",
+ "harmonia-store-path",
+ "harmonia-store-ref-scan",
  "nix",
  "tempfile",
  "tokio",
