@@ -158,7 +158,7 @@ async fn test_handler_with_nix_store() {
 
     // Create handler
     let store_dir = StoreDir::new(store_dir).expect("Failed to create StoreDir");
-    let handler = LocalStoreHandler::new(store_dir, db_path)
+    let handler = LocalStoreHandler::new(store_dir, db_path, false)
         .await
         .expect("Failed to create handler");
 
@@ -213,7 +213,9 @@ async fn test_handler_query_realisation() {
         .unwrap();
     }
 
-    let handler = LocalStoreHandler::new(store_dir, db_path).await.unwrap();
+    let handler = LocalStoreHandler::new(store_dir, db_path, false)
+        .await
+        .unwrap();
     let mut store = handler.handshake().await.unwrap();
 
     let id = harmonia_store_derivation::realisation::DrvOutput {
