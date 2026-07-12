@@ -47,7 +47,7 @@ bstr = "1.11"
 bytes = "1.11"
 data-encoding = "2.11"
 derive_more = { version = "2.1", features = [ "display" ] }
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 futures-core = "0.3"
 futures-sink = "0.3"
 futures-util = { version = "0.3", features = [ "sink" ] }
