@@ -148,6 +148,7 @@ pub enum Request {
     AddBuildLog(BaseStorePath),
     BuildPathsWithResults(BuildPathsRequest),
     AddPermRoot(AddPermRootRequest),
+    AddToStoreScanning(AddToStoreScanningRequest),
 }
 
 impl Request {
@@ -183,6 +184,7 @@ impl Request {
             Request::AddBuildLog(_) => Operation::AddBuildLog,
             Request::BuildPathsWithResults(_) => Operation::BuildPathsWithResults,
             Request::AddPermRoot(_) => Operation::AddPermRoot,
+            Request::AddToStoreScanning(_) => Operation::AddToStoreScanning,
         }
     }
 
@@ -278,6 +280,9 @@ impl Request {
             Request::AddPermRoot(req) => {
                 let gc_root = String::from_utf8_lossy(&req.gc_root);
                 debug_span!("AddPermRoot", path=?req.store_path, ?gc_root)
+            }
+            Request::AddToStoreScanning(req) => {
+                debug_span!("AddToStoreScanning", name=?req.name, cam=?req.cam)
             }
         }
     }
@@ -390,6 +395,15 @@ pub struct AddPermRootRequest {
     pub gc_root: DaemonPath,
 }
 
+/// Like [`AddToStoreRequest`] but without `refs`, which are instead discovered
+/// by scanning the dump.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
+pub struct AddToStoreScanningRequest {
+    pub name: String,
+    pub cam: ContentAddressMethodAlgorithm,
+    // Framed NAR dump
+}
+
 macro_rules! optional_info {
     ($sub:ty) => {
         impl NixDeserializeTrait for Option<$sub> {
@@ -461,7 +475,6 @@ macro_rules! optional_from_str {
 }
 optional_from_str!(String);
 optional_from_str!(ContentAddress);
-optional_from_str!(ContentAddressMethodAlgorithm);
 
 impl NixDeserializeTrait for Option<Microseconds> {
     async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>

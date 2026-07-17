@@ -72,3 +72,38 @@ wire_roundtrip!(roundtrip_realisation, Realisation);
 wire_roundtrip!(roundtrip_build_result, BuildResult);
 wire_roundtrip!(roundtrip_query_missing_result, QueryMissingResult);
 wire_roundtrip!(roundtrip_derived_path, DerivedPath);
+
+#[test]
+fn roundtrip_add_to_store_scanning_request() {
+    use crate::daemon_wire::types2::{AddToStoreScanningRequest, Request};
+    use harmonia_store_content_address::ContentAddressMethodAlgorithm;
+    use harmonia_utils_hash::Algorithm;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+
+    let req = Request::AddToStoreScanning(AddToStoreScanningRequest {
+        name: "example".into(),
+        cam: ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256),
+    });
+
+    let buf = rt.block_on(async {
+        let mut buf = Vec::new();
+        let mut w = NixWriter::builder().build(&mut buf);
+        w.write_value(&req).await.expect("write");
+        w.flush().await.expect("flush");
+        buf
+    });
+    assert_eq!(u64::from_le_bytes(buf[..8].try_into().unwrap()), 1001);
+    assert!(
+        buf.windows(14).any(|w| w == b"fixed:r:sha256"),
+        "cam must be transmitted in renderWithAlgo form"
+    );
+
+    let back: Request = rt.block_on(async {
+        let mut r = NixReader::builder().build_buffered(Cursor::new(buf));
+        r.read_value().await.expect("read")
+    });
+    assert_eq!(back, req);
+}

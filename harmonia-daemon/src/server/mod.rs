@@ -36,7 +36,7 @@ use harmonia_protocol::log::LogMessage;
 use harmonia_protocol::ser::{NixWrite, NixWriter};
 use harmonia_protocol::types::{AddToStoreItem, DaemonPath};
 use harmonia_protocol::valid_path_info::ValidPathInfo;
-use harmonia_protocol::version::{FeatureSet, supported_features};
+use harmonia_protocol::version::{FEATURE_ADD_TO_STORE_SCANNING, FeatureSet, supported_features};
 use harmonia_store_content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_derivation::derivation::BasicDerivation;
 use harmonia_store_derivation::derived_path::{DerivedPath, OutputName};
@@ -565,6 +565,21 @@ where
         ret
     }
 
+    fn add_to_store_scanning<'a, 'r, R>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: R,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'r>>
+    where
+        R: AsyncBufRead + Send + Unpin + 'r,
+        'a: 'r,
+    {
+        let ret = self.0.add_to_store_scanning(name, cam, source);
+        trace!("AddToStoreScanning Size {}", size_of_val(ret.deref()));
+        ret
+    }
+
     fn shutdown(&mut self) -> impl std::future::Future<Output = DaemonResult<()>> + Send + '_ {
         let ret = Box::pin(self.0.shutdown());
         trace!("Shutdown Size {}", size_of_val(&ret));
@@ -737,6 +752,21 @@ where
         'p: 'r,
     {
         store.add_ca_to_store(name, cam, refs, repair, source)
+    }
+
+    fn add_to_store_scanning<'s, 'p, 'r, NW, S>(
+        store: &'s mut S,
+        name: &'p str,
+        cam: ContentAddressMethodAlgorithm,
+        source: NW,
+    ) -> impl ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'r
+    where
+        S: DaemonStore + 's,
+        NW: AsyncBufRead + Unpin + Send + 'r,
+        's: 'r,
+        'p: 'r,
+    {
+        store.add_to_store_scanning(name, cam, source)
     }
 
     fn add_to_store_nar<'s, 'p, 'r, NW, S>(
@@ -1063,6 +1093,31 @@ where
             AddPermRoot(req) => {
                 let logs = store.add_perm_root(&req.store_path, &req.gc_root);
                 let value = self.process_logs(logs).await?;
+                self.writer.write_value(&value).await?;
+            }
+            AddToStoreScanning(req) => {
+                // Unlike upstream, drain the dump even on rejection so the
+                // connection stays usable.
+                let feature_negotiated = self
+                    .reader
+                    .features()
+                    .contains(FEATURE_ADD_TO_STORE_SCANNING);
+                let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
+                let mut framed = FramedReader::new(buf_reader);
+                let res = if feature_negotiated {
+                    let logs =
+                        Self::add_to_store_scanning(&mut store, &req.name, req.cam, &mut framed);
+                    process_logs(&mut self.writer, logs).await
+                } else {
+                    Err(DaemonError::custom(
+                        "Adding to store with scanning was requested, but not supported in negotiated protocol",
+                    ))
+                    .recover()
+                };
+                let err = framed.drain_all().await;
+                let value = res?;
+                err?;
+                self.writer.write_value(&RawLogMessage::Last).await?;
                 self.writer.write_value(&value).await?;
             }
         }

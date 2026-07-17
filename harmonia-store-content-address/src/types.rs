@@ -91,6 +91,26 @@ impl ContentAddressMethodAlgorithm {
             ContentAddressMethodAlgorithm::NixArchive(_) => ContentAddressMethod::NixArchive,
         }
     }
+
+    /// Renders the worker protocol form.
+    pub fn render_with_algo(&self) -> String {
+        format!("{}:{}", self.method(), self.algorithm())
+    }
+
+    /// Parses the worker protocol form produced by [`Self::render_with_algo`].
+    pub fn parse_with_algo(s: &str) -> Result<Self, ParseContentAddressError> {
+        if s == "text:sha256" {
+            Ok(Self::Text)
+        } else if let Some(rest) = s.strip_prefix("fixed:") {
+            if let Some(algo) = rest.strip_prefix("r:") {
+                Ok(Self::NixArchive(algo.parse()?))
+            } else {
+                Ok(Self::Flat(rest.parse()?))
+            }
+        } else {
+            Err(ParseContentAddressError::InvalidForm(s.into()))
+        }
+    }
 }
 
 impl FromStr for ContentAddressMethodAlgorithm {
@@ -271,6 +291,45 @@ mod unittests {
 
         assert_eq!(content_address.to_string(), v);
         assert_eq!(content_address, v.parse().unwrap());
+    }
+
+    #[rstest]
+    #[case::text(ContentAddressMethodAlgorithm::Text, "text:sha256", "text:sha256")]
+    #[case::flat(
+        ContentAddressMethodAlgorithm::Flat(Algorithm::SHA256),
+        "fixed:sha256",
+        "sha256"
+    )]
+    #[case::recursive(
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256),
+        "fixed:r:sha256",
+        "r:sha256"
+    )]
+    fn method_algorithm_render_parse(
+        #[case] cama: ContentAddressMethodAlgorithm,
+        #[case] with_algo: &str,
+        #[case] aterm: &str,
+    ) {
+        assert_eq!(cama.render_with_algo(), with_algo);
+        assert_eq!(
+            ContentAddressMethodAlgorithm::parse_with_algo(with_algo).unwrap(),
+            cama
+        );
+
+        assert_eq!(cama.to_string(), aterm);
+        assert_eq!(
+            aterm.parse::<ContentAddressMethodAlgorithm>().unwrap(),
+            cama
+        );
+    }
+
+    /// The worker-protocol parser must not accept the ATerm form.
+    #[rstest]
+    #[case("r:sha256")]
+    #[case("sha256")]
+    #[case("text:sha1")]
+    fn method_algorithm_parse_with_algo_rejects(#[case] value: &str) {
+        ContentAddressMethodAlgorithm::parse_with_algo(value).unwrap_err();
     }
 
     #[rstest]

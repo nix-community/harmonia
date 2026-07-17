@@ -648,14 +648,32 @@ nix_deserialize_remote!(#[nix(from_str)] harmonia_utils_hash::fmt::Bare<harmonia
 nix_serialize_remote!(#[nix(display)] harmonia_utils_hash::fmt::Bare<harmonia_utils_hash::fmt::Base16<crate::NarHash>>);
 
 // ContentAddressMethodAlgorithm
-nix_deserialize_remote!(
-    #[nix(from_str)]
-    harmonia_store_content_address::ContentAddressMethodAlgorithm
-);
-nix_serialize_remote!(
-    #[nix(display)]
-    harmonia_store_content_address::ContentAddressMethodAlgorithm
-);
+// The worker protocol uses the `renderWithAlgo` form, not the derivation
+// ATerm form ("r:sha256") that Display/FromStr use.
+impl crate::de::NixDeserialize for harmonia_store_content_address::ContentAddressMethodAlgorithm {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + crate::de::NixRead + Send,
+    {
+        use crate::de::Error;
+        if let Some(buf) = reader.try_read_bytes().await? {
+            let s = std::str::from_utf8(&buf).map_err(R::Error::invalid_data)?;
+            Self::parse_with_algo(s)
+                .map(Some)
+                .map_err(R::Error::invalid_data)
+        } else {
+            Ok(None)
+        }
+    }
+}
+impl crate::ser::NixSerialize for harmonia_store_content_address::ContentAddressMethodAlgorithm {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: crate::ser::NixWrite,
+    {
+        writer.write_display(self.render_with_algo()).await
+    }
+}
 
 // StorePathHash
 nix_deserialize_remote!(

@@ -41,7 +41,9 @@ use harmonia_protocol::types::{
 };
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol::version::{FeatureSet, supported_features};
-use harmonia_protocol::{FEATURE_REALISATION_WITH_PATH, ProtocolVersion};
+use harmonia_protocol::{
+    FEATURE_ADD_TO_STORE_SCANNING, FEATURE_REALISATION_WITH_PATH, ProtocolVersion,
+};
 
 // From harmonia-store-derivation
 use harmonia_protocol::log::{LogMessage, Message, Verbosity};
@@ -244,7 +246,8 @@ where
             // Exchange features (protocol >= 1.38).
             let mut features = FeatureSet::new();
             if version.minor() >= 38 {
-                let local = supported_features();
+                let mut local = supported_features();
+                local.insert(FEATURE_ADD_TO_STORE_SCANNING.to_owned());
                 writer.write_value(&local).await.with_field("features")?;
                 writer.flush().await.with_field("features")?;
                 let daemon_features: FeatureSet =
@@ -996,6 +999,45 @@ where
         }
         .future_result()
         .fill_operation(Operation::AddToStore)
+        .boxed_result()
+    }
+
+    fn add_to_store_scanning<'a, 'r, S>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: S,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'r>>
+    where
+        S: AsyncBufRead + Send + Unpin + 'r,
+        'a: 'r,
+    {
+        async move {
+            if !self.has_feature(FEATURE_ADD_TO_STORE_SCANNING) {
+                return Err(DaemonErrorKind::Custom(format!(
+                    "the daemon does not support the '{FEATURE_ADD_TO_STORE_SCANNING}' protocol feature, perhaps this is not in a recursive-nix builder?"
+                ))
+                .into());
+            }
+            self.writer
+                .write_value(&Operation::AddToStoreScanning)
+                .await?;
+            self.writer.write_value(name).await?;
+            self.writer.write_value(&cam).await?;
+            self.writer.flush().await?;
+            Ok(ProcessStderr::new(&mut self.reader)
+                .stream()
+                .drive_result(async {
+                    let mut source = source;
+                    let mut framed = FramedWriter::new(&mut self.writer);
+                    copy_buf(&mut source, &mut framed).await?;
+                    framed.shutdown().await?;
+                    self.writer.flush().await?;
+                    Ok(()) as DaemonResult<()>
+                }))
+        }
+        .future_result()
+        .fill_operation(Operation::AddToStoreScanning)
         .boxed_result()
     }
 
