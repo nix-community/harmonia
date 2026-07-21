@@ -11,6 +11,9 @@
 //! but protocol can impl traits for external store-core types.
 
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use bytes::Bytes;
 
@@ -21,7 +24,9 @@ use crate::ser::{NixSerialize, NixWrite};
 use harmonia_protocol_derive::{nix_deserialize_remote, nix_serialize_remote};
 use harmonia_store_aterm::raw_output::{AtermOutput as _, BorrowedRawOutput};
 use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, StructuredAttrs};
-use harmonia_store_derivation::derived_path::{DerivedPath, LegacyDerivedPath, OutputName};
+use harmonia_store_derivation::derived_path::{
+    DerivedPath, LegacyDerivedPath, OutputName, SingleDerivedPath,
+};
 use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_path::{StorePath, StorePathName};
 
@@ -190,6 +195,79 @@ impl NixDeserialize for DerivedPath {
                 .parse::<LegacyDerivedPath>(&s)
                 .map_err(R::Error::invalid_data)?;
             Ok(Some(legacy.0))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+// ========== SingleDerivedPath ==========
+// The worker protocol uses a tagged binary format rather than the "drv!output"
+// string form. A tag word of 0 means an opaque store path and 1 means a built
+// path followed by its output name.
+
+fn write_single_derived_path<'a, W>(
+    value: &'a SingleDerivedPath,
+    writer: &'a mut W,
+) -> Pin<Box<dyn Future<Output = Result<(), W::Error>> + Send + 'a>>
+where
+    W: NixWrite,
+{
+    Box::pin(async move {
+        match value {
+            SingleDerivedPath::Opaque(path) => {
+                writer.write_number(0).await?;
+                writer.write_value(path).await
+            }
+            SingleDerivedPath::Built { drv_path, output } => {
+                writer.write_number(1).await?;
+                write_single_derived_path(drv_path, writer).await?;
+                writer.write_value(output).await
+            }
+        }
+    })
+}
+
+fn read_single_derived_path_tail<'a, R>(
+    reader: &'a mut R,
+    tag: u64,
+) -> Pin<Box<dyn Future<Output = Result<SingleDerivedPath, R::Error>> + Send + 'a>>
+where
+    R: ?Sized + NixRead + Send,
+{
+    Box::pin(async move {
+        use crate::de::Error;
+        match tag {
+            0 => Ok(SingleDerivedPath::Opaque(reader.read_value().await?)),
+            1 => {
+                let inner_tag = reader.read_value::<u64>().await?;
+                let drv_path = Arc::new(read_single_derived_path_tail(reader, inner_tag).await?);
+                let output = reader.read_value().await?;
+                Ok(SingleDerivedPath::Built { drv_path, output })
+            }
+            _ => Err(R::Error::invalid_data(std::format_args!(
+                "invalid tag {tag} for single derived path"
+            ))),
+        }
+    })
+}
+
+impl NixSerialize for SingleDerivedPath {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: NixWrite,
+    {
+        write_single_derived_path(self, writer).await
+    }
+}
+
+impl NixDeserialize for SingleDerivedPath {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + NixRead + Send,
+    {
+        if let Some(tag) = reader.try_read_value::<u64>().await? {
+            read_single_derived_path_tail(reader, tag).await.map(Some)
         } else {
             Ok(None)
         }

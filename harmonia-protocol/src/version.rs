@@ -36,9 +36,34 @@ pub const FEATURE_REALISATION_WITH_PATH: &str = "realisation-with-path-not-hash"
 /// not in [`supported_features`] and the client adds it at handshake instead.
 pub const FEATURE_ADD_TO_STORE_SCANNING: &str = "add-to-store-scanning";
 
+/// Enables the `SubmitOutput` operation.
+///
+/// Upstream daemons only advertise this on `builder-rpc-v0` connections, so it
+/// is not in [`supported_features`] and the client adds it at handshake instead.
+pub const FEATURE_SUBMIT_OUTPUT: &str = "submit-output";
+
+/// Tells the client not to send [`SetOptions`](crate::daemon_wire::types::Operation::SetOptions).
+///
+/// Upstream daemons only advertise this on recursive connections.
+pub const FEATURE_DISABLE_SET_OPTIONS: &str = "disable-set-options";
+
 /// Features harmonia advertises during handshake.
 pub fn supported_features() -> FeatureSet {
     [FEATURE_REALISATION_WITH_PATH.to_owned()].into()
+}
+
+/// The protocol version of the pinned `builder-rpc-v0` derivation feature.
+pub const BUILDER_RPC_V0_VERSION: ProtocolVersion = ProtocolVersion::from_parts(1, 38);
+
+/// The feature set of the `builder-rpc-v0` derivation feature.
+pub fn builder_rpc_v0_features() -> FeatureSet {
+    [
+        FEATURE_REALISATION_WITH_PATH.to_owned(),
+        FEATURE_DISABLE_SET_OPTIONS.to_owned(),
+        FEATURE_ADD_TO_STORE_SCANNING.to_owned(),
+        FEATURE_SUBMIT_OUTPUT.to_owned(),
+    ]
+    .into()
 }
 
 #[derive(

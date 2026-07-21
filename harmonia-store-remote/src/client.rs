@@ -42,14 +42,15 @@ use harmonia_protocol::types::{
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol::version::{FeatureSet, supported_features};
 use harmonia_protocol::{
-    FEATURE_ADD_TO_STORE_SCANNING, FEATURE_REALISATION_WITH_PATH, ProtocolVersion,
+    FEATURE_ADD_TO_STORE_SCANNING, FEATURE_DISABLE_SET_OPTIONS, FEATURE_REALISATION_WITH_PATH,
+    FEATURE_SUBMIT_OUTPUT, ProtocolVersion,
 };
 
 // From harmonia-store-derivation
 use harmonia_protocol::log::{LogMessage, Message, Verbosity};
 use harmonia_store_content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_derivation::derivation::BasicDerivation;
-use harmonia_store_derivation::derived_path::{DerivedPath, OutputName};
+use harmonia_store_derivation::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathSet};
 use harmonia_utils_io::{AsyncBufReadCompat, BytesReader, Lending};
@@ -246,8 +247,12 @@ where
             // Exchange features (protocol >= 1.38).
             let mut features = FeatureSet::new();
             if version.minor() >= 38 {
+                // These are not in `supported_features()` because the daemon
+                // only advertises them on recursive connections.
                 let mut local = supported_features();
+                local.insert(FEATURE_DISABLE_SET_OPTIONS.to_owned());
                 local.insert(FEATURE_ADD_TO_STORE_SCANNING.to_owned());
+                local.insert(FEATURE_SUBMIT_OUTPUT.to_owned());
                 writer.write_value(&local).await.with_field("features")?;
                 writer.flush().await.with_field("features")?;
                 let daemon_features: FeatureSet =
@@ -1000,6 +1005,28 @@ where
         .future_result()
         .fill_operation(Operation::AddToStore)
         .boxed_result()
+    }
+
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        async move {
+            if !self.has_feature(FEATURE_SUBMIT_OUTPUT) {
+                return Err(DaemonErrorKind::Custom(format!(
+                    "the daemon does not support the '{FEATURE_SUBMIT_OUTPUT}' protocol feature, \
+                   perhaps this is not in a derivation with the `builder-rpc-v0` feature?"
+                ))
+                .into());
+            }
+            self.writer.write_value(&Operation::SubmitOutput).await?;
+            self.writer.write_value(path).await?;
+            self.writer.write_value(output).await?;
+            Ok(self.process_stderr().map_ok(|_: IgnoredOne| ()))
+        }
+        .future_result()
+        .fill_operation(Operation::SubmitOutput)
     }
 
     fn add_to_store_scanning<'a, 'r, S>(

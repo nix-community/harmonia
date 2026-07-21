@@ -5,61 +5,24 @@
 //! Harmonia's daemon never advertises the `add-to-store-scanning` feature,
 //! so both sides must reject the operation gracefully.
 
-use std::future::ready;
 use std::io::Cursor;
-use std::time::Duration;
 
 use tokio::io::AsyncWriteExt as _;
 use tokio::time::timeout;
 
-use harmonia_protocol::ProtocolVersion;
 use harmonia_protocol::daemon::{
-    DaemonResult, DaemonStore, FutureResultExt as _, HandshakeDaemonStore, ResultLog,
-    wire::{CLIENT_MAGIC, SERVER_MAGIC, logger::RawLogMessage, types::Operation},
+    DaemonStore,
+    wire::{logger::RawLogMessage, types::Operation},
 };
-use harmonia_protocol::de::{NixRead as _, NixReader};
-use harmonia_protocol::ser::{NixWrite as _, NixWriter};
-use harmonia_protocol::types::TrustLevel;
+use harmonia_protocol::de::NixRead as _;
+use harmonia_protocol::ser::NixWrite as _;
 use harmonia_protocol::version::{FEATURE_ADD_TO_STORE_SCANNING, FeatureSet};
 use harmonia_store_content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonClient;
 use harmonia_utils_hash::Algorithm;
 
-use crate::server::Builder;
-
-const TEST_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Reports every operation as unimplemented.
-#[derive(Debug)]
-struct NullStore;
-
-impl HandshakeDaemonStore for NullStore {
-    type Store = Self;
-
-    fn handshake(self) -> impl ResultLog<Output = DaemonResult<Self::Store>> + Send {
-        ready(Ok(self)).empty_logs()
-    }
-}
-
-impl DaemonStore for NullStore {
-    fn trust_level(&self) -> Option<TrustLevel> {
-        None
-    }
-
-    fn shutdown(&mut self) -> impl std::future::Future<Output = DaemonResult<()>> + Send + '_ {
-        ready(Ok(()))
-    }
-}
-
-fn spawn_server(stream: tokio::io::DuplexStream) -> tokio::task::JoinHandle<DaemonResult<()>> {
-    tokio::spawn(async move {
-        let (read, write) = tokio::io::split(stream);
-        Builder::new()
-            .serve_connection(read, write, NullStore)
-            .await
-    })
-}
+use super::{TEST_TIMEOUT, raw_client_handshake, spawn_server};
 
 /// The client refuses to send the operation without the negotiated feature.
 #[tokio::test]
@@ -100,42 +63,13 @@ async fn server_rejects_unnegotiated_scanning_op() {
         let (client_side, server_side) = tokio::io::duplex(64 * 1024);
         let server = spawn_server(server_side);
 
-        let (read, write) = tokio::io::split(client_side);
-        let mut reader = NixReader::builder().build_buffered(read);
-        let mut writer = NixWriter::builder().build(write);
-
-        // Handshake, advertising the scanning feature ourselves.
-        writer.write_number(CLIENT_MAGIC).await.unwrap();
-        writer.flush().await.unwrap();
-        assert_eq!(reader.read_number().await.unwrap(), SERVER_MAGIC);
-        let version: ProtocolVersion = reader.read_value().await.unwrap();
-        writer.write_value(&version).await.unwrap();
-        reader.set_version(version);
-        writer.set_version(version);
-
         let local: FeatureSet = [FEATURE_ADD_TO_STORE_SCANNING.to_owned()].into();
-        writer.write_value(&local).await.unwrap();
-        writer.flush().await.unwrap();
-        let daemon_features: FeatureSet = reader.read_value().await.unwrap();
+        let (mut reader, mut writer, daemon_features) =
+            raw_client_handshake(client_side, local).await;
         assert!(
             !daemon_features.contains(FEATURE_ADD_TO_STORE_SCANNING),
             "daemon must not advertise the scanning feature"
         );
-
-        writer.write_value(&false).await.unwrap(); // obsolete CPU affinity
-        writer.write_value(&false).await.unwrap(); // obsolete reserve space
-        writer.flush().await.unwrap();
-        let _nix_version: String = reader.read_value().await.unwrap();
-        let _trust: Option<TrustLevel> = reader.read_value().await.unwrap();
-
-        // Drain the store handshake's stderr stream.
-        loop {
-            match reader.read_value::<RawLogMessage>().await.unwrap() {
-                RawLogMessage::Last => break,
-                RawLogMessage::Error(err) => panic!("handshake error: {:?}", err.msg),
-                _ => {}
-            }
-        }
 
         // Send the operation despite the failed negotiation.
         let cam = ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256);
