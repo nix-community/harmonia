@@ -55,6 +55,7 @@ pub enum Operation {
     AddBuildLog = 45,
     BuildPathsWithResults = 46,
     AddPermRoot = 47,
+    AddToStoreScanning = 1001,
 }
 
 impl Operation {

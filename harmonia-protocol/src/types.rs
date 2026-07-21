@@ -627,6 +627,26 @@ pub trait DaemonStore: Send {
             .boxed_result()
     }
 
+    /// Add to store, scanning the dump for references.
+    ///
+    /// Only daemons serving a recursive-nix derivation builder support this.
+    fn add_to_store_scanning<'a, 'r, R>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: R,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'r>>
+    where
+        R: AsyncBufRead + Send + Unpin + 'r,
+        'a: 'r,
+    {
+        ready(Err(DaemonError::unimplemented(
+            Operation::AddToStoreScanning,
+        )))
+        .empty_logs()
+        .boxed_result()
+    }
+
     fn shutdown(&mut self) -> impl Future<Output = DaemonResult<()>> + Send + '_;
 }
 
@@ -884,6 +904,19 @@ where
         'a: 'r,
     {
         (**self).add_ca_to_store(name, cam, refs, repair, source)
+    }
+
+    fn add_to_store_scanning<'a, 'r, R>(
+        &'a mut self,
+        name: &'a str,
+        cam: ContentAddressMethodAlgorithm,
+        source: R,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<ValidPathInfo>> + Send + 'r>>
+    where
+        R: AsyncBufRead + Send + Unpin + 'r,
+        'a: 'r,
+    {
+        (**self).add_to_store_scanning(name, cam, source)
     }
 
     fn shutdown(&mut self) -> impl Future<Output = DaemonResult<()>> + Send + '_ {

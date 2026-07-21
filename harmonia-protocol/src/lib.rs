@@ -41,7 +41,8 @@ pub mod version;
 pub use harmonia_store_path_info::NarHash;
 
 pub use version::{
-    FEATURE_REALISATION_WITH_PATH, Feature, FeatureSet, ProtocolVersion, supported_features,
+    FEATURE_ADD_TO_STORE_SCANNING, FEATURE_REALISATION_WITH_PATH, Feature, FeatureSet,
+    ProtocolVersion, supported_features,
 };
 
 // Re-exports required by derive macros (harmonia_protocol_derive generates code using crate::store_path, etc.)

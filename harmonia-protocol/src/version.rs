@@ -30,6 +30,12 @@ pub type FeatureSet = BTreeSet<Feature>;
 /// instead of the legacy `sha256:<hex>!out` JSON-string format.
 pub const FEATURE_REALISATION_WITH_PATH: &str = "realisation-with-path-not-hash";
 
+/// Enables the `AddToStoreScanning` operation.
+///
+/// Upstream daemons only advertise this on recursive-nix connections, so it is
+/// not in [`supported_features`] and the client adds it at handshake instead.
+pub const FEATURE_ADD_TO_STORE_SCANNING: &str = "add-to-store-scanning";
+
 /// Features harmonia advertises during handshake.
 pub fn supported_features() -> FeatureSet {
     [FEATURE_REALISATION_WITH_PATH.to_owned()].into()
