@@ -17,6 +17,8 @@ members = [
     "harmonia-store-remote",
     "harmonia-store-aterm",
     "harmonia-file-core",
+    "harmonia-file-fd",
+    "harmonia-file-io-pure",
     "harmonia-file-nar",
     "harmonia-protocol",
     "harmonia-protocol-derive",
@@ -45,6 +47,7 @@ async-stream = "0.3"
 blake3 = "1.8"
 bstr = "1.11"
 bytes = "1.11"
+cap-std = "3"
 data-encoding = "2.11"
 derive_more = { version = "2.1", features = [ "display" ] }
 ed25519-dalek = "3"
@@ -98,6 +101,8 @@ tokio-test      = "0.4"
 
 # Internal crates
 harmonia-file-core             = { path = "harmonia-file-core" }
+harmonia-file-fd               = { path = "harmonia-file-fd" }
+harmonia-file-io-pure          = { path = "harmonia-file-io-pure" }
 harmonia-file-nar              = { path = "harmonia-file-nar" }
 harmonia-protocol              = { path = "harmonia-protocol" }
 harmonia-protocol-derive       = { path = "harmonia-protocol-derive" }
