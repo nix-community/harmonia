@@ -39,7 +39,7 @@ use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_protocol::version::{FEATURE_ADD_TO_STORE_SCANNING, FeatureSet, supported_features};
 use harmonia_store_content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_derivation::derivation::BasicDerivation;
-use harmonia_store_derivation::derived_path::{DerivedPath, OutputName};
+use harmonia_store_derivation::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_path::{StorePath, StorePathHash, StorePathSet};
 use harmonia_utils_io::{AsyncBufReadCompat, BytesReader};
@@ -535,6 +535,16 @@ where
     {
         let ret = self.0.add_build_log(path, source);
         trace!("AddBuildLog Size {}", size_of_val(ret.deref()));
+        ret
+    }
+
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        let ret = Box::pin(self.0.submit_output(path, output));
+        trace!("SubmitOutput Size {}", size_of_val(ret.deref()));
         ret
     }
 
@@ -1094,6 +1104,11 @@ where
                 let logs = store.add_perm_root(&req.store_path, &req.gc_root);
                 let value = self.process_logs(logs).await?;
                 self.writer.write_value(&value).await?;
+            }
+            SubmitOutput(req) => {
+                let logs = store.submit_output(&req.path, &req.output);
+                self.process_logs(logs).await?;
+                self.writer.write_value(&IgnoredOne).await?;
             }
             AddToStoreScanning(req) => {
                 // Unlike upstream, drain the dump even on rejection so the

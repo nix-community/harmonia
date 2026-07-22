@@ -74,6 +74,68 @@ wire_roundtrip!(roundtrip_query_missing_result, QueryMissingResult);
 wire_roundtrip!(roundtrip_derived_path, DerivedPath);
 
 #[test]
+fn single_derived_path_rejects_invalid_tag() {
+    use harmonia_store_derivation::derived_path::SingleDerivedPath;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        let mut buf = Vec::new();
+        let mut w = NixWriter::builder().build(&mut buf);
+        w.write_value(&2u64).await.expect("write");
+        w.flush().await.expect("flush");
+
+        let mut r = NixReader::builder().build_buffered(Cursor::new(buf));
+        r.read_value::<SingleDerivedPath>().await.unwrap_err();
+    });
+}
+
+/// Pins opcode 1000 and the tagged `SingleDerivedPath` encoding.
+#[test]
+fn roundtrip_submit_output_request() {
+    use std::sync::Arc;
+
+    use crate::daemon_wire::types2::{Request, SubmitOutputRequest};
+    use harmonia_store_derivation::derived_path::SingleDerivedPath;
+    use harmonia_store_path::StorePath;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+
+    let path = SingleDerivedPath::Built {
+        drv_path: Arc::new(SingleDerivedPath::Opaque(
+            StorePath::from_bytes(b"00000000000000000000000000000000-x.drv").unwrap(),
+        )),
+        output: "lib".parse().unwrap(),
+    };
+    let req = Request::SubmitOutput(SubmitOutputRequest {
+        path,
+        output: "out".parse().unwrap(),
+    });
+
+    let buf = rt.block_on(async {
+        let mut buf = Vec::new();
+        let mut w = NixWriter::builder().build(&mut buf);
+        w.write_value(&req).await.expect("write");
+        w.flush().await.expect("flush");
+        buf
+    });
+    let word = |i: usize| u64::from_le_bytes(buf[i * 8..(i + 1) * 8].try_into().unwrap());
+    assert_eq!(word(0), 1000);
+    assert_eq!(word(1), 1); // Built tag
+    assert_eq!(word(2), 0); // inner Opaque tag
+
+    let back: Request = rt.block_on(async {
+        let mut r = NixReader::builder().build_buffered(Cursor::new(buf));
+        r.read_value().await.expect("read")
+    });
+    assert_eq!(back, req);
+}
+
+#[test]
 fn roundtrip_add_to_store_scanning_request() {
     use crate::daemon_wire::types2::{AddToStoreScanningRequest, Request};
     use harmonia_store_content_address::ContentAddressMethodAlgorithm;

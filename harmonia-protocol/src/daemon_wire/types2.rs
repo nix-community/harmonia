@@ -20,7 +20,7 @@ use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_content_address::{ContentAddress, ContentAddressMethodAlgorithm};
 use harmonia_store_derivation::derivation::BasicDerivation;
-use harmonia_store_derivation::derived_path::DerivedPath;
+use harmonia_store_derivation::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_derivation::realisation::{DrvOutput, Realisation};
 use harmonia_store_path::{StorePath, StorePathHash, StorePathSet};
 use harmonia_utils_signature::Signature;
@@ -148,6 +148,7 @@ pub enum Request {
     AddBuildLog(BaseStorePath),
     BuildPathsWithResults(BuildPathsRequest),
     AddPermRoot(AddPermRootRequest),
+    SubmitOutput(SubmitOutputRequest),
     AddToStoreScanning(AddToStoreScanningRequest),
 }
 
@@ -184,6 +185,7 @@ impl Request {
             Request::AddBuildLog(_) => Operation::AddBuildLog,
             Request::BuildPathsWithResults(_) => Operation::BuildPathsWithResults,
             Request::AddPermRoot(_) => Operation::AddPermRoot,
+            Request::SubmitOutput(_) => Operation::SubmitOutput,
             Request::AddToStoreScanning(_) => Operation::AddToStoreScanning,
         }
     }
@@ -280,6 +282,9 @@ impl Request {
             Request::AddPermRoot(req) => {
                 let gc_root = String::from_utf8_lossy(&req.gc_root);
                 debug_span!("AddPermRoot", path=?req.store_path, ?gc_root)
+            }
+            Request::SubmitOutput(req) => {
+                debug_span!("SubmitOutput", path=?req.path, output=?req.output)
             }
             Request::AddToStoreScanning(req) => {
                 debug_span!("AddToStoreScanning", name=?req.name, cam=?req.cam)
@@ -393,6 +398,12 @@ pub struct AddMultipleToStoreRequest {
 pub struct AddPermRootRequest {
     pub store_path: StorePath,
     pub gc_root: DaemonPath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
+pub struct SubmitOutputRequest {
+    pub path: SingleDerivedPath,
+    pub output: OutputName,
 }
 
 /// Like [`AddToStoreRequest`] but without `refs`, which are instead discovered

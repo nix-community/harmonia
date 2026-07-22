@@ -23,7 +23,7 @@ use crate::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_protocol_derive::{NixDeserialize, NixSerialize};
 use harmonia_store_content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_derivation::derivation::BasicDerivation;
-use harmonia_store_derivation::derived_path::{DerivedPath, OutputName};
+use harmonia_store_derivation::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_path::{StorePath, StorePathHash, StorePathSet};
 use harmonia_utils_signature::Signature;
@@ -587,6 +587,17 @@ pub trait DaemonStore: Send {
         ready(Err(DaemonError::unimplemented(Operation::QueryRealisation))).empty_logs()
     }
 
+    /// Submit a store object as an output of the currently building derivation.
+    ///
+    /// Only daemons serving a `builder-rpc-v0` derivation builder support this.
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        ready(Err(DaemonError::unimplemented(Operation::SubmitOutput))).empty_logs()
+    }
+
     fn add_build_log<'s, 'r, 'p, R>(
         &'s mut self,
         path: &'p StorePath,
@@ -868,6 +879,14 @@ where
         output_id: &'a DrvOutput,
     ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedRealisation>>> + Send + 'a {
         (**self).query_realisation(output_id)
+    }
+
+    fn submit_output<'a>(
+        &'a mut self,
+        path: &'a SingleDerivedPath,
+        output: &'a OutputName,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        (**self).submit_output(path, output)
     }
 
     fn add_build_log<'s, 'r, 'p, R>(
