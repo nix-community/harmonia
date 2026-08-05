@@ -11,32 +11,52 @@ use harmonia_utils_base_encoding::Base;
 
 use crate::raw_output::AtermOutput;
 
+/// How an input-derivation key is rendered in the ATerm `inputDrvs`
+/// list. Normally this is a [`StorePath`] printed as an absolute path,
+/// but the intermediate derivation used to compute the hash modulo
+/// replaces each input derivation with its own hash modulo, rendered
+/// as bare base16 (see [`crate::hash_modulo`]).
+pub trait AtermInput {
+    fn write_key(&self, store_dir: &StoreDir, out: &mut Vec<u8>);
+}
+
+impl AtermInput for StorePath {
+    fn write_key(&self, store_dir: &StoreDir, out: &mut Vec<u8>) {
+        let abs = self.to_absolute_path(store_dir);
+        write_escaped(out, abs.to_string_lossy().as_bytes());
+    }
+}
+
+impl AtermInput for harmonia_utils_hash::Sha256 {
+    fn write_key(&self, _store_dir: &StoreDir, out: &mut Vec<u8>) {
+        write_escaped(out, format!("{self:x}").as_bytes());
+    }
+}
+
 /// Print a derivation in Nix ATerm format.
-pub fn print_derivation_aterm<I, O: AtermOutput>(
+///
+/// Takes a derivation whose inputs are already in the format
+/// representation ([`DerivationInputs`]), generic over the
+/// input-derivation key. Convert an in-memory derivation with
+/// [`DerivationT::into_full`].
+pub fn print_derivation_aterm<K: AtermInput, O: AtermOutput>(
     store_dir: &StoreDir,
-    drv: &DerivationT<I, O>,
-) -> Vec<u8>
-where
-    for<'a> DerivationInputs: From<&'a I>,
-{
+    drv: &DerivationT<DerivationInputs<K>, O>,
+) -> Vec<u8> {
     let mut out = Vec::new();
     write_derivation(store_dir, drv, &mut out);
     out
 }
 
-/// Write a derivation in Nix ATerm format to a string buffer.
-pub fn write_derivation<I, O: AtermOutput>(
+/// Write a derivation in Nix ATerm format to a string buffer. See
+/// [`print_derivation_aterm`].
+pub fn write_derivation<K: AtermInput, O: AtermOutput>(
     store_dir: &StoreDir,
-    drv: &DerivationT<I, O>,
+    drv: &DerivationT<DerivationInputs<K>, O>,
     out: &mut Vec<u8>,
-) where
-    for<'a> DerivationInputs: From<&'a I>,
-{
-    let inputs = DerivationInputs::from(&drv.inputs);
-    let has_dynamic = inputs
-        .drvs
-        .values()
-        .any(|oi| !oi.dynamic_outputs.is_empty());
+) {
+    let DerivationInputs { srcs, drvs } = &drv.inputs;
+    let has_dynamic = drvs.values().any(|oi| !oi.dynamic_outputs.is_empty());
 
     if has_dynamic {
         out.extend_from_slice(b"DrvWithVersion(\"xp-dyn-drv\",");
@@ -49,9 +69,9 @@ pub fn write_derivation<I, O: AtermOutput>(
     out.push(b',');
 
     // Input derivations and input sources
-    write_input_drvs(store_dir, &inputs.drvs, has_dynamic, out);
+    write_input_drvs(store_dir, drvs, has_dynamic, out);
     out.push(b',');
-    write_input_srcs(store_dir, &inputs.srcs, out);
+    write_input_srcs(store_dir, srcs, out);
     out.push(b',');
 
     // Platform
@@ -109,21 +129,20 @@ fn write_outputs<O: AtermOutput>(
     out.push(b']');
 }
 
-fn write_input_drvs(
+fn write_input_drvs<K: AtermInput>(
     store_dir: &StoreDir,
-    drvs: &BTreeMap<StorePath, OutputInputs>,
+    drvs: &BTreeMap<K, OutputInputs>,
     versioned: bool,
     out: &mut Vec<u8>,
 ) {
     out.push(b'[');
-    for (i, (path, output_inputs)) in drvs.iter().enumerate() {
+    for (i, (key, output_inputs)) in drvs.iter().enumerate() {
         if i > 0 {
             out.push(b',');
         }
         out.push(b'(');
 
-        let abs = path.to_absolute_path(store_dir);
-        write_escaped(out, abs.to_string_lossy().as_bytes());
+        key.write_key(store_dir, out);
         out.push(b',');
 
         write_output_inputs(output_inputs, versioned, out);

@@ -1,9 +1,7 @@
 //! For derivations that input-address their outputs
 
 use bytes::Bytes;
-use harmonia_store_derivation::derivation::{
-    BasicDerivation, DerivationOutput, DerivationT, OutputPathName,
-};
+use harmonia_store_derivation::derivation::{DerivationOutput, DerivationT, OutputPathName};
 use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathNameError, StorePathSet};
 
@@ -73,10 +71,13 @@ pub fn hash_derivation(
     store_dir: &StoreDir,
     drv: &DerivationT<StorePathSet, UnfilledOutput>,
 ) -> harmonia_utils_hash::Sha256 {
-    // Convert UnfilledOutput → DerivationOutput::Deferred so the
-    // printer can produce the ATerm with all-empty output fields.
-    let as_basic: BasicDerivation = drv.clone().map_outputs(DerivationOutput::from);
-    let aterm = print_derivation_aterm(store_dir, &as_basic);
+    // Blank env vars named after outputs (shared with the unresolved
+    // hash-modulo path — the two hashes must agree on masking), so the
+    // hash does not depend on the derivation's own (stale or
+    // placeholder) output paths. `UnfilledOutput` prints as all-empty
+    // output fields directly.
+    let masked = crate::hash_modulo::mask_outputs_and_env(drv.clone());
+    let aterm = print_derivation_aterm(store_dir, &masked.into_full());
     harmonia_utils_hash::Sha256::digest(&aterm)
 }
 
@@ -117,12 +118,26 @@ pub fn fill_outputs(
     drv: DerivationT<StorePathSet, UnfilledOutput>,
 ) -> Result<DerivationT<StorePathSet, StorePath>, StorePathNameError> {
     let drv_hash = hash_derivation(store_dir, &drv);
+    fill_outputs_from_hash(store_dir, drv, &drv_hash)
+}
 
+/// Fill each unfilled output with the path computed from the given
+/// derivation hash (via [`make_output_path`]), and set the
+/// corresponding env vars (e.g. `$out`) to the absolute store paths.
+///
+/// Shared by [`fill_outputs`] (resolved, hash from [`hash_derivation`])
+/// and [`hash_modulo::fill_deferred_outputs`](crate::hash_modulo::fill_deferred_outputs)
+/// (unresolved, hash from the recursive hash modulo).
+pub(crate) fn fill_outputs_from_hash<I>(
+    store_dir: &StoreDir,
+    drv: DerivationT<I, UnfilledOutput>,
+    drv_hash: &harmonia_utils_hash::Sha256,
+) -> Result<DerivationT<I, StorePath>, StorePathNameError> {
     let mut outputs = std::collections::BTreeMap::new();
     let mut env = drv.env;
 
     for (output_name, UnfilledOutput) in drv.outputs {
-        let path = make_output_path(store_dir, &drv.name, &drv_hash, &output_name)?;
+        let path = make_output_path(store_dir, &drv.name, drv_hash, &output_name)?;
 
         let abs_path = path
             .to_absolute_path(store_dir)
@@ -151,6 +166,7 @@ pub fn fill_outputs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harmonia_store_derivation::derivation::BasicDerivation;
     use harmonia_store_derivation::derivation::DerivationOutputs;
     use harmonia_store_derivation::derivation::derivation_output_arbitrary::arb_output_name_for_drv;
     use proptest::prelude::*;

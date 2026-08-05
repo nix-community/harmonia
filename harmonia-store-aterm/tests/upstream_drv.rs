@@ -51,7 +51,7 @@ fn drv_matches_json_and_roundtrips(#[case] base_path: &str) {
     assert_eq!(from_aterm, from_json);
 
     // Print back to ATerm and verify roundtrip
-    let printed = print_derivation_aterm(&store_dir, &from_aterm);
+    let printed = print_derivation_aterm(&store_dir, &from_aterm.into_full());
     assert_eq!(printed, drv_str.as_bytes());
 }
 

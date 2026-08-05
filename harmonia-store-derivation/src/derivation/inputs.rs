@@ -17,13 +17,35 @@ pub struct OutputInputs {
     pub dynamic_outputs: BTreeMap<OutputName, OutputInputs>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-pub struct DerivationInputs {
+/// The split-by-kind ("full") input representation used by the on-disk
+/// and wire formats: sources vs. input derivations, with the trie
+/// structure for dynamic outputs.
+///
+/// `Key` is how an input derivation is identified — normally a
+/// [`StorePath`], but the intermediate derivation used to compute the
+/// hash modulo keys input derivations by their own hash modulo instead.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "Key: Serialize",
+    deserialize = "Key: Deserialize<'de> + Ord"
+))]
+pub struct DerivationInputs<Key = StorePath> {
     #[serde(default)]
     pub srcs: StorePathSet,
     /// `SingleDerivedPath::Built` inputs as a trie-like structure.
     #[serde(default)]
-    pub drvs: BTreeMap<StorePath, OutputInputs>,
+    pub drvs: BTreeMap<Key, OutputInputs>,
+}
+
+// Manual impl: a derived `Default` would spuriously require
+// `Key: Default` (`BTreeMap` is unconditionally `Default`).
+impl<Key> Default for DerivationInputs<Key> {
+    fn default() -> Self {
+        DerivationInputs {
+            srcs: StorePathSet::default(),
+            drvs: BTreeMap::new(),
+        }
+    }
 }
 
 impl From<&DerivationInputs> for BTreeSet<SingleDerivedPath> {

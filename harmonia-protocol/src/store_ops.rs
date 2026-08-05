@@ -22,7 +22,7 @@ pub async fn write_derivation<S>(
 where
     S: DaemonStore + ?Sized,
 {
-    let aterm = harmonia_store_aterm::print_derivation_aterm(store_dir, drv);
+    let aterm = harmonia_store_aterm::print_derivation_aterm(store_dir, &drv.clone().into_full());
     let name = format!("{}.drv", drv.name);
     let source = std::io::Cursor::new(aterm);
     store
@@ -152,7 +152,7 @@ mod tests {
         assert!(call.repair);
         assert_eq!(
             call.source,
-            harmonia_store_aterm::print_derivation_aterm(&store_dir, &drv),
+            harmonia_store_aterm::print_derivation_aterm(&store_dir, &drv.clone().into_full()),
         );
     }
 }
