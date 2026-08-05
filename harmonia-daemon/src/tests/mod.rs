@@ -1,6 +1,10 @@
+mod add_to_store_nar;
 mod add_to_store_scanning;
+mod build_derivation;
+mod query_missing;
 mod sqlite_nix_store;
 mod submit_output;
+pub(crate) mod test_store;
 
 use std::future::ready;
 use std::time::Duration;
