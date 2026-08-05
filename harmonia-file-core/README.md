@@ -11,7 +11,6 @@ matching nix's `FileSystemObject` type hierarchy.
 
 - `FileSystemObject<C, Ch>` — tagged enum: `Regular`, `Directory`, or `Symlink`
 - `FileTree<C>` — recursive tree (newtype wrapping `FileSystemObject<C, Box<FileTree<C>>>`)
-- `ShallowTree<C>` — one-level tree with `Opaque` children
 - `MemoryTree` — in-memory tree (`FileTree<Vec<u8>>`)
 
 ## Serde

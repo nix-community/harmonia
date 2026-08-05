@@ -1,0 +1,23 @@
+[package]
+name                 = "harmonia-file-io-pure"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+repository.workspace = true
+description          = "Async file tree IO traits and in-memory implementations"
+
+[dependencies]
+futures-core.workspace = true
+futures-util.workspace = true
+harmonia-file-core     = { workspace = true }
+serde.workspace        = true
+serde_json.workspace   = true
+thiserror.workspace    = true
+tokio.workspace        = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -10,6 +10,9 @@ use harmonia_utils_io::AsyncBytesRead;
 
 use crate::archive::{NarEvent, NarParser};
 
+/// One directory frame on the build stack, holding its name and the children gathered so far.
+type DirFrame = (Option<String>, BTreeMap<String, Box<FileTree<NarFileInfo>>>);
+
 /// Metadata for a file entry within a NAR archive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NarFileInfo {
@@ -28,8 +31,8 @@ where
     let mut parser = NarParser::new(reader);
 
     // Stack of (name, entries) for directories being built.
-    let mut stack: Vec<DirFrame> = Vec::new();
-    let mut result: Option<FileTree<NarFileInfo>> = None;
+    let mut stack = Vec::<DirFrame>::new();
+    let mut result = Option::<FileTree<NarFileInfo>>::None;
 
     while let Some(event) = parser.next().await {
         let event = event?;
@@ -79,11 +82,8 @@ where
     result.ok_or_else(|| std::io::Error::other("empty NAR"))
 }
 
-type DirFrame = (Option<String>, BTreeMap<String, Box<FileTree<NarFileInfo>>>);
-
-#[allow(clippy::ptr_arg)]
 fn insert_node(
-    stack: &mut Vec<DirFrame>,
+    stack: &mut [DirFrame],
     result: &mut Option<FileTree<NarFileInfo>>,
     name: String,
     node: FileTree<NarFileInfo>,
@@ -126,8 +126,11 @@ mod tests {
 
         // NarByteStream produces raw NAR bytes
         let byte_stream = crate::archive::NarByteStream::new(dir.to_owned());
-        let chunks: Vec<bytes::Bytes> = byte_stream.try_collect().await.unwrap();
-        let nar_bytes: Vec<u8> = chunks.into_iter().flatten().collect();
+        let chunks = byte_stream
+            .try_collect::<Vec<bytes::Bytes>>()
+            .await
+            .unwrap();
+        let nar_bytes = chunks.into_iter().flatten().collect::<Vec<u8>>();
 
         // Parse the listing
         let reader = BytesReader::new(std::io::Cursor::new(nar_bytes));
