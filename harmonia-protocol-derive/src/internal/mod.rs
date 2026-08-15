@@ -149,8 +149,12 @@ impl<'a> Container<'a> {
             return for_type.clone();
         }
         let path: syn::Path = self.ident.clone().into();
-        let tp = syn::TypePath { qself: None, path };
-        tp.into()
+        let tp = syn::TypePath {
+            attrs: Vec::new(),
+            qself: None,
+            path,
+        };
+        syn::Type::Path(tp)
     }
 }
 
