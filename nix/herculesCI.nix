@@ -11,9 +11,6 @@ let
   # Only run effect on main branch
   isMain = args.branch == "main";
 
-  # Skip x86_64-darwin for now - rustc builds are slow and often not cached
-  uploadSystems = builtins.filter (s: s != "x86_64-darwin") systems;
-
   # codecov-cli depends on test-results-parser which has an unfree license
   # Override just the license instead of using allowUnfree (expensive)
   codecov-cli = pkgs.codecov-cli.override {
@@ -27,7 +24,7 @@ let
   };
 
   # Get test outputs for all systems (list -> attrset)
-  testOutputs = lib.genAttrs uploadSystems (system: self.checks.${system}.tests);
+  testOutputs = lib.genAttrs systems (system: self.checks.${system}.tests);
 in
 {
   onPush.default.outputs.effects.uploadCodecov.run =
@@ -99,7 +96,7 @@ in
             else
               echo "No coverage file found for ${system}"
             fi
-          '') uploadSystems}
+          '') systems}
         '';
       }
     else
