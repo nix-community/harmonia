@@ -284,11 +284,20 @@ impl<Inputs, Output> DerivationT<Inputs, Output> {
             structured_attrs: self.structured_attrs,
         }
     }
-}
 
-impl<Inputs> DerivationT<Inputs> {
+    /// Convert the inputs to the split-by-kind format representation
+    /// ([`DerivationInputs`]), moving the other fields. This is the
+    /// boundary conversion for the on-disk/wire formats (e.g. the ATerm
+    /// printer).
+    pub fn into_full(self) -> DerivationT<DerivationInputs, Output>
+    where
+        for<'a> DerivationInputs: From<&'a Inputs>,
+    {
+        self.map_inputs(|i| DerivationInputs::from(&i))
+    }
+
     /// Transform inputs, keeping everything else the same.
-    pub fn map_inputs<T>(self, f: impl FnOnce(Inputs) -> T) -> DerivationT<T> {
+    pub fn map_inputs<T>(self, f: impl FnOnce(Inputs) -> T) -> DerivationT<T, Output> {
         DerivationT {
             name: self.name,
             outputs: self.outputs,
@@ -300,7 +309,9 @@ impl<Inputs> DerivationT<Inputs> {
             structured_attrs: self.structured_attrs,
         }
     }
+}
 
+impl<Inputs> DerivationT<Inputs> {
     /// Replace all occurrences of each rewrite's key with its value in builder,
     /// args, env (keys and values), and structured_attrs.
     ///

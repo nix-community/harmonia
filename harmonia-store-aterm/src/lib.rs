@@ -1,11 +1,12 @@
 mod error;
+pub mod hash_modulo;
 pub mod input_address;
 mod parser;
 mod printer;
 pub mod raw_output;
 
 pub use error::ParseError;
-pub use printer::print_derivation_aterm;
+pub use printer::{AtermInput, print_derivation_aterm, write_derivation};
 
 use harmonia_store_derivation::derivation::Derivation;
 use harmonia_store_path::{StoreDir, StorePathName};

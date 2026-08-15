@@ -27,7 +27,7 @@ fn default_priority() -> usize {
 }
 
 fn default_enable_compression() -> bool {
-    false
+    true
 }
 
 /// zstd parameters applied to on-the-fly NAR encoding when the client sends

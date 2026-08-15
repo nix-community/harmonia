@@ -29,7 +29,10 @@ use rstest::rstest;
 fn aterm_roundtrips(#[case] input: &str, #[case] name: &str) {
     let store_dir = StoreDir::default();
     let drv = parse_derivation_aterm(&store_dir, input.as_bytes(), name.parse().unwrap()).unwrap();
-    assert_eq!(print_derivation_aterm(&store_dir, &drv), input.as_bytes());
+    assert_eq!(
+        print_derivation_aterm(&store_dir, &drv.into_full()),
+        input.as_bytes()
+    );
 }
 
 /// ATerm strings are byte sequences, not UTF-8. The printer must emit non-ASCII
@@ -43,7 +46,7 @@ fn roundtrip_non_utf8_bytes() {
     let input: &[u8] = b"Derive([(\"out\",\"\",\"\",\"\")],[],[],\"x86_64-linux\",\"/bin/sh\",[\"a\xc8\x82b\"],[(\"name\",\"test\")])";
     let drv = parse_derivation_aterm(&store_dir, input, "test".parse().unwrap()).unwrap();
     assert_eq!(drv.args, vec![b"a\xc8\x82b".to_vec()]);
-    let printed = print_derivation_aterm(&store_dir, &drv);
+    let printed = print_derivation_aterm(&store_dir, &drv.into_full());
     assert_eq!(printed, input);
 }
 
@@ -60,7 +63,7 @@ fn roundtrip_ca_fixed() {
         "linux-6.16.tar.xz".parse().unwrap(),
     )
     .unwrap();
-    let output = print_derivation_aterm(&store_dir, &drv);
+    let output = print_derivation_aterm(&store_dir, &drv.clone().into_full());
 
     // Re-parse the printed output and verify structural equality
     let drv2 =

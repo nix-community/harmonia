@@ -138,9 +138,7 @@ max_connection_rate = 256
 # binary cache priority that is advertised in /nix-cache-info
 priority = 30
 # Whether to enable transparent compression with zstd.
-# Note that this is incompatible with resuming, so don't enable this
-# if any of your users are on a flaky connection.
-# Default: false
+# Default: true
 enable_compression = true
 
 # Allow to override the store path advertised in /nix-cache-info
