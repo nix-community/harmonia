@@ -11,8 +11,7 @@ let
   # Only run effect on main branch
   isMain = args.branch == "main";
 
-  # Skip x86_64-darwin for now - rustc builds are slow and often not cached
-  uploadSystems = builtins.filter (s: s != "x86_64-darwin") systems;
+  uploadSystems = systems;
 
   # codecov-cli depends on test-results-parser which has an unfree license
   # Override just the license instead of using allowUnfree (expensive)
