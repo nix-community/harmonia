@@ -148,6 +148,7 @@ pub(crate) async fn get(
                 let ranged_stream = create_range_stream(stream, offset, range_length);
 
                 return Ok(res
+                    .status(http::StatusCode::PARTIAL_CONTENT)
                     .insert_header((http::header::CONTENT_TYPE, "application/x-nix-archive"))
                     .insert_header((http::header::ACCEPT_RANGES, "bytes"))
                     .insert_header(cache_control_max_age_1y())
