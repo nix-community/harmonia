@@ -910,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-bench"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "criterion",
  "harmonia-store-path",
@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-cache"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "actix-files",
  "actix-web",
@@ -965,11 +965,11 @@ dependencies = [
 
 [[package]]
 name = "harmonia-client"
-version = "3.1.0"
+version = "3.2.0"
 
 [[package]]
 name = "harmonia-daemon"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-file-core"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "harmonia-utils-test",
  "serde",
@@ -1004,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-file-nar"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "bstr",
  "bytes",
@@ -1032,7 +1032,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-protocol"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "async-stream",
  "bstr",
@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-protocol-derive"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1080,7 +1080,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-ssh-store"
-version = "3.1.0"
+version = "3.2.0"
 
 [[package]]
 name = "harmonia-store-aterm"
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-build-result"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "harmonia-store-build-result",
  "harmonia-store-derivation",
@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-content-address"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "derive_more",
  "harmonia-store-content-address",
@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-db"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "harmonia-store-content-address",
  "harmonia-store-derivation",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-nar-info"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "harmonia-store-content-address",
  "harmonia-store-path",
@@ -1189,7 +1189,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-path"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "derive_more",
  "harmonia-store-path",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-path-info"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "harmonia-store-content-address",
  "harmonia-store-path",
@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-store-remote"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -1309,7 +1309,7 @@ dependencies = [
 
 [[package]]
 name = "harmonia-utils-signature"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "data-encoding",
  "ed25519-dalek",

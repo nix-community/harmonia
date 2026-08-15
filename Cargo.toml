@@ -38,7 +38,7 @@ edition = "2024"
 homepage = "https://github.com/nix-community/harmonia"
 license = "MIT"
 repository = "https://github.com/nix-community/harmonia.git"
-version = "3.1.0"
+version = "3.2.0"
 
 [workspace.dependencies]
 async-stream = "0.3"
