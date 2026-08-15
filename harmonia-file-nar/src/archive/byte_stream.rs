@@ -4,6 +4,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
 use bytes::{BufMut, Bytes, BytesMut};
+
+use super::dumper::DumpedFile;
 use futures_core::Stream;
 
 use super::NarEvent;
@@ -18,21 +20,12 @@ use crate::wire::calc_padding;
 /// metadata before yielding to the consumer.
 const FRAME_FLUSH_THRESHOLD: usize = 32 * 1024;
 
-/// Max size of a single file-content chunk yielded downstream.
-///
-/// Large mmap'd files are sliced into pieces of this size so the HTTP layer
-/// can interleave socket writes with further NAR encoding work and so a slow
-/// client does not pin a multi-GiB `Bytes` in actix's write buffer at once.
-/// Slicing a `Bytes` is just a refcount bump — no copy.
-const FILE_CHUNK_SIZE: usize = 256 * 1024;
-
 enum Phase {
     /// Pull the next [`NarEvent`] from the dumper and encode framing.
     Event,
-    /// Yield file content (possibly in multiple slices), then append the
-    /// trailing padding/`)` tokens to `frame` and go back to [`Phase::Event`].
+    /// Yield file content chunks, then append trailing padding/`)` tokens.
     Emit {
-        data: Bytes,
+        file: DumpedFile,
         size: u64,
     },
     Done,
@@ -42,10 +35,9 @@ enum Phase {
 ///
 /// Drives a [`NarDumper`] directly and emits the NAR wire format without
 /// intermediate copies: framing tokens are accumulated in a small reusable
-/// buffer, and file payloads are forwarded as the `Bytes` already loaded by
-/// the dumper (heap buffer for small files, mmap-backed for large ones). The
-/// only per-byte copy on the serving path is the one the HTTP layer performs
-/// into its socket write buffer.
+/// buffer, and file payloads are forwarded as `Bytes` chunks produced by the
+/// dumper (an eagerly loaded heap buffer for small files, bounded `read()`
+/// chunks for large ones).
 pub struct NarByteStream {
     dumper: NarDumper,
     /// Scratch buffer for NAR structure tokens between file payloads.
@@ -138,10 +130,7 @@ impl Stream for NarByteStream {
                                         TOK_FILE
                                     });
                                     this.frame.put_u64_le(size);
-                                    this.phase = Phase::Emit {
-                                        data: reader.into_bytes(),
-                                        size,
-                                    };
+                                    this.phase = Phase::Emit { file: reader, size };
                                     // Flush framing now so file bytes follow
                                     // immediately without being copied into
                                     // the frame buffer.
@@ -160,11 +149,14 @@ impl Stream for NarByteStream {
                         }
                     }
                 }
-                Phase::Emit { data, size } => {
-                    if !data.is_empty() {
-                        let n = data.len().min(FILE_CHUNK_SIZE);
-                        let chunk = data.split_to(n);
-                        return Poll::Ready(Some(Ok(chunk)));
+                Phase::Emit { file, size } => {
+                    match file.next_chunk() {
+                        Some(Ok(chunk)) => return Poll::Ready(Some(Ok(chunk))),
+                        Some(Err(e)) => {
+                            this.phase = Phase::Done;
+                            return Poll::Ready(Some(Err(e)));
+                        }
+                        None => {}
                     }
                     // File fully emitted; append trailer and resume framing.
                     this.frame.put_bytes(0, calc_padding(*size));
@@ -228,8 +220,7 @@ mod tests {
         assert_eq!(got, want.to_vec());
     }
 
-    /// Exercise the mmap-backed `Bytes::from_owner` path and the
-    /// `FILE_CHUNK_SIZE` slicing of large payloads.
+    /// Exercise the lazy chunked-read path for large payloads.
     #[tokio::test]
     async fn byte_stream_large_file_matches_nix_store_dump() {
         // Larger than SMALL_FILE_THRESHOLD and not a multiple of

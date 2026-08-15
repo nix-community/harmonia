@@ -2,7 +2,6 @@ use crate::ByteString;
 
 mod byte_stream;
 mod dumper;
-pub(crate) mod mmap;
 mod parser;
 pub(crate) mod radix_tree;
 mod read_nar;

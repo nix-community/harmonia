@@ -135,23 +135,31 @@ fn os_string_into_bytes(s: std::ffi::OsString) -> Bytes {
     Bytes::from(s.into_vec())
 }
 
-use super::mmap::MappedFile;
-
-/// Files up to this size are read into a heap buffer; larger files are
-/// memory-mapped so streaming a multi-gigabyte store path stays bounded.
+/// Files up to this size are read eagerly; larger files are streamed in
+/// [`FILE_CHUNK_SIZE`] pieces so memory stays bounded.
+///
+/// Deliberately `read()`-based, not mmap: the kernel patches uprobe
+/// breakpoint bytes into every mapping of a probed inode (even `PROT_READ`),
+/// so an mmap-based dumper serves NARs that do not match the signed
+/// `NarHash` (issue #1140). Chunked reads also benchmark at least as fast
+/// as mmap for this one-pass workload.
 const SMALL_FILE_THRESHOLD: u64 = 256 * 1024; // 256 KiB
 
-/// Load a file as a single `Bytes` value without intermediate copies:
-/// small files become `Bytes::from(Vec)`, large files become a refcounted
-/// view over the mmap via `Bytes::from_owner`.
-///
-/// `size` comes from the directory walk's `lstat`, so the small-file branch
-/// allocates exactly once at the right capacity instead of letting
-/// `std::fs::read` issue its own `fstat` to size the buffer.
-fn load_file_bytes(path: &Path, size: u64) -> io::Result<Bytes> {
+pub(crate) const FILE_CHUNK_SIZE: usize = 256 * 1024;
+
+enum FileData {
+    Eager(Bytes),
+    /// Opened by the blocking walker task, read chunk-by-chunk during emission.
+    Lazy {
+        file: std::fs::File,
+        remaining: u64,
+    },
+}
+
+fn load_file_data(path: &Path, size: u64) -> io::Result<FileData> {
+    let mut f = std::fs::File::open(path)?;
     if size <= SMALL_FILE_THRESHOLD {
         use std::io::Read as _;
-        let mut f = std::fs::File::open(path)?;
         let mut buf = Vec::with_capacity(size as usize);
         f.read_to_end(&mut buf)?;
         // The NAR length prefix has already been derived from `size`; if the
@@ -163,31 +171,59 @@ fn load_file_bytes(path: &Path, size: u64) -> io::Result<Bytes> {
                 buf.len()
             )));
         }
-        Ok(Bytes::from(buf))
+        Ok(FileData::Eager(Bytes::from(buf)))
     } else {
-        Ok(Bytes::from_owner(MappedFile::open(path, size)?))
+        Ok(FileData::Lazy {
+            file: f,
+            remaining: size,
+        })
     }
 }
 
-/// File contents for a [`NarEvent::File`], already loaded into memory (or
-/// memory-mapped) by the same blocking task that walked the directory.
-///
-/// The data is fetched eagerly so the async consumer never has to round-trip
-/// to the blocking pool per file; neither representation holds an open file
-/// descriptor, so at most [`CHUNK_SIZE`] entries worth of small-file buffers
-/// plus mappings are resident at a time.
+/// File contents for a [`NarEvent::File`]: small files are already in memory,
+/// large files hold an open descriptor and are read incrementally.
 pub struct DumpedFile {
-    data: Bytes,
+    data: FileData,
+    /// Chunk handed out by [`Self::next_chunk`] but not yet fully consumed
+    /// through the [`AsyncRead`] interface.
+    pending: Bytes,
 }
 
 impl DumpedFile {
-    fn new(data: Bytes) -> Self {
-        Self { data }
-    }
-
-    /// Take the file content as a zero-copy [`Bytes`].
-    pub fn into_bytes(self) -> Bytes {
-        self.data
+    /// Produce the next content chunk, or `None` when the file is fully
+    /// emitted. The bounded synchronous `read()` for lazy data is comparable
+    /// to the page-fault stalls the previous mmap implementation incurred.
+    pub(crate) fn next_chunk(&mut self) -> Option<io::Result<Bytes>> {
+        match &mut self.data {
+            FileData::Eager(bytes) => {
+                if bytes.is_empty() {
+                    return None;
+                }
+                let n = bytes.len().min(FILE_CHUNK_SIZE);
+                Some(Ok(bytes.split_to(n)))
+            }
+            FileData::Lazy { file, remaining } => {
+                use std::io::Read as _;
+                if *remaining == 0 {
+                    return None;
+                }
+                let want = (*remaining).min(FILE_CHUNK_SIZE as u64) as usize;
+                let mut buf = vec![0u8; want];
+                // Truncated after lstat; the NAR length prefix is already
+                // written, so fail instead of desyncing.
+                if let Err(e) = file.read_exact(&mut buf) {
+                    return Some(Err(if e.kind() == io::ErrorKind::UnexpectedEof {
+                        io::Error::other(format!(
+                            "file truncated during dump: {remaining} bytes missing"
+                        ))
+                    } else {
+                        e
+                    }));
+                }
+                *remaining -= want as u64;
+                Some(Ok(Bytes::from(buf)))
+            }
+        }
     }
 }
 
@@ -197,10 +233,16 @@ impl AsyncRead for DumpedFile {
         _cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        let n = self.data.len().min(buf.remaining());
-        buf.put_slice(&self.data[..n]);
-        // `Bytes::advance` on an owned/mmap-backed buffer just bumps an offset.
-        bytes::Buf::advance(&mut self.data, n);
+        if self.pending.is_empty() {
+            match self.next_chunk() {
+                None => return Poll::Ready(Ok(())),
+                Some(Err(e)) => return Poll::Ready(Err(e)),
+                Some(Ok(chunk)) => self.pending = chunk,
+            }
+        }
+        let n = self.pending.len().min(buf.remaining());
+        buf.put_slice(&self.pending[..n]);
+        bytes::Buf::advance(&mut self.pending, n);
         Poll::Ready(Ok(()))
     }
 }
@@ -213,7 +255,7 @@ enum Entry {
         name: Bytes,
         size: u64,
         executable: bool,
-        data: Bytes,
+        data: FileData,
     },
     Symlink {
         depth: usize,
@@ -310,7 +352,7 @@ impl State {
                             // task that is already iterating the directory,
                             // so the async side receives ready-to-stream
                             // bytes without a second pool round-trip.
-                            let data = load_file_bytes(entry.path(), size)?;
+                            let data = load_file_data(entry.path(), size)?;
                             Entry::File {
                                 depth,
                                 name: entry_name(entry, use_case_hack),
@@ -388,7 +430,10 @@ impl Stream for NarDumper {
                         name,
                         executable,
                         size,
-                        reader: DumpedFile::new(data),
+                        reader: DumpedFile {
+                            data,
+                            pending: Bytes::new(),
+                        },
                     },
                     Entry::Symlink { name, target, .. } => NarEvent::Symlink { name, target },
                 };
