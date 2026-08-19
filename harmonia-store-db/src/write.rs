@@ -6,6 +6,7 @@
 //! These are primarily used for testing and local store management.
 
 use rusqlite::params;
+use tracing::info;
 
 use harmonia_store_path::{StoreDir, StorePath};
 
@@ -210,5 +211,126 @@ impl StoreDb {
             params![drv_path, output_name, output_path, signatures],
         )?;
         Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Remove paths by their `ValidPaths.id` in a single transaction.
+    ///
+    /// Intended for bulk garbage collection. The ids come from
+    /// [`StoreGraph::db_id`](crate::StoreGraph::db_id). Reference edges
+    /// among the dead set are removed first, because cycles between dead paths would
+    /// otherwise violate the `ON DELETE RESTRICT` constraint on
+    /// `Refs.reference` (Nix avoids it by deleting one path at a time in
+    /// topological order).
+    ///
+    /// The caller must include every referrer: if some path outside `ids`
+    /// still references a path inside `ids`, the referenced path is deleted
+    /// anyway and the surviving referrer is left with a missing dependency.
+    /// Nix rejects such a deletion, this function does not detect it.
+    ///
+    /// ```
+    /// # fn main() -> harmonia_store_db::Result<()> {
+    /// use harmonia_store_db::{GraphOptions, StoreDb};
+    /// use harmonia_store_path::StoreDir;
+    ///
+    /// let db = StoreDb::open_memory()?;
+    /// let graph = db.load_graph(&StoreDir::default(), &GraphOptions::default())?;
+    /// let dead: Vec<i64> = graph.nodes().map(|n| graph.db_id(n)).collect();
+    /// db.invalidate_ids(dead)?; // everything is dead
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn invalidate_ids(&self, ids: impl IntoIterator<Item = i64>) -> Result<()> {
+        self.conn.execute_batch("BEGIN")?;
+        let result = self.invalidate_ids_in_txn(ids);
+        match result {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT")?;
+                // Truncate the WAL so its disk use doesn't accumulate across
+                // chunks. On a full disk an unbounded WAL would abort a later
+                // chunk. Best effort: a blocked checkpoint leaves the WAL for
+                // the next one.
+                let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+                Ok(())
+            }
+            Err(e) => {
+                self.conn.execute_batch("ROLLBACK").ok();
+                Err(e)
+            }
+        }
+    }
+
+    fn invalidate_ids_in_txn(&self, ids: impl IntoIterator<Item = i64>) -> Result<()> {
+        // A temp table lets the Refs of all dead paths be batch-deleted in
+        // two statements instead of one subquery per path.
+        self.conn
+            .execute_batch("CREATE TEMP TABLE IF NOT EXISTS DeadPaths (id INTEGER PRIMARY KEY)")?;
+        self.conn.execute_batch("DELETE FROM DeadPaths")?;
+        {
+            let mut ins = self.conn.prepare("INSERT INTO DeadPaths VALUES (?)")?;
+            for id in ids {
+                ins.execute([id])?;
+            }
+        }
+        self.conn.execute_batch(
+            "DELETE FROM Refs WHERE referrer IN (SELECT id FROM DeadPaths) \
+             OR reference IN (SELECT id FROM DeadPaths)",
+        )?;
+        // Same cycle problem for the CA realisations of Nix <= 2.34:
+        // RealisationsRefs.realisationReference is ON DELETE RESTRICT.
+        if crate::graph::has_table(&self.conn, "Realisations")? {
+            self.conn.execute_batch(
+                "DELETE FROM RealisationsRefs WHERE referrer IN \
+                     (SELECT id FROM Realisations WHERE outputPath IN \
+                         (SELECT id FROM DeadPaths)) \
+                 OR realisationReference IN \
+                     (SELECT id FROM Realisations WHERE outputPath IN \
+                         (SELECT id FROM DeadPaths)); \
+                 DELETE FROM Realisations WHERE outputPath IN \
+                     (SELECT id FROM DeadPaths)",
+            )?;
+        }
+        self.conn
+            .execute_batch("DELETE FROM ValidPaths WHERE id IN (SELECT id FROM DeadPaths)")?;
+        Ok(())
+    }
+
+    /// Run `VACUUM` if enough of the database file consists of free pages
+    /// to be worth a full rewrite: at least a quarter of the file and at
+    /// least 64 pages. Returns whether a vacuum ran.
+    ///
+    /// The caller must ensure no concurrent writer (e.g. by holding the
+    /// GC lock). Concurrent readers are fine in WAL mode.
+    pub fn maybe_vacuum(&self) -> Result<bool> {
+        let freelist: i64 = self
+            .conn
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+        let pages: i64 = self.conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+        if !vacuum_worthwhile(freelist, pages) {
+            return Ok(false);
+        }
+        info!("vacuuming database ({freelist} of {pages} pages free)...");
+        let start = std::time::Instant::now();
+        self.conn.execute_batch("VACUUM")?;
+        let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+        info!("vacuum done in {:.1}s", start.elapsed().as_secs_f64());
+        Ok(true)
+    }
+}
+
+/// At least a quarter of the file and at least 64 pages must be free.
+fn vacuum_worthwhile(freelist: i64, pages: i64) -> bool {
+    freelist >= 64 && freelist * 4 >= pages
+}
+
+#[cfg(test)]
+mod tests {
+    use super::vacuum_worthwhile;
+
+    #[test]
+    fn vacuum_thresholds() {
+        assert!(!vacuum_worthwhile(63, 1), "below absolute minimum");
+        assert!(vacuum_worthwhile(64, 256), "exactly a quarter free");
+        assert!(!vacuum_worthwhile(64, 257), "just under a quarter free");
+        assert!(vacuum_worthwhile(1000, 1000), "mostly free");
     }
 }

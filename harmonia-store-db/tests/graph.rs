@@ -53,6 +53,12 @@ fn refs_of(g: &StoreGraph, node: NodeIdx) -> Vec<NodeIdx> {
     refs
 }
 
+fn count(db: &StoreDb, table: &str) -> i64 {
+    db.connection()
+        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+        .unwrap()
+}
+
 #[test]
 fn load_graph_builds_csr() {
     let (db, sd) = setup();
@@ -192,6 +198,90 @@ fn load_graph_build_trace_edges() {
 }
 
 #[test]
+fn invalidate_ids_handles_ref_cycles() {
+    let (db, sd) = setup();
+    let a = add_path(&db, &format!("{H1}-a"), 1, 1);
+    let b = add_path(&db, &format!("{H2}-b"), 1, 1);
+    add_path(&db, &format!("{H3}-c"), 1, 1);
+    // Cycle between the two dead paths. The FK on delete restrict would
+    // reject row-by-row deletion.
+    add_ref(&db, a, b);
+    add_ref(&db, b, a);
+
+    // Resolve rowids through the graph like a GC would, so db_id() is
+    // exercised against the real ValidPaths ids.
+    let g = db.load_graph(&sd, &NO_KEEP).unwrap();
+    let dead: Vec<i64> = ["-a", "-b"]
+        .iter()
+        .map(|s| g.db_id(idx_of(&g, s)))
+        .collect();
+    assert_eq!(dead, vec![a, b]);
+    db.invalidate_ids(dead).unwrap();
+
+    let remaining = db.query_all_valid_paths(&sd).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert!(remaining[0].to_string().ends_with("-c"));
+    assert_eq!(count(&db, "Refs"), 0);
+}
+
+#[test]
+fn invalidate_ids_cascades_derivation_outputs() {
+    let (db, _) = setup();
+    let drv = add_path(&db, &format!("{H1}-pkg.drv"), 1, 1);
+    add_path(&db, &format!("{H2}-pkg"), 1, 1);
+    db.connection()
+        .execute(
+            "INSERT INTO DerivationOutputs (drv, id, path) VALUES (?, 'out', ?)",
+            rusqlite::params![drv, full(&format!("{H2}-pkg"))],
+        )
+        .unwrap();
+
+    db.invalidate_ids([drv]).unwrap();
+
+    assert_eq!(count(&db, "DerivationOutputs"), 0);
+}
+
+#[test]
+fn invalidate_ids_clears_realisations_with_restrict_fk() {
+    // Nix <= 2.34 CA schema: RealisationsRefs.realisationReference is ON
+    // DELETE RESTRICT. Bulk-deleting two dead paths whose realisations
+    // reference each other must not trip the constraint.
+    let (db, _) = setup();
+    db.connection()
+        .execute_batch(
+            "CREATE TABLE Realisations (
+                 id integer primary key autoincrement not null,
+                 drvPath text not null,
+                 outputName text not null,
+                 outputPath integer not null references ValidPaths(id) on delete cascade,
+                 signatures text
+             );
+             CREATE TABLE RealisationsRefs (
+                 referrer integer not null,
+                 realisationReference integer,
+                 foreign key (referrer) references Realisations(id) on delete cascade,
+                 foreign key (realisationReference) references Realisations(id) on delete restrict
+             );",
+        )
+        .unwrap();
+    let a = add_path(&db, &format!("{H1}-a"), 1, 1);
+    let b = add_path(&db, &format!("{H2}-b"), 1, 1);
+    db.connection()
+        .execute_batch(&format!(
+            "INSERT INTO Realisations (drvPath, outputName, outputPath) \
+                 VALUES ('sha256:a!out', 'out', {a}), ('sha256:b!out', 'out', {b});
+             INSERT INTO RealisationsRefs (referrer, realisationReference) VALUES (1, 2);"
+        ))
+        .unwrap();
+
+    db.invalidate_ids([a, b]).unwrap();
+
+    for table in ["Realisations", "RealisationsRefs", "ValidPaths"] {
+        assert_eq!(count(&db, table), 0, "{table} not cleared");
+    }
+}
+
+#[test]
 fn basename_index_lookups() {
     let (db, sd) = setup();
     add_path(&db, &format!("{H1}-a"), 1, 1);
@@ -225,6 +315,41 @@ fn compute_closure_marks_reachable_only() {
     assert!(!closure.is_empty());
     assert!(closure.contains(ia));
     assert!(!closure.contains(ic));
+}
+
+#[test]
+fn maybe_vacuum_skips_small_freelist() {
+    let (db, _) = setup();
+    add_path(&db, &format!("{H1}-a"), 1, 1);
+    assert!(!db.maybe_vacuum().unwrap());
+}
+
+#[test]
+fn maybe_vacuum_runs_after_bulk_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = StoreDb::open(
+        dir.path().join("db.sqlite"),
+        harmonia_store_db::OpenMode::Create,
+    )
+    .unwrap();
+    db.create_schema().unwrap();
+    // Fill and empty the database so most pages end up on the freelist.
+    let filler = "x".repeat(4096);
+    for i in 0..500 {
+        db.connection()
+            .execute(
+                "INSERT INTO ValidPaths (path, hash, registrationTime) VALUES (?, ?, 1)",
+                rusqlite::params![format!("/nix/store/{H1}-{i}"), filler],
+            )
+            .unwrap();
+    }
+    db.connection()
+        .execute_batch("DELETE FROM ValidPaths")
+        .unwrap();
+
+    assert!(db.maybe_vacuum().unwrap());
+    // The rewrite returned the free pages. A second vacuum is not worth it.
+    assert!(!db.maybe_vacuum().unwrap());
 }
 
 #[test]
