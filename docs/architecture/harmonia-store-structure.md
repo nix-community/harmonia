@@ -105,11 +105,12 @@ graph BT
     bench
     client
     ssh-store
-    file-nar --> file-core
-    file-nar --> utils-io
     utils-hash --> utils-base-encoding
     utils-signature --> utils-base-encoding
     store-path --> utils-hash
+    utils-io --> utils-hash
+    file-nar --> file-core
+    file-nar --> utils-io
     store-content-address --> store-path
     store-fs --> store-path
     store-ref-scan --> store-path
