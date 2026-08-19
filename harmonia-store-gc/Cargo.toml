@@ -16,7 +16,9 @@ foldhash            = { workspace = true }
 harmonia-store-db   = { workspace = true }
 harmonia-store-fs   = { workspace = true }
 harmonia-store-path = { workspace = true }
+memchr              = { workspace = true }
 nix                 = { workspace = true }
+rayon               = { workspace = true }
 thiserror           = { workspace = true }
 tracing             = { workspace = true }
 tracing-subscriber  = { workspace = true }
