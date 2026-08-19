@@ -34,6 +34,7 @@ tracing-subscriber  = { workspace = true, optional = true }
 walkdir             = { workspace = true }
 
 [dev-dependencies]
+rand     = { workspace = true }
 rusqlite = { workspace = true }
 tempfile = { workspace = true }
 
