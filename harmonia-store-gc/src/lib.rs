@@ -17,7 +17,9 @@
 //! Entry point: [`gc::collect_garbage`] with a [`store::GcStore`].
 
 mod error;
-pub mod roots;
+pub mod gc;
+pub mod gc_socket;
+pub(crate) mod roots;
 pub mod store;
 pub mod temp_roots;
 
@@ -27,6 +29,6 @@ pub use error::{Error, Result};
 ///
 /// SipHash showed up in GC profiles when hashing millions of ~50-char
 /// store paths, so foldhash is used instead.
-pub type HashMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
+pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
 /// Hash set counterpart of [`HashMap`].
 pub(crate) type HashSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
