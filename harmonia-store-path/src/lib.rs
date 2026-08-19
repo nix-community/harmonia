@@ -19,7 +19,7 @@ pub use path::{
     ParseStorePathError, StorePath, StorePathError, StorePathHash, StorePathName,
     StorePathNameError,
 };
-pub use store_dir::{FromStoreDirStr, StoreDir, StoreDirDisplay};
+pub use store_dir::{FromStoreDirStr, StoreDir, StoreDirDisplay, StoreDirError};
 
 pub type StorePathSet = BTreeSet<StorePath>;
 

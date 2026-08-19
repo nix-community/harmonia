@@ -10,6 +10,7 @@ members = [
     "harmonia-store-derivation",
     "harmonia-store-ref-scan",
     "harmonia-store-db",
+    "harmonia-store-fs",
     "harmonia-store-path",
     "harmonia-utils-signature",
     "harmonia-store-nar-info",
@@ -56,7 +57,7 @@ getrandom = "0.4"
 libc = "0.2"
 md5 = "0.8"
 memchr = "2"
-nix = { version = "0.31", features = [ "signal", "mman" ] }
+nix = { version = "0.31", features = [ "signal", "mman", "fs", "user", "mount", "sched" ] }
 num_enum = "0.7"
 pin-project-lite = "0.2"
 prometheus = { version = "0.14", default-features = false }
@@ -107,6 +108,7 @@ harmonia-store-build-result    = { path = "harmonia-store-build-result" }
 harmonia-store-content-address = { path = "harmonia-store-content-address" }
 harmonia-store-db              = { path = "harmonia-store-db" }
 harmonia-store-derivation      = { path = "harmonia-store-derivation" }
+harmonia-store-fs              = { path = "harmonia-store-fs" }
 harmonia-store-nar-info        = { path = "harmonia-store-nar-info" }
 harmonia-store-path            = { path = "harmonia-store-path" }
 harmonia-store-path-info       = { path = "harmonia-store-path-info" }
