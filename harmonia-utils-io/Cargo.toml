@@ -13,10 +13,11 @@ repository.workspace = true
 description          = "Async I/O utilities for Harmonia"
 
 [dependencies]
-bytes            = { workspace = true }
-futures-util     = { workspace = true }
-pin-project-lite = { workspace = true }
-tokio            = { workspace = true, features = [ "io-util", "net", "sync" ] }
+bytes               = { workspace = true }
+futures-util        = { workspace = true }
+harmonia-utils-hash = { workspace = true }
+pin-project-lite    = { workspace = true }
+tokio               = { workspace = true, features = [ "io-util", "net", "sync" ] }
 
 # Linux opens the dir with O_PATH
 [target.'cfg(target_os = "linux")'.dependencies]
