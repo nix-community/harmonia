@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Jörg Thalheim
+# SPDX-License-Identifier: MIT
+
+[package]
+name                 = "harmonia-store-gc"
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
+repository.workspace = true
+description          = "Garbage collection for the Nix store"
+
+[dependencies]
+foldhash            = { workspace = true }
+harmonia-store-db   = { workspace = true }
+harmonia-store-fs   = { workspace = true }
+harmonia-store-path = { workspace = true }
+nix                 = { workspace = true }
+thiserror           = { workspace = true }
+tracing             = { workspace = true }
+tracing-subscriber  = { workspace = true }
+
+[dev-dependencies]
+rusqlite = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

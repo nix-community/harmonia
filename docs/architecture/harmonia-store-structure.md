@@ -130,6 +130,8 @@ graph BT
     protocol --> store-aterm
     protocol --> store-build-result
     protocol --> store-path-info
+    store-gc --> store-db
+    store-gc --> store-fs
     daemon --> protocol
     daemon --> store-db
     store-remote --> protocol
