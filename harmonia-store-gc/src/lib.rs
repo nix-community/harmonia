@@ -18,7 +18,7 @@
 
 mod error;
 pub mod gc;
-pub mod gc_socket;
+pub(crate) mod gc_socket;
 pub mod profiles;
 pub(crate) mod roots;
 pub mod store;

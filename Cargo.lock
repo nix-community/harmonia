@@ -1207,6 +1207,7 @@ dependencies = [
  "harmonia-store-path",
  "memchr",
  "nix",
+ "rand",
  "rayon",
  "rusqlite",
  "tempfile",
