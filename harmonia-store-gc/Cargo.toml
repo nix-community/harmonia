@@ -16,9 +16,11 @@ foldhash            = { workspace = true }
 harmonia-store-db   = { workspace = true }
 harmonia-store-path = { workspace = true }
 nix                 = { workspace = true }
+rayon               = { workspace = true }
 thiserror           = { workspace = true }
 tracing             = { workspace = true }
 tracing-subscriber  = { workspace = true }
+walkdir             = { workspace = true }
 
 [dev-dependencies]
 rusqlite = { workspace = true }

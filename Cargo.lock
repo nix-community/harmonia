@@ -1180,11 +1180,13 @@ dependencies = [
  "harmonia-store-db",
  "harmonia-store-path",
  "nix",
+ "rayon",
  "rusqlite",
  "tempfile",
  "thiserror",
  "tracing",
  "tracing-subscriber",
+ "walkdir",
 ]
 
 [[package]]
