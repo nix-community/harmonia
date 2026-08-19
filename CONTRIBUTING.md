@@ -134,7 +134,7 @@ nix build .#checks.$(nix config show system).clippy -L
    cargo nextest run --workspace
    ```
 4. Write meaningful commit messages explaining *why*, not just *what*
-5. Open a PR against `master`
+5. Open a PR against `main`
 
 ## CI
 
