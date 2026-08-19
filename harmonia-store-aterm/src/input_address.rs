@@ -211,6 +211,12 @@ mod tests {
             ).unwrap();
             prop_assert_eq!(UnfilledOutput, roundtripped);
         }
+    }
+
+    proptest! {
+        // Generating and hashing full derivations is expensive. A few dozen
+        // cases give plenty of coverage without slowing down the test suite.
+        #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
 
         /// `hash_derivation` should be deterministic — same derivation
         /// always produces the same hash.
