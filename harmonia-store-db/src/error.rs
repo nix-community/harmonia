@@ -48,4 +48,8 @@ pub enum Error {
     /// Parse error for content address
     #[error("Invalid content address: {0}")]
     InvalidContentAddress(String),
+
+    /// Reference graph has too many edges to load into a [`crate::StoreGraph`]
+    #[error("store has more than 2^32 reference edges")]
+    TooManyEdges,
 }

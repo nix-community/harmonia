@@ -31,6 +31,7 @@
 
 mod connection;
 mod error;
+mod graph;
 mod query;
 mod schema;
 mod types;
@@ -38,5 +39,6 @@ mod write;
 
 pub use connection::{OpenMode, StoreDb};
 pub use error::{Error, Result};
+pub use graph::{BasenameIndex, Closure, GraphOptions, NodeIdx, StoreGraph};
 pub use schema::SCHEMA_VERSION;
 pub use types::*;
