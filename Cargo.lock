@@ -1195,6 +1195,7 @@ dependencies = [
  "harmonia-store-db",
  "harmonia-store-path",
  "nix",
+ "rand",
  "rayon",
  "rusqlite",
  "tempfile",
