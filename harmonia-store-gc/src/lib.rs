@@ -17,7 +17,9 @@
 //! Entry point: [`gc::collect_garbage`] with a [`store::GcStore`].
 
 mod error;
+pub mod roots;
 pub mod store;
+pub mod temp_roots;
 
 pub use error::{Error, Result};
 
@@ -27,4 +29,4 @@ pub use error::{Error, Result};
 /// store paths, so foldhash is used instead.
 pub type HashMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
 /// Hash set counterpart of [`HashMap`].
-pub type HashSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
+pub(crate) type HashSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
