@@ -20,6 +20,7 @@ pub mod config;
 mod error;
 pub mod gc;
 pub mod gc_socket;
+pub mod profiles;
 pub mod roots;
 pub mod store;
 pub mod temp_roots;
