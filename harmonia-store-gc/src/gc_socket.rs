@@ -615,3 +615,6 @@ mod tests {
         live.end_delete_unknown("other");
     }
 }
+
+#[cfg(test)]
+mod stress_tests;
