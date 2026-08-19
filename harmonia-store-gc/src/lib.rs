@@ -18,7 +18,9 @@
 
 pub mod config;
 mod error;
+pub mod roots;
 pub mod store;
+pub mod temp_roots;
 
 pub use error::{Error, Result};
 
