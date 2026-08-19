@@ -12,6 +12,7 @@ repository.workspace = true
 description          = "SQLite database interface for Nix store metadata"
 
 [dependencies]
+foldhash                       = { workspace = true }
 harmonia-store-content-address = { workspace = true }
 harmonia-store-derivation      = { workspace = true }
 harmonia-store-path            = { workspace = true }
