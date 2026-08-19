@@ -11,7 +11,12 @@ homepage.workspace   = true
 repository.workspace = true
 description          = "Garbage collection for the Nix store"
 
+[[bin]]
+name = "harmonia-gc"
+path = "src/bin/harmonia-gc.rs"
+
 [dependencies]
+clap                = { workspace = true }
 foldhash            = { workspace = true }
 harmonia-store-db   = { workspace = true }
 harmonia-store-fs   = { workspace = true }
