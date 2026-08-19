@@ -10,6 +10,7 @@ members = [
     "harmonia-store-derivation",
     "harmonia-store-ref-scan",
     "harmonia-store-db",
+    "harmonia-store-gc",
     "harmonia-store-path",
     "harmonia-utils-signature",
     "harmonia-store-nar-info",
@@ -45,6 +46,14 @@ async-stream = "0.3"
 blake3 = "1.8"
 bstr = "1.11"
 bytes = "1.11"
+clap = { version = "4", default-features = false, features = [
+    "std",
+    "help",
+    "usage",
+    "error-context",
+    "suggestions",
+    "derive",
+] }
 data-encoding = "2.11"
 derive_more = { version = "2.1", features = [ "display" ] }
 ed25519-dalek = "3.0.0-rc.0"
@@ -56,10 +65,22 @@ getrandom = "0.4"
 libc = "0.2"
 md5 = "0.8"
 memchr = "2"
-nix = { version = "0.31", features = [ "signal", "mman" ] }
+nix = { version = "0.31", features = [
+    "signal",
+    "mman",
+    "fs",
+    "user",
+    "dir",
+    "mount",
+    "sched",
+    "socket",
+    "poll",
+] }
 num_enum = "0.7"
+pico-args = "0.5"
 pin-project-lite = "0.2"
 prometheus = { version = "0.14", default-features = false }
+rayon = "1"
 rusqlite = { version = "0.40", features = [ "bundled" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
@@ -83,6 +104,7 @@ tokio-util = "0.7"
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
+walkdir = "2"
 
 # Proc-macro toolkit (harmonia-protocol-derive)
 proc-macro2 = "1.0"
@@ -107,6 +129,7 @@ harmonia-store-build-result    = { path = "harmonia-store-build-result" }
 harmonia-store-content-address = { path = "harmonia-store-content-address" }
 harmonia-store-db              = { path = "harmonia-store-db" }
 harmonia-store-derivation      = { path = "harmonia-store-derivation" }
+harmonia-store-gc              = { path = "harmonia-store-gc" }
 harmonia-store-nar-info        = { path = "harmonia-store-nar-info" }
 harmonia-store-path            = { path = "harmonia-store-path" }
 harmonia-store-path-info       = { path = "harmonia-store-path-info" }

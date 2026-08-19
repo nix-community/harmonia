@@ -1173,6 +1173,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "harmonia-store-gc"
+version = "3.2.0"
+dependencies = [
+ "foldhash",
+ "harmonia-store-db",
+ "harmonia-store-path",
+ "nix",
+ "rusqlite",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "harmonia-store-nar-info"
 version = "3.2.0"
 dependencies = [
