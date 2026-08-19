@@ -111,6 +111,7 @@ graph BT
     utils-signature --> utils-base-encoding
     store-path --> utils-hash
     store-content-address --> store-path
+    store-fs --> store-path
     store-ref-scan --> store-path
     store-derivation --> store-content-address
     store-derivation --> utils-signature

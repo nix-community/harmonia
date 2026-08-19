@@ -140,6 +140,7 @@ def generate_mermaid(
     # Store crates that perform I/O (blacklist — excluded from the pure group).
     STORE_IMPURE = {
         "store-db",
+        "store-fs",
         "store-remote",
     }
     # Store crates that are I/O-free (whitelist — included in the pure group).

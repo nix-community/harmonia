@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Jörg Thalheim
+# SPDX-License-Identifier: MIT
+
+[package]
+name        = "harmonia-store-fs"
+description = "Filesystem layout of a local Nix store"
+version     = { workspace = true }
+edition     = { workspace = true }
+license     = { workspace = true }
+
+[dependencies]
+harmonia-store-path = { workspace = true }
+thiserror           = { workspace = true }
+tracing             = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true }
+
+[lints]
+workspace = true
