@@ -19,7 +19,7 @@ use std::task::{Context as TaskContext, Poll};
 use pin_project_lite::pin_project;
 use tokio::io::AsyncRead;
 
-use crate::{Algorithm, Context, Hash};
+use harmonia_utils_hash::{Algorithm, Context, Hash};
 
 /// Shared accumulator for the incremental hash and byte count.
 ///
