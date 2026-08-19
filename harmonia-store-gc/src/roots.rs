@@ -24,7 +24,7 @@ use crate::error::{Error, Result};
 /// Returned nodes belong to the graph behind `idx`. Runtime-scan
 /// candidates that are not in the database are dropped, mirroring Nix's
 /// `findRuntimeRoots`.
-pub fn find_roots(
+pub(crate) fn find_roots(
     layout: &StoreLayout,
     extra_dirs: &[PathBuf],
     idx: &BasenameIndex,

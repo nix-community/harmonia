@@ -14,19 +14,46 @@
 //! paths while a collection is in progress. Running it next to a busy
 //! nix-daemon is safe.
 //!
-//! Entry point: [`gc::collect_garbage`] with a [`store::GcStore`].
+//! ```no_run
+//! # fn main() -> harmonia_store_gc::Result<()> {
+//! use std::path::Path;
+//! use harmonia_store_gc::{GcOptions, GcStore, collect_garbage};
+//!
+//! let store = GcStore::open(Path::new("/nix/store"), Path::new("/nix/var/nix"))?;
+//! let report = collect_garbage(
+//!     &store,
+//!     &GcOptions {
+//!         dry_run: true,
+//!         ..Default::default()
+//!     },
+//! )?;
+//! for path in &report.would_delete {
+//!     println!("{path}");
+//! }
+//! println!("~{} bytes in {} paths", report.bytes_freed, report.paths_deleted);
+//! # Ok(())
+//! # }
+//! ```
 
 mod error;
-pub mod roots;
-pub mod store;
-pub mod temp_roots;
+mod gc;
+mod gc_socket;
+mod roots;
+mod store;
+mod temp_roots;
+#[cfg(test)]
+mod testutil;
 
 pub use error::{Error, Result};
+pub use gc::{GcOptions, GcReport, collect_garbage};
+pub use harmonia_store_db::GraphOptions;
+pub use store::GcStore;
+pub use temp_roots::TempRoots;
 
 /// Hash map keyed by store path strings.
 ///
 /// SipHash showed up in GC profiles when hashing millions of ~50-char
 /// store paths, so foldhash is used instead.
-pub type HashMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
+pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
 /// Hash set counterpart of [`HashMap`].
 pub(crate) type HashSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
