@@ -12,7 +12,7 @@ use harmonia_store_content_address::ContentAddress;
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 
 use crate::connection::StoreDb;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::types::{DerivationOutput, Realisation, ValidPathInfo};
 
 fn parse_from_sql<T: std::str::FromStr>(
@@ -153,29 +153,23 @@ impl StoreDb {
         store_dir: &StoreDir,
         hash_part: &StorePathHash,
     ) -> Result<Option<ValidPathInfo>> {
-        let prefix = format!("{store_dir}/{hash_part}");
-
+        let (lo, hi) = hash_part_range(store_dir, hash_part);
         let mut stmt = self.conn.prepare_cached(
             r#"
             SELECT id, path, hash, registrationTime, deriver, narSize, ultimate, sigs, ca
             FROM ValidPaths
-            WHERE path >= ?1 LIMIT 1
+            WHERE path >= ?1 AND path < ?2 LIMIT 1
             "#,
         )?;
 
-        let info = stmt.query_row(params![&prefix], |row| {
+        let info = stmt.query_row(params![lo, hi], |row| {
             valid_path_info_from_row(store_dir, row)
         });
 
         match info {
             Ok(mut info) => {
-                let full_path = store_dir.display(&info.path).to_string();
-                if full_path.starts_with(&prefix) {
-                    info.info.references = self.query_reference_paths_by_id(store_dir, info.id)?;
-                    Ok(Some(info))
-                } else {
-                    Ok(None)
-                }
+                info.info.references = self.query_reference_paths_by_id(store_dir, info.id)?;
+                Ok(Some(info))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -188,19 +182,20 @@ impl StoreDb {
         store_dir: &StoreDir,
         hash_part: &StorePathHash,
     ) -> Result<Option<StorePath>> {
-        let prefix = format!("{store_dir}/{hash_part}");
-
+        let (lo, hi) = hash_part_range(store_dir, hash_part);
         let mut stmt = self.conn.prepare_cached(
             r#"
-            SELECT path FROM ValidPaths WHERE path >= ?1 LIMIT 1
+            SELECT path FROM ValidPaths WHERE path >= ?1 AND path < ?2 LIMIT 1
             "#,
         )?;
 
-        let result: Option<String> = stmt.query_row(params![&prefix], |row| row.get(0)).ok();
-
-        match result {
-            Some(path) if path.starts_with(&prefix) => Ok(store_dir.parse(&path).ok()),
-            _ => Ok(None),
+        match stmt.query_row(params![lo, hi], |row| row.get::<_, String>(0)) {
+            Ok(path) => store_dir
+                .parse::<StorePath>(&path)
+                .map(Some)
+                .map_err(|e| Error::InvalidStorePath(e.to_string())),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -465,4 +460,13 @@ impl StoreDb {
             Err(e) => Err(e.into()),
         }
     }
+}
+
+/// `[lo, hi)` range on `ValidPaths.path` covering exactly `<store>/<hash>-*`
+/// ('.' is the byte after '-').
+fn hash_part_range(store_dir: &StoreDir, hash_part: &StorePathHash) -> (String, String) {
+    (
+        format!("{store_dir}/{hash_part}-"),
+        format!("{store_dir}/{hash_part}."),
+    )
 }
