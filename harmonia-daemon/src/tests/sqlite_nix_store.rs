@@ -237,3 +237,60 @@ async fn test_handler_query_realisation() {
     };
     assert!(store.query_realisation(&miss).await.unwrap().is_none());
 }
+
+/// Stock Nix sends SetOptions right after the handshake; the daemon must
+/// accept it or every upstream client fails before its first query.
+#[tokio::test]
+async fn test_stock_nix_client_can_talk_to_daemon() {
+    let temp_dir = CanonicalTempDir::new().unwrap();
+    let store_dir = temp_dir.path().join("store");
+    let state_dir = temp_dir.path().join("var/nix");
+    std::fs::create_dir_all(&store_dir).unwrap();
+    std::fs::create_dir_all(&state_dir).unwrap();
+
+    let store_url = format!(
+        "local?store={}&state={}",
+        store_dir.display(),
+        state_dir.display()
+    );
+    let output = Command::new("nix-store")
+        .args(["--init", "--store", &store_url])
+        .output()
+        .expect("Failed to run nix-store --init");
+    assert!(output.status.success(), "nix-store --init failed");
+
+    let sd = StoreDir::new(&store_dir).unwrap();
+    let handler = LocalStoreHandler::new(sd.clone(), state_dir.join("db/db.sqlite"))
+        .await
+        .unwrap();
+    let socket = temp_dir.path().join("d.sock");
+    let server = crate::server::DaemonServer::new(handler, socket.clone(), sd);
+    let server_task = tokio::spawn(async move { server.serve().await });
+    while !socket.exists() {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    let output = tokio::process::Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command",
+            "store",
+            "info",
+        ])
+        .arg("--store")
+        .arg(format!(
+            "unix://{}?store={}",
+            socket.display(),
+            store_dir.display()
+        ))
+        .env("NIX_CONFIG", "")
+        .output()
+        .await
+        .unwrap();
+    server_task.abort();
+    assert!(
+        output.status.success(),
+        "nix store info failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
