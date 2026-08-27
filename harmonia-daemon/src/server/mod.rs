@@ -829,13 +829,7 @@ where
         S: DaemonStore + 't,
     {
         let logs = Self::store_nar_from_path(store, &path);
-
-        let mut logs = pin!(logs);
-        while let Some(msg) = logs.next().await {
-            write_log(&mut self.writer, msg).await?;
-        }
-
-        let mut reader = pin!(logs.await?);
+        let mut reader = pin!(process_logs(&mut self.writer, logs).await?);
         self.writer.write_value(&RawLogMessage::Last).await?;
         let ret = copy_buf(&mut reader, &mut self.writer)
             .map_err(DaemonError::from)

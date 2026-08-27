@@ -511,9 +511,10 @@ where
             let (reader, result) = receiver
                 .await
                 .expect("stderr processing stream dropped before sending result");
-            let reader = reader.get_mut().lend(NarBytesReader::new);
             match result {
-                Ok(_) => Ok(AsyncBufReadCompat::new(reader)),
+                Ok(_) => Ok(AsyncBufReadCompat::new(
+                    reader.get_mut().lend(NarBytesReader::new),
+                )),
                 Err(err) => Err(err.fill_operation(Operation::NarFromPath)),
             }
         }
