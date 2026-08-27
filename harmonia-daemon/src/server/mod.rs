@@ -1185,7 +1185,15 @@ where
         info!("Listening on {:?}", self.socket_path);
 
         loop {
-            let (stream, _addr) = listener.accept().await?;
+            let stream = match listener.accept().await {
+                Ok((stream, _addr)) => stream,
+                // EMFILE/ECONNABORTED etc. must not take the daemon down.
+                Err(e) => {
+                    error!("accept failed: {e}");
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
             let handler = self.handler.clone();
             let store_dir = self.store_dir.clone();
 
