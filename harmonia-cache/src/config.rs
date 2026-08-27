@@ -41,7 +41,8 @@ pub(crate) struct ZstdConfig {
     pub(crate) level: i32,
     #[serde(default = "ZstdConfig::default_long_distance")]
     pub(crate) long_distance_matching: bool,
-    /// log2 of the match window. 0 = auto: with LDM, cap at 25 (32 MiB) so
+    /// log2 of the match window (non-NAR responses are clamped to 23 per
+    /// RFC 9659). 0 = auto: with LDM, cap at 25 (32 MiB) so
     /// decoder memory stays bounded; without LDM, use the level default so
     /// the encoder doesn't allocate a large window it can't fill.
     #[serde(default)]

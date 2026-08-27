@@ -140,7 +140,10 @@ pub(crate) async fn get(
 
                 return Ok(res
                     .status(http::StatusCode::PARTIAL_CONTENT)
-                    .insert_header((http::header::CONTENT_TYPE, "application/x-nix-archive"))
+                    .insert_header((
+                        http::header::CONTENT_TYPE,
+                        crate::zstd_body::NAR_CONTENT_TYPE,
+                    ))
                     .insert_header((http::header::ACCEPT_RANGES, "bytes"))
                     .insert_header(cache_control_max_age_1y())
                     .body(actix_web::body::SizedStream::new(
@@ -160,7 +163,10 @@ pub(crate) async fn get(
     let stream = NarByteStream::new(real_path);
 
     Ok(res
-        .insert_header((http::header::CONTENT_TYPE, "application/x-nix-archive"))
+        .insert_header((
+            http::header::CONTENT_TYPE,
+            crate::zstd_body::NAR_CONTENT_TYPE,
+        ))
         .insert_header((http::header::ACCEPT_RANGES, "bytes"))
         .insert_header(cache_control_max_age_1y())
         // Sized so the zstd middleware can pledge the exact length.

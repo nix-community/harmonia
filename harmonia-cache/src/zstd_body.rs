@@ -21,7 +21,9 @@ use std::task::{Context, Poll, ready};
 use actix_web::Error;
 use actix_web::body::{BodySize, MessageBody};
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready};
-use actix_web::http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, HeaderMap, HeaderValue, VARY};
+use actix_web::http::header::{
+    ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderValue, VARY,
+};
 use actix_web::rt::task::{JoinHandle, spawn_blocking};
 use actix_web::web::Bytes;
 use bytes::BytesMut;
@@ -31,8 +33,15 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::config::ZstdConfig;
 
 /// LDM would otherwise raise windowLog to 27 (128 MiB decoder buffer); 25
-/// keeps almost all of the ratio at 32 MiB.
+/// keeps almost all of the ratio at 32 MiB. Only used for NARs, which are
+/// consumed by Nix (windowLogMax 27).
 const LDM_WINDOW_LOG_CAP: u32 = 25;
+
+/// RFC 9659 caps the `zstd` content-coding window at 8 MiB and browsers
+/// enforce it, so anything a browser might fetch must stay within this.
+const HTTP_WINDOW_LOG_MAX: u32 = 23;
+
+pub(crate) const NAR_CONTENT_TYPE: &str = "application/x-nix-archive";
 
 /// Responses smaller than this stay uncompressed; the zstd frame header and
 /// chunked-encoding overhead would erase any win.
@@ -111,7 +120,11 @@ enum LdmSlot {
     Fallback,
 }
 
-fn build_encoder(cfg: &ZstdConfig, pledged_size: Option<u64>) -> io::Result<ZstdEncoder> {
+fn build_encoder(
+    cfg: &ZstdConfig,
+    pledged_size: Option<u64>,
+    is_nar: bool,
+) -> io::Result<ZstdEncoder> {
     use zstd_safe::CParameter;
 
     let mut enc = ZstdEncoder::new(Writer::new(), cfg.level)?;
@@ -124,6 +137,11 @@ fn build_encoder(cfg: &ZstdConfig, pledged_size: Option<u64>) -> io::Result<Zstd
     let window_log = match cfg.window_log {
         0 if cfg.long_distance_matching => LDM_WINDOW_LOG_CAP,
         n => n,
+    };
+    let window_log = if is_nar {
+        window_log
+    } else {
+        window_log.min(HTTP_WINDOW_LOG_MAX)
     };
     if window_log != 0 {
         enc.set_parameter(CParameter::WindowLog(window_log))?;
@@ -411,7 +429,11 @@ where
                         None,
                     ),
                 };
-                match build_encoder(&cfg, pledge) {
+                let is_nar = head
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .is_some_and(|v| v == NAR_CONTENT_TYPE);
+                match build_encoder(&cfg, pledge, is_nar) {
                     Ok(enc) => {
                         head.headers_mut()
                             .insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
@@ -469,6 +491,34 @@ mod tests {
         assert!(accepts_zstd(&h));
     }
 
+    /// Non-NAR streams must decode with the RFC 9659 8 MiB window browsers use.
+    #[actix_web::test]
+    async fn non_nar_stream_fits_browser_window() {
+        let original = Bytes::from(
+            (0..3_000_000u32)
+                .flat_map(|i| i.to_le_bytes())
+                .collect::<Vec<u8>>(),
+        );
+        {
+            let inner = stream::iter([Ok::<_, io::Error>(original.clone())]);
+            let enc = build_encoder(&ZstdConfig::default(), None, false).unwrap();
+            let body = ZstdBody::new(inner, Box::new(enc), None);
+            futures_util::pin_mut!(body);
+            let mut compressed = Vec::new();
+            while let Some(chunk) = body.next().await {
+                compressed.extend_from_slice(&chunk.unwrap());
+            }
+            let mut dctx = zstd_safe::DCtx::create();
+            dctx.set_parameter(zstd_safe::DParameter::WindowLogMax(HTTP_WINDOW_LOG_MAX))
+                .unwrap();
+            let mut out = vec![0u8; original.len() + 1];
+            let mut inb = zstd_safe::InBuffer::around(&compressed);
+            let mut outb = zstd_safe::OutBuffer::around(&mut out[..]);
+            dctx.decompress_stream(&mut outb, &mut inb)
+                .expect("frame window exceeds 8 MiB");
+        }
+    }
+
     #[actix_web::test]
     async fn round_trip() {
         // Mix of tiny and large chunks to cover both inline and blocking paths.
@@ -485,7 +535,7 @@ mod tests {
         let original: Vec<u8> = chunks.iter().flat_map(|b| b.iter().copied()).collect();
 
         let inner = stream::iter(chunks.into_iter().map(Ok::<_, io::Error>));
-        let enc = build_encoder(&ZstdConfig::default(), Some(original.len() as u64)).unwrap();
+        let enc = build_encoder(&ZstdConfig::default(), Some(original.len() as u64), true).unwrap();
         let body = ZstdBody::new(inner, Box::new(enc), None);
         futures_util::pin_mut!(body);
 
