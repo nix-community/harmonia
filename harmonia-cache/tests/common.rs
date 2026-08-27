@@ -495,7 +495,7 @@ pub fn build_hello_derivation(env_vars: &[(String, String)]) -> Result<String> {
     "#;
 
     let mut cmd = Command::new("nix-build");
-    cmd.args(["--expr", expr, "--no-out-link"]);
+    cmd.args(["--expr", expr, "--no-out-link", "--builders", ""]);
 
     // Clear NIX_REMOTE and set our custom env
     cmd.env_remove("NIX_REMOTE");
