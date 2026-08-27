@@ -3,19 +3,28 @@ on:
   status:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    # Only run on successful buildbot builds
+    # Only run on successful buildbot builds of commits that live on a branch
+    # in this repository (status events also fire for fork-PR head commits,
+    # which must not run with our secrets).
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event.state == 'success' &&
-       github.event.context == 'buildbot/nix-build')
+       github.event.context == 'buildbot/nix-build' &&
+       github.event.branches[0] != null)
+    env:
+      SHA: ${{ github.event.sha || github.sha }}
+      BRANCH: ${{ github.event.branches[0].name || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
         with:
-          # For status events, checkout the commit the status was reported on
-          ref: ${{ github.event.sha || github.sha }}
+          ref: ${{ env.SHA }}
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -29,7 +38,6 @@ jobs:
       - name: Find PR number
         id: find-pr
         run: |
-          SHA="${{ github.event.sha || github.sha }}"
           PR_NUMBER=$(gh pr list --search "$SHA" --state all --json number --jq '.[0].number // empty')
           echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
         env:
@@ -40,20 +48,23 @@ jobs:
 
       - name: Run benchmark
         run: |
-          CI_NUMBER_ARG=""
-          if [ -n "${{ steps.find-pr.outputs.number }}" ]; then
-            CI_NUMBER_ARG="--ci-number ${{ steps.find-pr.outputs.number }}"
+          CI_NUMBER_ARG=()
+          if [ -n "$PR_NUMBER" ]; then
+            CI_NUMBER_ARG=(--ci-number "$PR_NUMBER")
           fi
           bencher run \
             --project harmonia \
-            --token '${{ secrets.BENCHER_API_TOKEN }}' \
-            --branch '${{ github.event.branches[0].name || github.ref_name }}' \
-            --hash '${{ github.event.sha || github.sha }}' \
+            --token "$BENCHER_API_TOKEN" \
+            --branch "$BRANCH" \
+            --hash "$SHA" \
             --testbed github-actions \
             --adapter rust_criterion \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            $CI_NUMBER_ARG \
+            --github-actions "$GH_TOKEN" \
+            "${CI_NUMBER_ARG[@]}" \
             --err \
             'cargo bench --package harmonia-bench'
         env:
           HARMONIA_FLAKE: .#harmonia
+          PR_NUMBER: ${{ steps.find-pr.outputs.number }}
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
