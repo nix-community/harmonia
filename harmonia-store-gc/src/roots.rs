@@ -130,6 +130,13 @@ fn find_roots_in_dir(
     Ok(())
 }
 
+/// Errors that prove a path does not exist (vs. EACCES/EIO which don't).
+fn is_missing(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(e.kind(), NotFound | NotADirectory | InvalidFilename)
+        || e.raw_os_error() == Some(nix::libc::ELOOP)
+}
+
 /// Indirect root: symlink -> symlink -> store. Nix's findRoots resolves
 /// at most one extra hop. Resolve it with lstat + readlink, never a
 /// following stat(): under fs.protected_symlinks, following a user-owned
@@ -150,7 +157,7 @@ fn resolve_indirect_root(
     let target_meta = match fs::symlink_metadata(&abs_target) {
         Ok(m) => m,
         // First hop gone: the indirect root was removed.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        Err(e) if is_missing(&e) => {
             remove_stale_auto_link(dir, link);
             return Ok(());
         }
@@ -169,7 +176,7 @@ fn resolve_indirect_root(
     }
     let target2 = match fs::read_link(&abs_target) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if is_missing(&e) => return Ok(()),
         Err(source) => {
             return Err(Error::ReadLink {
                 path: abs_target,
@@ -191,7 +198,7 @@ fn resolve_indirect_root(
     } else {
         abs_target.parent().unwrap_or(Path::new("/")).join(target2)
     };
-    if fs::symlink_metadata(&abs_target2).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+    if fs::symlink_metadata(&abs_target2).is_err_and(|e| is_missing(&e)) {
         remove_stale_auto_link(dir, link);
     }
     Ok(())
@@ -520,6 +527,30 @@ mod tests {
         let roots = find_roots(&layout, &[extra], &idx).unwrap();
         let expected = idx.get(&target).unwrap();
         assert_eq!(roots, vec![expected], "{roots:?}");
+    }
+
+    /// An auto root whose target's parent became a regular file (ENOTDIR)
+    /// is just as gone as ENOENT and must not abort the whole scan.
+    #[test]
+    fn indirect_root_through_non_directory_is_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = tmp.path().join("state");
+        let auto = state.join("gcroots/auto");
+        fs::create_dir_all(&auto).unwrap();
+        fs::create_dir_all(state.join("profiles")).unwrap();
+        let not_a_dir = tmp.path().join("x");
+        fs::write(&not_a_dir, b"").unwrap();
+        std::os::unix::fs::symlink(not_a_dir.join("result"), auto.join("r1")).unwrap();
+
+        let g = graph(&[&format!("{HASH}-foo")]);
+        let idx = BasenameIndex::new(&g);
+        let layout = StoreLayout::new(Path::new("/nix/store"), &state).unwrap();
+        let roots = find_roots(&layout, &[], &idx).unwrap();
+        assert!(roots.is_empty());
+        assert!(
+            fs::symlink_metadata(auto.join("r1")).is_err(),
+            "stale link removed"
+        );
     }
 
     #[test]
