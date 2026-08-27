@@ -1049,9 +1049,7 @@ where
                 self.writer.write_value(&value).await?;
             }
             AddMultipleToStore(req) => {
-                let builder = NixReader::builder()
-                    .set_version(self.reader.version())
-                    .set_features(self.reader.features().clone());
+                let builder = self.reader.nested_builder();
                 let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
                 let mut framed = FramedReader::new(buf_reader);
                 let source = builder.build_buffered(&mut framed);

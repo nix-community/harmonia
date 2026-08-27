@@ -138,6 +138,15 @@ where
         &self.buf[..]
     }
 
+    /// Builder for a nested writer (e.g. over a `FramedWriter`) that
+    /// inherits this connection's negotiated protocol state.
+    pub fn nested_builder(&self) -> NixWriterBuilder {
+        NixWriter::builder()
+            .set_version(self.version)
+            .set_features(self.features.clone())
+            .set_store_dir(&self.store_dir)
+    }
+
     pub fn set_version(&mut self, version: ProtocolVersion) {
         self.version = version;
     }
