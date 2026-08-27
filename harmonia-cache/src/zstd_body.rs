@@ -370,10 +370,10 @@ where
         Box::pin(async move {
             let res = fut.await?;
             Ok(res.map_body(|head, body| {
-                // A handler-set Content-Encoding also covers range responses,
-                // which set `identity` to keep partial content byte-exact.
+                // Partial content must stay byte-exact.
                 if !wants_zstd
                     || head.headers().contains_key(CONTENT_ENCODING)
+                    || head.status == actix_web::http::StatusCode::PARTIAL_CONTENT
                     || head.status.is_redirection()
                     || head.status == actix_web::http::StatusCode::NO_CONTENT
                 {
@@ -505,6 +505,7 @@ mod tests {
 
         let big = Bytes::from(vec![b'x'; 64 * 1024]);
         let big_for_handler = big.clone();
+        let big_for_partial = big.clone();
         let app = test::init_service(
             App::new()
                 .wrap(ZstdMiddleware::new(ZstdConfig::default()))
@@ -518,9 +519,32 @@ mod tests {
                 .route(
                     "/tiny",
                     web::get().to(|| async { HttpResponse::Ok().body("ok") }),
+                )
+                .route(
+                    "/partial",
+                    web::get().to(move || {
+                        let b = big_for_partial.clone();
+                        async move {
+                            HttpResponse::PartialContent()
+                                .insert_header(("Content-Range", "bytes 0-65535/100000"))
+                                .body(b)
+                        }
+                    }),
                 ),
         )
         .await;
+
+        // Partial content must stay byte-exact and carry no Content-Encoding.
+        let res = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/partial")
+                .insert_header((ACCEPT_ENCODING, "zstd"))
+                .to_request(),
+        )
+        .await;
+        assert!(res.headers().get(CONTENT_ENCODING).is_none());
+        assert_eq!(test::read_body(res).await, big);
 
         let res = test::call_service(&app, test::TestRequest::get().uri("/big").to_request()).await;
         assert!(res.headers().get(CONTENT_ENCODING).is_none());
