@@ -43,7 +43,7 @@ fn flock_retry(mut f: fs::File, arg: FlockArg) -> std::io::Result<Flock<fs::File
 /// ```no_run
 /// # fn main() -> harmonia_store_gc::Result<()> {
 /// use std::path::Path;
-/// use harmonia_store_gc::temp_roots::TempRoots;
+/// use harmonia_store_gc::TempRoots;
 ///
 /// let mut roots = TempRoots::create(Path::new("/nix/var/nix"))?;
 /// roots.add("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-example")?;
@@ -240,7 +240,7 @@ impl TempRoots {
 /// stale: we can acquire a write lock on it because the owner held one.
 /// Stale files are removed and their roots ignored, mirroring Nix's
 /// `findTempRoots`.
-pub fn find_temp_roots(state_dir: &Path) -> Result<std::collections::HashSet<String>> {
+pub(crate) fn find_temp_roots(state_dir: &Path) -> Result<std::collections::HashSet<String>> {
     let mut roots = std::collections::HashSet::new();
     let temp_dir = state_dir.join("temproots");
 

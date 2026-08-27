@@ -121,10 +121,6 @@ pub enum Error {
     #[error("invalid time spec '{spec}': {reason}")]
     TimeSpec { spec: String, reason: String },
 
-    /// Writing the dry-run report to stdout failed
-    #[error("writing report: {source}")]
-    Report { source: std::io::Error },
-
     /// Deleting a store path failed
     #[error("removing {path}: {source}")]
     Remove {

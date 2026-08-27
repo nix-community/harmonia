@@ -20,20 +20,23 @@ use crate::error::Result;
 /// ```no_run
 /// # fn main() -> harmonia_store_gc::Result<()> {
 /// use std::path::Path;
-/// use harmonia_store_gc::store::GcStore;
+/// use harmonia_store_gc::GcStore;
 ///
 /// let store = GcStore::open(Path::new("/nix/store"), Path::new("/nix/var/nix"))?;
 /// # Ok(())
 /// # }
 /// ```
 pub struct GcStore {
-    /// The store database at `state_dir/db/db.sqlite`.
-    pub db: StoreDb,
-    /// Where the store lives on disk.
-    pub layout: StoreLayout,
+    pub(crate) db: StoreDb,
+    pub(crate) layout: StoreLayout,
 }
 
 impl GcStore {
+    /// Where the store lives on disk.
+    pub fn layout(&self) -> &StoreLayout {
+        &self.layout
+    }
+
     /// Open the store database read-write, as needed for an actual
     /// collection.
     pub fn open(store_dir: &Path, state_dir: &Path) -> Result<Self> {
