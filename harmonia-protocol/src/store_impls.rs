@@ -72,11 +72,16 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
     where
         R: ?Sized + NixRead + Send,
     {
+        use crate::de::Error as _;
         use harmonia_store_derivation::derivation::DerivationOutputs;
 
         // Try to read the drv path - if not present, return None
         if let Some(drv_path) = reader.try_read_value::<StorePath>().await? {
-            let name = drv_path.name().clone();
+            // Nix's `nameFromPath`: strip the `.drv` extension.
+            let name = match drv_path.name().strip_suffix(".drv") {
+                Some(n) => n.parse().map_err(R::Error::invalid_data)?,
+                None => drv_path.name().clone(),
+            };
 
             let outputs_len = reader.read_value::<usize>().await?;
             let mut outputs = DerivationOutputs::new();
@@ -161,7 +166,7 @@ where
 
     let store_dir = writer.store_dir().clone();
     let raw = output
-        .to_raw(&store_dir, drv_name, output_name, Base::NixBase32)
+        .to_raw(&store_dir, drv_name, output_name, Base::Hex)
         .map_err(W::Error::unsupported_data)?;
     writer.write_value(&raw.path.as_slice()).await?;
     writer.write_value(&raw.hash_algo.as_slice()).await?;
@@ -783,6 +788,7 @@ impl crate::ser::NixSerialize for harmonia_store_path::StoreDir {
 #[cfg(test)]
 mod tests {
     use crate::ser::NixWrite;
+    use harmonia_store_derivation::derivation::BasicDerivation;
     use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 
     fn sample_realisation() -> Realisation {
@@ -826,5 +832,73 @@ mod tests {
             err.to_string()
                 .contains(crate::version::FEATURE_REALISATION_WITH_PATH)
         );
+    }
+
+    const FOD_HASH_HEX: &str = "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1";
+
+    fn sample_fod() -> (harmonia_store_path::StorePath, BasicDerivation) {
+        use harmonia_store_derivation::derivation::DerivationOutput;
+        let ca = format!("fixed:sha256:{FOD_HASH_HEX}").parse().unwrap();
+        let drv = BasicDerivation {
+            name: "foo".parse().unwrap(),
+            outputs: [("out".parse().unwrap(), DerivationOutput::CAFixed(ca))].into(),
+            inputs: Default::default(),
+            platform: bytes::Bytes::from_static(b"x86_64-linux"),
+            builder: bytes::Bytes::from_static(b"/bin/sh"),
+            args: Vec::new(),
+            env: Default::default(),
+            structured_attrs: None,
+        };
+        (
+            "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
+            drv,
+        )
+    }
+
+    /// Nix's writeDerivation sends the FOD hash as base16 and derives the
+    /// name from the path minus `.drv`.
+    #[tokio::test]
+    async fn basic_derivation_wire_matches_nix() {
+        use crate::de::NixRead;
+        use tokio::io::AsyncWriteExt as _;
+
+        let (path, drv) = sample_fod();
+        let out: harmonia_store_derivation::derived_path::OutputName = "out".parse().unwrap();
+        let out_path = drv.outputs[&out]
+            .path(&Default::default(), &drv.name, &out)
+            .unwrap()
+            .unwrap()
+            .to_absolute_path(&Default::default())
+            .display()
+            .to_string();
+        let mut mock = crate::ser::mock::Builder::new()
+            .write_display("/nix/store/g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv")
+            .write_number(1)
+            .write_display("out")
+            .write_slice(out_path.as_bytes())
+            .write_slice(b"sha256")
+            .write_slice(FOD_HASH_HEX.as_bytes())
+            .write_number(0)
+            .write_slice(b"x86_64-linux")
+            .write_slice(b"/bin/sh")
+            .write_number(0)
+            .write_number(0)
+            .build();
+        mock.write_value(&(path.clone(), drv.clone()))
+            .await
+            .unwrap();
+
+        let mut buf = Vec::new();
+        let mut writer = crate::ser::NixWriter::new(&mut buf);
+        writer
+            .write_value(&(path.clone(), drv.clone()))
+            .await
+            .unwrap();
+        writer.flush().await.unwrap();
+        drop(writer);
+        let mut reader = crate::de::NixReader::new(std::io::Cursor::new(buf));
+        let got: (harmonia_store_path::StorePath, BasicDerivation) =
+            reader.read_value().await.unwrap();
+        assert_eq!(got, (path, drv));
     }
 }
