@@ -114,7 +114,14 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let start = Instant::now();
-        let method = req.method().to_string();
+        // Fixed label set: the raw method is client-controlled (cardinality DoS).
+        let method = match *req.method() {
+            actix_web::http::Method::GET => "GET",
+            actix_web::http::Method::HEAD => "HEAD",
+            actix_web::http::Method::POST => "POST",
+            actix_web::http::Method::PUT => "PUT",
+            _ => "other",
+        };
         // Only track metrics for paths with a match pattern
         let path = req.match_pattern().map(|p| p.to_string());
         let metrics = self.metrics.clone();
@@ -131,12 +138,12 @@ where
 
                 metrics
                     .http_requests_total
-                    .with_label_values(&[&method, &path, &status])
+                    .with_label_values(&[method, &path, &status])
                     .inc();
 
                 metrics
                     .http_requests_duration
-                    .with_label_values(&[&method, &path, &status])
+                    .with_label_values(&[method, &path, &status])
                     .observe(duration);
             }
 
