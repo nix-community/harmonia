@@ -9,8 +9,7 @@ use harmonia_store_path::{
     ParseStorePathError, StoreDir, StorePath, StorePathName, StorePathNameError,
 };
 use harmonia_utils_base_encoding::Base;
-use harmonia_utils_hash::fmt::ParseHashErrorKind;
-use harmonia_utils_hash::{Hash, InvalidHashError};
+use harmonia_utils_hash::fmt::{NonSRI, ParseHashError, ParseHashErrorKind};
 
 /// Error from decoding raw output fields into a typed output.
 #[derive(Debug, thiserror::Error)]
@@ -22,12 +21,10 @@ pub enum FromRawOutputError {
     StorePath(#[from] ParseStorePathError),
     #[error("invalid content address method/algorithm: {0}")]
     ParseMethodAlgo(#[from] ParseContentAddressError),
-    #[error("invalid {base} hash at position {position}")]
-    HashDecode { base: Base, position: usize },
+    #[error("{0}")]
+    HashDecode(#[from] ParseHashError),
 
     // Variant-reconstruction errors
-    #[error("invalid hash: {0}")]
-    InvalidHash(#[from] InvalidHashError),
     #[error("invalid content address: {0}")]
     InvalidContentAddress(#[from] ParseHashErrorKind),
     #[error("failed to compute CAFixed output path: {0}")]
@@ -106,7 +103,6 @@ pub trait AtermOutput: Sized {
         store_dir: &StoreDir,
         drv_name: &StorePathName,
         output_name: &OutputName,
-        base: Base,
     ) -> Result<Self, Self::Error>;
 }
 
@@ -173,19 +169,7 @@ impl AtermOutput for DerivationOutput {
         store_dir: &StoreDir,
         drv_name: &StorePathName,
         output_name: &OutputName,
-        base: Base,
     ) -> Result<Self, FromRawOutputError> {
-        let decode_hash = |hash_bytes: &[u8]| -> Result<Vec<u8>, FromRawOutputError> {
-            let mut digest = vec![0u8; base.decode_len(hash_bytes.len())];
-            harmonia_utils_base_encoding::decode_for_base(base)(hash_bytes, &mut digest).map_err(
-                |e| FromRawOutputError::HashDecode {
-                    base,
-                    position: e.error.position,
-                },
-            )?;
-            Ok(digest)
-        };
-
         match raw {
             // hashAlgo present, hash is "impure" → Impure
             // (path is ignored — nix leaves it empty for impure outputs)
@@ -206,8 +190,8 @@ impl AtermOutput for DerivationOutput {
                 hash: hash @ [_, ..],
             } => {
                 let cama: ContentAddressMethodAlgorithm = std::str::from_utf8(algo)?.parse()?;
-                let digest = decode_hash(hash)?;
-                let hash = Hash::from_slice(cama.algorithm(), &digest)?;
+                // Like Nix, accept base16/nix32/base64 by length.
+                let hash = NonSRI::parse(cama.algorithm(), std::str::from_utf8(hash)?)?;
                 let ca = ContentAddress::from_hash(cama.method(), hash)?;
                 let output = Self::CAFixed(ca);
                 // If a path was supplied, verify it matches what the CA computes.
@@ -271,6 +255,22 @@ mod tests {
         })
     }
 
+    #[test]
+    fn odd_length_hex_hash_is_error_not_panic() {
+        let raw = BorrowedRawOutput {
+            path: b"",
+            hash_algo: b"r:sha256",
+            hash: b"abc",
+        };
+        let res = DerivationOutput::from_raw(
+            raw,
+            &StoreDir::default(),
+            &"x".parse().unwrap(),
+            &"out".parse().unwrap(),
+        );
+        assert!(matches!(res, Err(FromRawOutputError::HashDecode(_))));
+    }
+
     proptest! {
         #[test]
         fn derivation_output_roundtrips(
@@ -279,7 +279,7 @@ mod tests {
             let store_dir = StoreDir::default();
             let raw = output.to_raw(&store_dir, &drv_name, &output_name, Base::Hex).unwrap();
             let roundtripped = DerivationOutput::from_raw(
-                raw.borrow(), &store_dir, &drv_name, &output_name, Base::Hex,
+                raw.borrow(), &store_dir, &drv_name, &output_name,
             ).unwrap();
             prop_assert_eq!(output, roundtripped);
         }

@@ -11,8 +11,6 @@ use harmonia_store_derivation::derivation::{DerivationInputs, OutputInputs};
 use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 
-use harmonia_utils_base_encoding::Base;
-
 use crate::ParseError;
 use crate::raw_output::{AtermOutput as _, BorrowedRawOutput};
 
@@ -158,8 +156,7 @@ impl<'a> Parser<'a> {
                 hash_algo: &hash_algo,
                 hash: &hash,
             };
-            let output =
-                DerivationOutput::from_raw(raw, self.store_dir, drv_name, &name, Base::Hex)?;
+            let output = DerivationOutput::from_raw(raw, self.store_dir, drv_name, &name)?;
             outputs.insert(name, output);
 
             if self.peek() == Some(b',') {

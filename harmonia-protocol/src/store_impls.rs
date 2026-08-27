@@ -131,7 +131,6 @@ where
     R: ?Sized + NixRead + Send,
 {
     use crate::de::Error;
-    use harmonia_utils_base_encoding::Base;
 
     let path = reader.read_value::<Bytes>().await?;
     let hash_algo = reader.read_value::<Bytes>().await?;
@@ -143,7 +142,8 @@ where
         hash_algo: &hash_algo,
         hash: &hash,
     };
-    DerivationOutput::from_raw(raw, store_dir, drv_name, output_name, Base::NixBase32)
+    // Nix accepts base16/nix32/base64 here by length.
+    DerivationOutput::from_raw(raw, store_dir, drv_name, output_name)
         .map_err(R::Error::invalid_data)
 }
 

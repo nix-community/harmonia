@@ -46,7 +46,6 @@ impl AtermOutput for UnfilledOutput {
         _store_dir: &StoreDir,
         _drv_name: &StorePathName,
         _output_name: &OutputName,
-        _base: Base,
     ) -> Result<Self, InvalidCombination> {
         match raw {
             BorrowedRawOutput {
@@ -207,7 +206,7 @@ mod tests {
             prop_assert!(raw.hash_algo.is_empty());
             prop_assert!(raw.hash.is_empty());
             let roundtripped = UnfilledOutput::from_raw(
-                raw.borrow(), &store_dir, &drv_name, &output_name, Base::Hex,
+                raw.borrow(), &store_dir, &drv_name, &output_name,
             ).unwrap();
             prop_assert_eq!(UnfilledOutput, roundtripped);
         }
