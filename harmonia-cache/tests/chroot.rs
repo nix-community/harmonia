@@ -20,9 +20,13 @@ async fn test_chroot() -> Result<()> {
     let test_file = temp_dir.path().join("my-file");
     fs::write(&test_file, "test contents")?;
 
+    let secret = temp_dir.path().join("secret");
+    fs::write(&secret, "top secret")?;
+
     let test_dir = temp_dir.path().join("my-dir");
-    fs::create_dir_all(&test_dir)?;
+    fs::create_dir_all(test_dir.join("web"))?;
     fs::copy(&test_file, test_dir.join("my-file"))?;
+    std::os::unix::fs::symlink(&secret, test_dir.join("web/index.html"))?;
 
     // Add file and directory to the store (this will create the store structure)
     let file_output = Command::new("nix")
@@ -237,6 +241,37 @@ real_nix_store = "{}"
             .lines()
             .any(|l| l.to_ascii_lowercase() == format!("content-length: {content_len}")),
         "Expected content-length: {content_len} header in HEAD response, got:\n{head_response}"
+    );
+
+    // `..` must not escape the store path into a listing of the whole store.
+    let status = Command::new("curl")
+        .args([
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "--path-as-is",
+            "--max-time",
+            "5",
+            &format!("http://127.0.0.1:{port}/serve/{dir_hash}/.."),
+        ])
+        .output()?;
+    assert_eq!(String::from_utf8(status.stdout)?, "404", ".. traversal");
+
+    // A symlinked index.html pointing outside the store must not be served.
+    let output = Command::new("curl")
+        .args([
+            "-s",
+            "--max-time",
+            "5",
+            &format!("http://127.0.0.1:{port}/serve/{dir_hash}/web/"),
+        ])
+        .output()?;
+    let body = String::from_utf8(output.stdout)?;
+    assert!(
+        !body.contains("top secret"),
+        "index.html symlink escaped store"
     );
 
     // Test that we can fetch narinfo for the file with the virtual path

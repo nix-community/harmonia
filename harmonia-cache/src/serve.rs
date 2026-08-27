@@ -145,13 +145,18 @@ pub(crate) async fn get(
             settings.store.real_store().display()
         ))?;
 
-    if !full_path.starts_with(&real_store) {
+    // Must resolve to something *inside* the store, not the store root itself.
+    let in_store = |p: &Path| p.starts_with(&real_store) && p != real_store;
+    if !in_store(&full_path) {
         return Ok(HttpResponse::NotFound().finish());
     }
 
     if full_path.is_dir() {
         let index_file = full_path.join("index.html");
-        if index_file.metadata().is_ok_and(|stat| stat.is_file()) {
+        if let Ok(index_file) = index_file.canonicalize()
+            && in_store(&index_file)
+            && index_file.is_file()
+        {
             return Ok(NamedFile::open_async(&index_file)
                 .await
                 .io_context(format!("cannot open {}", index_file.display()))?
