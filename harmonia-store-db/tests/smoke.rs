@@ -124,6 +124,23 @@ fn test_query_path_info_by_hash_part() {
     assert!(miss.is_none());
 }
 
+/// A miss whose lexicographic successor has an unparseable column (e.g. a
+/// `fixed:git:` CA we don't support) must be a miss, not an error.
+#[test]
+fn test_query_by_hash_part_miss_ignores_unparseable_neighbour() {
+    let db = StoreDb::open_memory().unwrap();
+    db.connection()
+        .execute(
+            "INSERT INTO ValidPaths (path, hash, registrationTime, ca) \
+             VALUES (?, 'sha256:0000000000000000000000000000000000000000000000000000000000000000', 1, 'fixed:git:sha1:xyz')",
+            [format!("{}", sd().display(&sp("git")))],
+        )
+        .unwrap();
+    let miss_hash = StorePathHash::new([0u8; 20]);
+    let miss = db.query_path_info_by_hash_part(&sd(), &miss_hash).unwrap();
+    assert!(miss.is_none());
+}
+
 /// Verify reference graph operations.
 #[test]
 fn test_reference_graph() {

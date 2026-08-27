@@ -100,26 +100,22 @@ fn modulo_drvs<E>(
         if !oi.dynamic_outputs.is_empty() {
             return Ok(None);
         }
-        // Two input derivation paths can share a hash modulo (that is
-        // the point of the modulo — e.g. they differ only in
-        // fixed-output provenance), so MERGE output sets on a hash-key
-        // collision. (Nix `insert_or_assign`s here, silently
-        // dropping the earlier entry's outputs from the intermediate
-        // ATerm — a bug we deliberately do not reproduce.)
-        /// Merge one intermediate `inputDrvs` entry (see the collision
-        /// note above).
-        fn add(
-            drvs: &mut BTreeMap<Sha256, OutputInputs>,
-            h: Sha256,
-            names: impl IntoIterator<Item = OutputName>,
-        ) {
-            drvs.entry(h).or_default().outputs.extend(names);
-        }
+        // Nix `insert_or_assign`s on a hash-key collision; replicate that
+        // exactly since this is the preimage for output paths.
+        let mut add = |h: Sha256, outputs: BTreeSet<OutputName>| {
+            drvs.insert(
+                h,
+                OutputInputs {
+                    outputs,
+                    dynamic_outputs: BTreeMap::new(),
+                },
+            );
+        };
         match lookup(drv_path).map_err(InputModuloError::Lookup)? {
             HashModulo::DeferredDrv => return Ok(None),
             // Regular non-CA derivation: replace the derivation path
             // with its hash, keeping the requested output names.
-            HashModulo::DrvHash(h) => add(&mut drvs, h, oi.outputs.iter().cloned()),
+            HashModulo::DrvHash(h) => add(h, oi.outputs.clone()),
             // Fixed-output derivation: pretend each output hash is a
             // derivation hash producing a single "out" output.
             HashModulo::CaOutputHashes(output_hashes) => {
@@ -129,7 +125,7 @@ fn modulo_drvs<E>(
                             output: output.clone(),
                         }
                     })?;
-                    add(&mut drvs, *h, [OutputName::default()]);
+                    add(*h, [OutputName::default()].into());
                 }
             }
         }
@@ -396,6 +392,29 @@ mod tests {
         drv.env
             .insert(Bytes::from("url"), Bytes::from(env_noise.to_owned()));
         drv
+    }
+
+    /// Nix replaces (not merges) on hash-modulo key collision.
+    #[test]
+    fn modulo_drvs_collision_replaces_like_nix() {
+        let h = Sha256::digest(b"same");
+        let mut inputs = DerivationInputs::default();
+        let mk = |outs: &[&str]| OutputInputs {
+            outputs: outs.iter().map(|o| o.parse().unwrap()).collect(),
+            dynamic_outputs: BTreeMap::new(),
+        };
+        inputs.drvs.insert(
+            "00000000000000000000000000000000-a.drv".parse().unwrap(),
+            mk(&["dev"]),
+        );
+        inputs.drvs.insert(
+            "11111111111111111111111111111111-b.drv".parse().unwrap(),
+            mk(&["out"]),
+        );
+        let res = modulo_drvs(&inputs, |_| Ok::<_, Infallible>(HashModulo::DrvHash(h)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(res[&h], mk(&["out"]));
     }
 
     fn no_lookup(_: &StorePath) -> Result<HashModulo, Infallible> {

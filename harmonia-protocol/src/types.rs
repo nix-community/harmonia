@@ -343,14 +343,14 @@ pub trait DaemonStore: Send {
     /// is unknown (e.g. the daemon didn't report it).
     fn trust_level(&self) -> Option<TrustLevel>;
 
-    /// Sets options on server.
-    /// This is usually called by the client just after the handshake to set
-    /// options for the rest of the session.
+    /// Stock Nix clients send this unconditionally right after the
+    /// handshake, so the default accepts and ignores it rather than failing
+    /// every connection.
     fn set_options<'a>(
         &'a mut self,
         options: &'a ClientOptions,
     ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
-        ready(Err(DaemonError::unimplemented(Operation::SetOptions))).empty_logs()
+        ready(Ok(())).empty_logs()
     }
 
     fn is_valid_path<'a>(

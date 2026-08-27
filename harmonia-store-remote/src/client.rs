@@ -511,9 +511,10 @@ where
             let (reader, result) = receiver
                 .await
                 .expect("stderr processing stream dropped before sending result");
-            let reader = reader.get_mut().lend(NarBytesReader::new);
             match result {
-                Ok(_) => Ok(AsyncBufReadCompat::new(reader)),
+                Ok(_) => Ok(AsyncBufReadCompat::new(
+                    reader.get_mut().lend(NarBytesReader::new),
+                )),
                 Err(err) => Err(err.fill_operation(Operation::NarFromPath)),
             }
         }
@@ -666,11 +667,9 @@ where
             info!(self.id, "add_multiple_to_store {}", self.id);
             let driver = async {
                 let id = self.id;
-                let version = self.writer.version();
-                let features = self.writer.features().clone();
-                let mut writer = NixWriter::builder()
-                    .set_version(version)
-                    .set_features(features)
+                let mut writer = self
+                    .writer
+                    .nested_builder()
                     .build(FramedWriter::new(&mut self.writer));
 
                 debug!(id, "Write write stream");

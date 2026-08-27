@@ -120,6 +120,15 @@ where
 }
 
 impl<R> NixReader<R> {
+    /// Builder for a nested reader (e.g. over a `FramedReader`) that
+    /// inherits this connection's negotiated protocol state.
+    pub fn nested_builder(&self) -> NixReaderBuilder {
+        NixReader::builder()
+            .set_version(self.version)
+            .set_features(self.features.clone())
+            .set_store_dir(&self.store_dir)
+    }
+
     pub fn set_version(&mut self, version: ProtocolVersion) {
         self.version = version;
     }

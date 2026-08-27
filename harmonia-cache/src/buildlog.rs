@@ -94,9 +94,6 @@ pub(crate) async fn get(
 
     let log = if ext == "bz2" {
         log.insert_header(("Content-Encoding", HeaderValue::from_static("bzip2")))
-    } else if settings.enable_compression {
-        // don't allow compression middleware to modify partial content
-        log.insert_header(("Content-Encoding", HeaderValue::from_static("none")))
     } else {
         log
     };

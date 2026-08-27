@@ -17,5 +17,12 @@ async fn test_prometheus_metrics() -> Result<()> {
         "Metrics should include /nix-cache-info path"
     );
 
+    // Arbitrary client-supplied methods must not become label values.
+    std::process::Command::new("curl")
+        .args(["-s", "-X", "FOO123", &cache.url("/nix-cache-info")])
+        .output()?;
+    let metrics = cache.curl("/metrics")?;
+    assert!(!metrics.contains("FOO123"), "unbounded method label");
+
     Ok(())
 }

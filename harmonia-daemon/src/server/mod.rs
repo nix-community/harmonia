@@ -829,13 +829,7 @@ where
         S: DaemonStore + 't,
     {
         let logs = Self::store_nar_from_path(store, &path);
-
-        let mut logs = pin!(logs);
-        while let Some(msg) = logs.next().await {
-            write_log(&mut self.writer, msg).await?;
-        }
-
-        let mut reader = pin!(logs.await?);
+        let mut reader = pin!(process_logs(&mut self.writer, logs).await?);
         self.writer.write_value(&RawLogMessage::Last).await?;
         let ret = copy_buf(&mut reader, &mut self.writer)
             .map_err(DaemonError::from)
@@ -1049,9 +1043,7 @@ where
                 self.writer.write_value(&value).await?;
             }
             AddMultipleToStore(req) => {
-                let builder = NixReader::builder()
-                    .set_version(self.reader.version())
-                    .set_features(self.reader.features().clone());
+                let builder = self.reader.nested_builder();
                 let buf_reader = AsyncBufReadCompat::new(&mut self.reader);
                 let mut framed = FramedReader::new(buf_reader);
                 let source = builder.build_buffered(&mut framed);
@@ -1187,7 +1179,15 @@ where
         info!("Listening on {:?}", self.socket_path);
 
         loop {
-            let (stream, _addr) = listener.accept().await?;
+            let stream = match listener.accept().await {
+                Ok((stream, _addr)) => stream,
+                // EMFILE/ECONNABORTED etc. must not take the daemon down.
+                Err(e) => {
+                    error!("accept failed: {e}");
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
             let handler = self.handler.clone();
             let store_dir = self.store_dir.clone();
 

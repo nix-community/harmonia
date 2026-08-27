@@ -41,7 +41,8 @@ pub(crate) struct ZstdConfig {
     pub(crate) level: i32,
     #[serde(default = "ZstdConfig::default_long_distance")]
     pub(crate) long_distance_matching: bool,
-    /// log2 of the match window. 0 = auto: with LDM, cap at 25 (32 MiB) so
+    /// log2 of the match window (non-NAR responses are clamped to 23 per
+    /// RFC 9659). 0 = auto: with LDM, cap at 25 (32 MiB) so
     /// decoder memory stays bounded; without LDM, use the level default so
     /// the encoder doesn't allocate a large window it can't fill.
     #[serde(default)]
@@ -91,7 +92,7 @@ fn derive_db_path(real_store: &Path) -> Option<PathBuf> {
 }
 
 // TODO(conni2461): users to restrict access
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     #[serde(default = "default_bind")]
@@ -136,6 +137,12 @@ pub(crate) struct Config {
     pub(crate) secret_keys: Vec<SecretKey>,
     #[serde(skip)]
     pub(crate) store: Store,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        toml::from_str("").expect("empty config deserializes with serde defaults")
+    }
 }
 
 impl Config {
@@ -242,4 +249,17 @@ pub(crate) fn load() -> Result<Config> {
     }
     settings.store = Store::new(store_dir, settings.real_nix_store.clone(), db_path);
     Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_uses_serde_defaults() {
+        let c = Config::default();
+        assert_eq!(c.workers, default_workers());
+        assert_eq!(c.bind, default_bind());
+        assert_eq!(c.priority, default_priority());
+    }
 }

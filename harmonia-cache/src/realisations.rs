@@ -40,8 +40,8 @@ pub async fn get(path: web::Path<(String, String)>, settings: web::Data<Config>)
 
     let row = settings.store.query_realisation(&drv_path, &output_name)?;
 
-    let row = match row {
-        Some(r) => r,
+    let mut realisation = match row {
+        Some(r) => r.realisation,
         None => {
             tracing::debug!("Realisation not found for {drv_path}!{output_raw}");
             return Ok(HttpResponse::NotFound()
@@ -50,8 +50,12 @@ pub async fn get(path: web::Path<(String, String)>, settings: web::Data<Config>)
         }
     };
 
+    realisation
+        .value
+        .sign_mut(&realisation.key, &settings.secret_keys);
+
     Ok(HttpResponse::Ok()
         .insert_header(cache_control_max_age_1y())
         .content_type("application/json")
-        .json(row.realisation.value))
+        .json(realisation.value))
 }

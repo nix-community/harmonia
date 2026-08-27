@@ -97,3 +97,28 @@ pub(crate) async fn raw_client_handshake(
 
     (reader, writer, daemon_features)
 }
+
+/// A daemon error for NarFromPath must leave the connection usable.
+#[tokio::test]
+async fn nar_from_path_error_keeps_connection_in_sync() {
+    use harmonia_store_path::StorePath;
+    use harmonia_store_remote::DaemonClient;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (client_side, server_side) = tokio::io::duplex(64 * 1024);
+        let server = spawn_server(server_side);
+        let (read, write) = tokio::io::split(client_side);
+        let mut client = DaemonClient::builder().connect(read, write).await.unwrap();
+        let path = StorePath::from_bytes(b"00000000000000000000000000000000-x").unwrap();
+        for _ in 0..2 {
+            let err = client.nar_from_path(&path).await.map(|_| ()).unwrap_err();
+            assert!(err.to_string().contains("unimplemented"), "{err}");
+        }
+        let err = client.is_valid_path(&path).await.unwrap_err();
+        assert!(err.to_string().contains("unimplemented"), "{err}");
+        drop(client);
+        server.await.unwrap().unwrap();
+    })
+    .await
+    .unwrap();
+}
