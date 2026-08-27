@@ -1309,7 +1309,6 @@ dependencies = [
  "sha1",
  "sha2",
  "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -1318,6 +1317,7 @@ version = "0.0.0-alpha.0"
 dependencies = [
  "bytes",
  "futures-util",
+ "harmonia-utils-hash",
  "hex-literal",
  "libc",
  "nix",

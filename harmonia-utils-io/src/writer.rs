@@ -1,4 +1,4 @@
-use crate::{Algorithm, Context, Hash};
+use harmonia_utils_hash::{Algorithm, Context, Hash};
 
 /// A hash writer that implements [`AsyncWrite`].
 ///
@@ -7,11 +7,12 @@ use crate::{Algorithm, Context, Hash};
 /// ```
 /// use tokio::io;
 /// use harmonia_utils_hash as hash;
+/// use harmonia_utils_io::HashWriter;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> std::io::Result<()> {
 /// let mut reader: &[u8] = b"hello, world";
-/// let mut writer = hash::HashWriter::new(hash::Algorithm::SHA256);
+/// let mut writer = HashWriter::new(hash::Algorithm::SHA256);
 ///
 /// io::copy(&mut reader, &mut writer).await?;
 /// let (size, hash) = writer.finish();

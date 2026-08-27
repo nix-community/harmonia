@@ -25,7 +25,6 @@ serde                        = { workspace = true }
 sha1                         = { workspace = true }
 sha2                         = { workspace = true }
 thiserror                    = { workspace = true }
-tokio                        = { workspace = true, features = [ "io-util" ] }
 
 [dev-dependencies]
 harmonia-utils-hash = { path = ".", features = [ "test" ] }
