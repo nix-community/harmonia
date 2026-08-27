@@ -78,7 +78,7 @@ pkgs.testers.nixosTest {
     print(body)
     data = json.loads(body)
     assert data["outPath"] == out.removeprefix("/nix/store/"), data
-    assert "signatures" in data, data
+    assert data["signatures"], data
 
     # The real test: the upstream Nix client must be able to substitute
     # the CA derivation via harmonia. With -j0 it cannot build locally,
@@ -87,7 +87,6 @@ pkgs.testers.nixosTest {
     client01.succeed(
         f"nix-store --realise {drv} -j0 "
         "--option substituters http://harmonia:5000 "
-        "--option require-sigs false "
         "--extra-experimental-features ca-derivations"
     )
     client01.succeed(f"grep -q hello-from-ca {out}")
