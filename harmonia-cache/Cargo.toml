@@ -55,6 +55,7 @@ nix                          = { workspace = true, features = [ "socket", "fs" ]
 prometheus                   = { workspace = true }
 
 [dev-dependencies]
+harmonia-utils-io   = { workspace = true }
 harmonia-utils-test = { workspace = true }
 nix                 = { workspace = true }
 tempfile            = { workspace = true }

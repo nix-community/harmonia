@@ -31,7 +31,10 @@ where
     let mut stack: Vec<DirFrame> = Vec::new();
     let mut result: Option<FileTree<NarFileInfo>> = None;
 
-    while let Some(event) = parser.next().await {
+    loop {
+        let Some(event) = parser.next().await else {
+            break;
+        };
         let event = event?;
         match event {
             NarEvent::File {
@@ -40,12 +43,14 @@ where
                 size,
                 mut reader,
             } => {
+                let nar_offset = parser.position();
+
                 // Drain the file contents (we only want metadata)
                 tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
 
                 let info = NarFileInfo {
                     size,
-                    nar_offset: None, // TODO: track byte offset
+                    nar_offset: Some(nar_offset),
                 };
                 let node = FileTree(FileSystemObject::Regular(Regular {
                     executable,
@@ -114,6 +119,8 @@ mod tests {
     use futures_util::TryStreamExt;
     use harmonia_utils_io::BytesReader;
 
+    use crate::archive::test_data;
+
     #[tokio::test]
     async fn test_listing_from_nar() {
         // Create a temp dir, dump it as NAR bytes, then parse the listing
@@ -130,7 +137,7 @@ mod tests {
         let nar_bytes: Vec<u8> = chunks.into_iter().flatten().collect();
 
         // Parse the listing
-        let reader = BytesReader::new(std::io::Cursor::new(nar_bytes));
+        let reader = BytesReader::new(std::io::Cursor::new(nar_bytes.clone()));
         let listing = parse_nar_listing(reader).await.unwrap();
 
         // Verify structure
@@ -149,5 +156,36 @@ mod tests {
         let sub_entries = entries["subdir"]["entries"].as_object().unwrap();
         assert!(sub_entries.contains_key("nested"));
         assert_eq!(sub_entries["nested"]["size"], 7);
+
+        // Every narOffset must address the file's contents in the NAR itself.
+        assert_contents_at(&nar_bytes, &entries["hello"], b"world");
+        assert_contents_at(&nar_bytes, &sub_entries["nested"], b"content");
+
+        // Only regular files carry an offset.
+        assert!(entries["link"].get("narOffset").is_none());
+        assert!(entries["subdir"].get("narOffset").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_listing_root_file_offset() {
+        for (events, expected, contents) in [
+            (test_data::text_file(), 96, b"Hello world!".as_slice()),
+            (test_data::exec_file(), 128, b"Very cool stuff".as_slice()),
+        ] {
+            let nar_bytes = crate::archive::write_nar(events.iter());
+
+            let reader = BytesReader::new(std::io::Cursor::new(nar_bytes.clone()));
+            let listing = parse_nar_listing(reader).await.unwrap();
+
+            let json = serde_json::to_value(&listing).unwrap();
+            assert_eq!(json["narOffset"], expected);
+            assert_contents_at(&nar_bytes, &json, contents);
+        }
+    }
+
+    /// Assert that `entry`'s `narOffset` addresses `contents` within `nar`.
+    fn assert_contents_at(nar: &[u8], entry: &serde_json::Value, contents: &[u8]) {
+        let offset = entry["narOffset"].as_u64().unwrap() as usize;
+        assert_eq!(&nar[offset..offset + contents.len()], contents);
     }
 }
