@@ -85,7 +85,8 @@ impl StoreDir {
     /// Given a full store path like `/nix/store/hash-name`, returns `hash-name`.
     pub fn strip_prefix<'s>(&self, s: &'s str) -> Result<&'s str, StorePathError> {
         let path = Path::new(s);
-        if !path.is_absolute() {
+        // Store paths are Unix-style regardless of host (e.g. wasm32).
+        if !s.starts_with('/') {
             return Err(StorePathError::NonAbsolute(path.to_owned()));
         }
         let name = s
