@@ -933,6 +933,7 @@ dependencies = [
  "harmonia-store-path-info",
  "harmonia-utils-base-encoding",
  "harmonia-utils-hash",
+ "harmonia-utils-io",
  "harmonia-utils-signature",
  "harmonia-utils-test",
  "http-range",

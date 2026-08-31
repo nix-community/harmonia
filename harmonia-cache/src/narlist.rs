@@ -213,11 +213,13 @@ mod test {
         let ours: serde_json::Value = serde_json::to_value(&json.root).unwrap();
 
         // Strip fields that may differ between nix versions:
-        // - narOffset: present in NAR listings but not filesystem listings
+        // - narOffset: only a listing read from a NAR knows byte offsets
         // - executable: false may be absent in older nix (pre-NixOS/nix#15834)
-        fn normalize(v: &mut serde_json::Value) {
+        fn normalize(v: &mut serde_json::Value, strip_offsets: bool) {
             if let Some(obj) = v.as_object_mut() {
-                obj.remove("narOffset");
+                if strip_offsets {
+                    obj.remove("narOffset");
+                }
                 if obj.get("executable") == Some(&serde_json::Value::Bool(false)) {
                     obj.remove("executable");
                 }
@@ -225,17 +227,31 @@ mod test {
                     && let Some(map) = entries.as_object_mut()
                 {
                     for (_, child) in map.iter_mut() {
-                        normalize(child);
+                        normalize(child, strip_offsets);
                     }
                 }
             }
         }
         let mut ours_normalized = ours;
-        normalize(&mut ours_normalized);
-        let mut reference_normalized = reference;
-        normalize(&mut reference_normalized);
+        normalize(&mut ours_normalized, true);
+        let mut reference_normalized = reference.clone();
+        normalize(&mut reference_normalized, true);
 
         assert_eq!(ours_normalized, reference_normalized);
+
+        // A listing read from the NAR must match nix down to the byte offsets.
+        let nar = fs::read(&nar_file).io_context("Failed to read nar file")?;
+        let listing = harmonia_file_nar::parse_nar_listing(harmonia_utils_io::BytesReader::new(
+            std::io::Cursor::new(nar),
+        ))
+        .await
+        .io_context("Failed to parse nar listing")?;
+        let mut from_nar = serde_json::to_value(&listing).unwrap();
+        normalize(&mut from_nar, false);
+        let mut reference_with_offsets = reference;
+        normalize(&mut reference_with_offsets, false);
+
+        assert_eq!(from_nar, reference_with_offsets);
 
         Ok(())
     }

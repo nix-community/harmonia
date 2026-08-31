@@ -10,6 +10,7 @@ use tracing::trace;
 
 use crate::ByteString;
 use crate::padded_reader::PaddedReader;
+use crate::wire::calc_aligned;
 use harmonia_utils_io::{AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending, LentReader};
 
 use super::NarEvent;
@@ -29,7 +30,8 @@ pin_project! {
         // increasing like Nix requires, which also rules out duplicates.
         // Empty means no entry seen yet (valid names are never empty).
         prev_names: Vec<ByteString>,
-        parsed: usize,
+        // Bytes consumed so far; see [`NarParser::position`].
+        position: u64,
         state: Inner<false>,
     }
 }
@@ -54,7 +56,7 @@ where
     pub fn new(reader: R) -> Self {
         Self {
             reader: Lending::new(reader),
-            parsed: 0,
+            position: 0,
             name: None,
             prev_names: Vec::new(),
             state: Inner {
@@ -62,6 +64,11 @@ where
                 state: InnerState::Root(0),
             },
         }
+    }
+
+    /// The parser's byte offset in the NAR (`narOffset`)
+    pub fn position(&self) -> u64 {
+        self.position
     }
 }
 
@@ -76,8 +83,12 @@ where
         let mut this = self.project();
         let mut reader = ready!(this.reader.as_mut().poll_reader(cx))?;
         match this.state.state {
-            InnerState::ReadContents(NodeType::ExecutableFile | NodeType::File, _, _)
-            | InnerState::ReadDir => {
+            InnerState::ReadContents(NodeType::ExecutableFile | NodeType::File, size, _) => {
+                // The file's reader has drained the contents and their padding.
+                *this.position = this.position.saturating_add(calc_aligned(size));
+                this.state.bump_next();
+            }
+            InnerState::ReadDir => {
                 this.state.bump_next();
             }
             InnerState::FinishReadEntry => {
@@ -100,6 +111,7 @@ where
             let cnt = this.state.drive(&buf)?;
             buf.advance(cnt);
             reader.as_mut().consume(cnt);
+            *this.position += cnt as u64;
             trace!(state=?this.state.state, cnt, "Loop state");
             match this.state.state {
                 InnerState::ReadContents(
@@ -131,6 +143,7 @@ where
                     let target = buf.split_to(len);
                     buf.advance(aligned - len);
                     reader.as_mut().consume(aligned);
+                    *this.position += aligned as u64;
                     this.state.bump_next();
                     let name = this.name.take().unwrap_or_default();
                     return Poll::Ready(Some(Ok(NarEvent::Symlink { name, target })));
@@ -162,6 +175,7 @@ where
                     *this.name = Some(name_buf);
                     buf.advance(aligned - len);
                     reader.as_mut().consume(aligned);
+                    *this.position += aligned as u64;
                     this.state.bump_next();
                 }
                 InnerState::ReadDir => {
