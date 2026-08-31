@@ -55,7 +55,7 @@
     ]
   );
 }
-// lib.optionalAttrs pkgs.stdenv.isLinux (
+// lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
   lib.mapAttrs' (
     name: _:
     lib.nameValuePair (lib.removeSuffix ".nix" name) (
