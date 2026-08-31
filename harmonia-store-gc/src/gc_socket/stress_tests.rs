@@ -101,27 +101,29 @@ fn run_deleter(graph: &StoreGraph, live: &LiveSet, acked: &[AtomicBool], seed: u
 }
 
 /// Register random roots and mark each acked root's closure. The deleter
-/// must never unlink an acked node.
+/// must never unlink an acked node. Returns the number of acks received.
 fn run_client(
     sock: &std::path::Path,
     graph: &StoreGraph,
     acked: &[AtomicBool],
     stop: &AtomicBool,
     seed: u64,
-) {
+) -> usize {
     let mut rng = StdRng::seed_from_u64(seed);
     let all: Vec<NodeIdx> = graph.nodes().collect();
+    let mut acks = 0;
     let Ok(mut conn) = UnixStream::connect(sock) else {
-        return;
+        return acks;
     };
     while !stop.load(Ordering::Acquire) {
         let root = all[rng.random_range(0..all.len())];
         let line = format!("{}\n", graph.path(root));
         let mut ack = [0u8; 1];
         if conn.write_all(line.as_bytes()).is_err() || conn.read_exact(&mut ack).is_err() {
-            return;
+            return acks;
         }
         assert_eq!(ack, *b"1");
+        acks += 1;
         let closure = graph.compute_closure(&[root]);
         for &node in &all {
             if closure.contains(node) {
@@ -129,9 +131,11 @@ fn run_client(
             }
         }
     }
+    acks
 }
 
-fn one_run(seed: u64) {
+/// Returns the number of acks clients received during this run.
+fn one_run(seed: u64) -> usize {
     let mut rng = StdRng::seed_from_u64(seed);
     let n = rng.random_range(4..44);
     let graph = Arc::new(gen_graph(&mut rng, n));
@@ -155,7 +159,7 @@ fn one_run(seed: u64) {
             let sock = sock.clone();
             std::thread::spawn(move || {
                 barrier.wait();
-                run_client(&sock, &graph, &acked, &stop, seed ^ (c as u64 + 1));
+                run_client(&sock, &graph, &acked, &stop, seed ^ (c as u64 + 1))
             })
         })
         .collect();
@@ -166,16 +170,15 @@ fn one_run(seed: u64) {
     stop.store(true, Ordering::Release);
     // Dropping the server closes client connections so the threads exit.
     drop(server);
-    for c in clients {
-        c.join().unwrap();
-    }
+    clients.into_iter().map(|c| c.join().unwrap()).sum()
 }
 
 #[test]
 fn concurrent_clients_never_resurrect_deleted_paths() {
     // Deterministic per seed. A protect() deadlock regression surfaces as
     // the harness timing out.
-    for seed in 1..=60u64 {
-        one_run(seed);
-    }
+    let acks: usize = (1..=60u64).map(one_run).sum();
+    // Small graphs can be deleted before any client connects. Make sure the
+    // run as a whole actually raced clients against the deleter.
+    assert!(acks > 0, "no client was ever acked, race not exercised");
 }
