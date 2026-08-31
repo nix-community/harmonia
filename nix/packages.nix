@@ -39,6 +39,7 @@ let
       [
         ../Cargo.toml
         ../Cargo.lock
+        ../.config/nextest.toml
         # test fixtures referenced via include_str! from harmonia-cache/tests
         (fs.fileFilter (f: f.hasExt "pk" || f.hasExt "sk" || f.hasExt "pem") ../tests)
       ]
@@ -76,7 +77,6 @@ let
     commonArgs
     // {
       inherit cargoArtifacts;
-      cargoExtraArgs = "--features harmonia-store-gc/cli";
 
       # Add runtime dependencies
       nativeBuildInputs = [ makeWrapper ];
