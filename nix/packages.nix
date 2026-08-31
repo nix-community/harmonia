@@ -76,6 +76,7 @@ let
     commonArgs
     // {
       inherit cargoArtifacts;
+      cargoExtraArgs = "--features harmonia-store-gc/cli";
 
       # Add runtime dependencies
       nativeBuildInputs = [ makeWrapper ];
@@ -126,7 +127,7 @@ let
         export NIX_UPSTREAM_SRC=${nix-src}
         export LLVM_COV=${llvmPackages.bintools-unwrapped}/bin/llvm-cov
         export LLVM_PROFDATA=${llvmPackages.bintools-unwrapped}/bin/llvm-profdata
-        ${lib.optionalString stdenv.isDarwin ''
+        ${lib.optionalString stdenv.hostPlatform.isDarwin ''
           export _NIX_TEST_NO_SANDBOX="1"
         ''}
 

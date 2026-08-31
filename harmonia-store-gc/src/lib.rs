@@ -38,6 +38,7 @@
 mod error;
 mod gc;
 mod gc_socket;
+pub mod profiles;
 mod roots;
 mod store;
 mod temp_roots;

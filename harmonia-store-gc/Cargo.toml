@@ -11,7 +11,16 @@ homepage.workspace   = true
 repository.workspace = true
 description          = "Garbage collection for the Nix store"
 
+[[bin]]
+name              = "harmonia-gc"
+path              = "src/bin/harmonia-gc.rs"
+required-features = [ "cli" ]
+
+[features]
+cli = [ "dep:clap", "dep:tracing-subscriber" ]
+
 [dependencies]
+clap                = { workspace = true, optional = true }
 foldhash            = { workspace = true }
 harmonia-store-db   = { workspace = true }
 harmonia-store-fs   = { workspace = true }
@@ -21,7 +30,7 @@ nix                 = { workspace = true }
 rayon               = { workspace = true }
 thiserror           = { workspace = true }
 tracing             = { workspace = true }
-tracing-subscriber  = { workspace = true }
+tracing-subscriber  = { workspace = true, optional = true }
 walkdir             = { workspace = true }
 
 [dev-dependencies]
