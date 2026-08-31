@@ -213,24 +213,35 @@ impl ConnectionPool {
 
     /// Create a new connection to the daemon.
     async fn create_connection(&self) -> DaemonResult<PooledConnection> {
-        let connect_fut = async {
-            debug!(
-                "Connecting to daemon socket at {}",
+        let start = tokio::time::Instant::now();
+        let deadline = start + self.config.connection_timeout;
+        // Separate phases so the error tells "daemon not accepting" apart
+        // from "daemon accepted but stalled in handshake".
+        let timed_out = |phase: &str| {
+            timeout_error(&format!(
+                "{phase} {} after {:.1?}",
                 self.socket_path.display(),
-            );
-            let handshake_client = DaemonClientBuilder::new()
-                .set_store_dir(&self.store_dir)
-                .build_unix(&self.socket_path)
-                .await?;
-
-            // Perform handshake (ResultLog is both Stream and Future, so we can just .await it)
-            let client = handshake_client.handshake().await?;
-            Ok::<_, DaemonError>(client)
+                start.elapsed(),
+            ))
         };
 
-        let client = tokio::time::timeout(self.config.connection_timeout, connect_fut)
+        debug!(
+            "Connecting to daemon socket at {}",
+            self.socket_path.display(),
+        );
+        let handshake_client = tokio::time::timeout_at(
+            deadline,
+            DaemonClientBuilder::new()
+                .set_store_dir(&self.store_dir)
+                .build_unix(&self.socket_path),
+        )
+        .await
+        .map_err(|_| timed_out("connecting to daemon socket"))??;
+
+        // ResultLog is both Stream and Future, so we can just .await it.
+        let client = tokio::time::timeout_at(deadline, handshake_client.handshake())
             .await
-            .map_err(|_| timeout_error("connecting to daemon"))??;
+            .map_err(|_| timed_out("handshake with daemon at"))??;
 
         Ok(PooledConnection {
             client,
@@ -393,5 +404,33 @@ mod tests {
             let _ = tokio::time::timeout(Duration::from_millis(1), &mut fut).await;
         }
         assert_eq!(pool.slots.available_permits(), 2);
+    }
+
+    /// A daemon that accepts but never answers must yield a timeout error
+    /// naming the handshake phase and the socket path.
+    #[tokio::test]
+    async fn handshake_timeout_names_phase_and_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        let _accept = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+
+        let config = PoolConfig {
+            max_size: 1,
+            connection_timeout: Duration::from_millis(100),
+            ..Default::default()
+        };
+        let pool = ConnectionPool::new(&sock, config);
+        let err = pool
+            .acquire()
+            .await
+            .err()
+            .expect("must time out")
+            .to_string();
+        assert!(err.contains("handshake"), "{err}");
+        assert!(err.contains("daemon.sock"), "{err}");
     }
 }
