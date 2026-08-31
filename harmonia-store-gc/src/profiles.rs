@@ -265,6 +265,12 @@ pub fn remove_old_generations(
     };
 
     let can_write = nix::unistd::access(dir, nix::unistd::AccessFlags::W_OK).is_ok();
+    if !can_write {
+        warn!(
+            "no write permission on {}, skipping its profiles",
+            dir.display()
+        );
+    }
 
     entries.par_iter().try_for_each(|entry| -> Result<()> {
         let path = entry.path();
