@@ -76,7 +76,6 @@ let
     commonArgs
     // {
       inherit cargoArtifacts;
-      cargoExtraArgs = "--features harmonia-store-gc/cli";
 
       # Add runtime dependencies
       nativeBuildInputs = [ makeWrapper ];

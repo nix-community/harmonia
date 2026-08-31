@@ -17,7 +17,8 @@ path              = "src/bin/harmonia-gc.rs"
 required-features = [ "cli" ]
 
 [features]
-cli = [ "dep:clap", "dep:tracing-subscriber" ]
+cli     = [ "dep:clap", "dep:tracing-subscriber" ]
+default = [ "cli" ]
 
 [dependencies]
 clap                = { workspace = true, optional = true }
