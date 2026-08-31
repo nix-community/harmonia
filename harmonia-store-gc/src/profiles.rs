@@ -166,10 +166,10 @@ impl ProfileLock {
 
 impl Drop for ProfileLock {
     fn drop(&mut self) {
-        // Nix's deleteLockFile: write the deletion marker, then unlink.
-        // The flock itself is released when the fd closes.
-        let _ = self.file.write_all(b"d");
+        // Same order as Nix's deleteLockFile: a crash in between must not
+        // leave a linked non-empty file, which waiters retry on forever.
         let _ = fs::remove_file(&self.lock_path);
+        let _ = self.file.write_all(b"d");
     }
 }
 
