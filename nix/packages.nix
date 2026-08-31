@@ -39,6 +39,7 @@ let
       [
         ../Cargo.toml
         ../Cargo.lock
+        ../.config/nextest.toml
         # test fixtures referenced via include_str! from harmonia-cache/tests
         (fs.fileFilter (f: f.hasExt "pk" || f.hasExt "sk" || f.hasExt "pem") ../tests)
       ]
