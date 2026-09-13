@@ -36,7 +36,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = "2.5.7"
 zstd = "0.13"
-zstd-safe = "7"
+zstd-safe = "8"
 # Nix.rs-based crates
 bytes                        = { workspace = true }
 futures-core                 = { workspace = true }
