@@ -8,7 +8,7 @@
 }:
 {
   inherit (packageSet) tests clippy;
-  treefmt = treefmt.config.build.check self;
+  treefmt = treefmt.check self;
   dependency-diagram =
     let
       generated =
