@@ -9,6 +9,7 @@ let
   cfg = config.services.harmonia-dev;
   cacheCfg = cfg.cache;
   daemonCfg = cfg.daemon;
+  gcCfg = cfg.gc;
 
   format = pkgs.formats.toml { };
   configFile = format.generate "harmonia.toml" cacheCfg.settings;
@@ -22,6 +23,7 @@ let
 in
 {
   imports = [
+    (lib.modules.importApply ./gc-options.nix { inherit crane nix-src; })
     # Renamed options for flat harmonia-dev -> harmonia-dev.cache
     (lib.mkRenamedOptionModule
       [ "services" "harmonia-dev" "enable" ]
@@ -44,13 +46,6 @@ in
 
   options = {
     services.harmonia-dev = {
-      package = lib.mkOption {
-        type = lib.types.package;
-        default = (pkgs.callPackage ./packages.nix { inherit crane nix-src; }).harmonia;
-        defaultText = lib.literalExpression "pkgs.harmonia";
-        description = "The harmonia package";
-      };
-
       cache = {
         enable = lib.mkEnableOption "Harmonia: Nix binary cache written in Rust";
 
@@ -70,6 +65,32 @@ in
           type = lib.types.submodule { freeformType = format.type; };
 
           description = "Settings to merge with the default configuration";
+        };
+      };
+
+      gc = {
+        dates = lib.mkOption {
+          type = with lib.types; either singleLineStr (listOf str);
+          apply = lib.toList;
+          default = [ "03:15" ];
+          example = "weekly";
+          description = ''
+            When to run garbage collection. Calendar event in the format
+            specified by {manpage}`systemd.time(7)`.
+          '';
+        };
+
+        randomizedDelaySec = lib.mkOption {
+          type = lib.types.singleLineStr;
+          default = "0";
+          example = "45min";
+          description = "Randomized delay before each run.";
+        };
+
+        persistent = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Run on next boot if a scheduled run was missed.";
         };
       };
 
@@ -197,6 +218,39 @@ in
           LockPersonality = true;
 
           LimitNOFILE = 65536;
+        };
+      };
+    })
+
+    (lib.mkIf gcCfg.enable {
+      assertions = [
+        {
+          assertion = gcCfg.automatic -> config.nix.enable;
+          message = "services.harmonia-dev.gc.automatic requires nix.enable";
+        }
+      ];
+
+      warnings = lib.optional (gcCfg.automatic && config.nix.gc.automatic) ''
+        Both services.harmonia-dev.gc.automatic and nix.gc.automatic are enabled.
+        Disable nix.gc.automatic to avoid running two garbage collectors.
+      '';
+
+      systemd.services.harmonia-gc = {
+        description = "Harmonia Nix Garbage Collector";
+        # `nix config show` for keep-derivations/keep-outputs.
+        path = [ config.nix.package ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = lib.escapeShellArgs gcCfg.argv;
+        };
+        startAt = lib.optionals gcCfg.automatic gcCfg.dates;
+        restartIfChanged = false;
+      };
+
+      systemd.timers.harmonia-gc = lib.mkIf gcCfg.automatic {
+        timerConfig = {
+          RandomizedDelaySec = gcCfg.randomizedDelaySec;
+          Persistent = gcCfg.persistent;
         };
       };
     })
