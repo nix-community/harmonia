@@ -2,8 +2,6 @@
   description = "Nix binary cache implemented in rust using libnix-store";
 
   inputs.nixpkgs.url = "git+https://github.com/NixOS/nixpkgs?shallow=1&ref=nixpkgs-unstable";
-  inputs.treefmt-nix.url = "github:numtide/treefmt-nix";
-  inputs.treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   inputs.crane.url = "github:ipetkov/crane";
   inputs.nix = {
     url = "github:nixos/nix";
@@ -15,7 +13,6 @@
     {
       self,
       nixpkgs,
-      treefmt-nix,
       crane,
       nix,
     }:
@@ -46,7 +43,7 @@
         }
       );
 
-      treefmt = eachSystem ({ pkgs, ... }: treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix);
+      treefmt = eachSystem ({ pkgs, ... }: pkgs.callPackage ./nix/treefmt.nix { });
     in
     {
       packages = eachSystem (
@@ -78,7 +75,7 @@
         }
       );
 
-      formatter = eachSystem ({ system, ... }: treefmt.${system}.config.build.wrapper);
+      formatter = eachSystem ({ system, ... }: treefmt.${system});
 
       nixosModules.harmonia =
         { lib, ... }:
