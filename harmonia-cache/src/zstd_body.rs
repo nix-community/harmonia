@@ -125,7 +125,7 @@ fn build_encoder(
     pledged_size: Option<u64>,
     is_nar: bool,
 ) -> io::Result<ZstdEncoder> {
-    use zstd_safe::CParameter;
+    use zstd::zstd_safe::CParameter;
 
     let mut enc = ZstdEncoder::new(Writer::new(), cfg.level)?;
     if let Some(size) = pledged_size {
@@ -508,12 +508,14 @@ mod tests {
             while let Some(chunk) = body.next().await {
                 compressed.extend_from_slice(&chunk.unwrap());
             }
-            let mut dctx = zstd_safe::DCtx::create();
-            dctx.set_parameter(zstd_safe::DParameter::WindowLogMax(HTTP_WINDOW_LOG_MAX))
-                .unwrap();
+            let mut dctx = zstd::zstd_safe::DCtx::create();
+            dctx.set_parameter(zstd::zstd_safe::DParameter::WindowLogMax(
+                HTTP_WINDOW_LOG_MAX,
+            ))
+            .unwrap();
             let mut out = vec![0u8; original.len() + 1];
-            let mut inb = zstd_safe::InBuffer::around(&compressed);
-            let mut outb = zstd_safe::OutBuffer::around(&mut out[..]);
+            let mut inb = zstd::zstd_safe::InBuffer::around(&compressed);
+            let mut outb = zstd::zstd_safe::OutBuffer::around(&mut out[..]);
             dctx.decompress_stream(&mut outb, &mut inb)
                 .expect("frame window exceeds 8 MiB");
         }
