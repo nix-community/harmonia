@@ -14,9 +14,8 @@ pkgs.testers.runNixOSTest {
       # requires keep-outputs (mirrors nix-store --gc semantics).
       nix.settings.keep-outputs = true;
       virtualisation.writableStore = true;
-      # nix from git for the BuildTraceV3 phase; referenced by store path in
-      # the test script, so it must be in the VM's closure.
-      virtualisation.additionalPaths = [ pkgs.nixVersions.git ];
+      # nix from git for the BuildTraceV3 phase. Kept as a GC root.
+      system.extraDependencies = [ pkgs.nixVersions.git ];
       environment.systemPackages = [
         pkgs.hello
         pkgs.sqlite
@@ -36,6 +35,9 @@ pkgs.testers.runNixOSTest {
 
     def gc() -> None:
         machine.succeed("systemctl start harmonia-gc.service")
+
+    # load-db at boot sets registrationTime=now. Stop keepRecent from pinning everything.
+    machine.succeed(f"sqlite3 {db} 'UPDATE ValidPaths SET registrationTime = 1'")
 
     # --- CA derivations: Realisations must keep drv<->output alive ---
     ca_drv_expr = (
