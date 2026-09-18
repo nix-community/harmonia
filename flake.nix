@@ -3,6 +3,8 @@
 
   inputs.nixpkgs.url = "git+https://github.com/NixOS/nixpkgs?shallow=1&ref=nixpkgs-unstable";
   inputs.crane.url = "github:ipetkov/crane";
+  inputs.nix-darwin.url = "github:nix-darwin/nix-darwin";
+  inputs.nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
   inputs.nix = {
     url = "github:nixos/nix";
     # We just need some test data, we're not building upstream nix.
@@ -15,6 +17,7 @@
       nixpkgs,
       crane,
       nix,
+      nix-darwin,
     }:
     let
       inherit (nixpkgs) lib;
@@ -66,6 +69,25 @@
           packageSet = packageSet.${system};
           treefmt = treefmt.${system};
         }
+        // lib.optionalAttrs (lib.hasSuffix "-darwin" system) {
+          darwin-module =
+            (nix-darwin.lib.darwinSystem {
+              inherit system;
+              modules = [
+                self.darwinModules.harmonia
+                {
+                  system.stateVersion = 5;
+                  services.harmonia-dev.gc = {
+                    enable = true;
+                    automatic = true;
+                    deleteOlderThan = "30d";
+                    ensureFree = "20%";
+                    gcRootsDirs = [ "/mnt/extra-roots" ];
+                  };
+                }
+              ];
+            }).system;
+        }
       );
 
       devShells = eachSystem (
@@ -87,6 +109,11 @@
             })
           ];
         };
+
+      darwinModules.harmonia = lib.modules.importApply ./nix/darwin-module.nix {
+        inherit crane;
+        nix-src = nix;
+      };
 
       herculesCI = import ./nix/herculesCI.nix {
         inherit self lib systems;
