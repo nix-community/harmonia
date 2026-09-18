@@ -21,7 +21,7 @@ use super::{GcSocketServer, LiveSet};
 use harmonia_store_db::{GraphOptions, NodeIdx, StoreDb, StoreGraph};
 use harmonia_store_path::StoreDir;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 fn full_path(i: usize) -> String {
     format!("/nix/store/{i:032x}-pkg")

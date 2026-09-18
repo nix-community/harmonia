@@ -157,8 +157,7 @@ pub(crate) async fn get(
             && in_store(&index_file)
             && index_file.is_file()
         {
-            return Ok(NamedFile::open_async(&index_file)
-                .await
+            return Ok(NamedFile::open(&index_file)
                 .io_context(format!("cannot open {}", index_file.display()))?
                 .respond_to(&req));
         }
@@ -171,8 +170,7 @@ pub(crate) async fn get(
         };
         directory_listing(&url_prefix, &full_path, &real_store)
     } else {
-        Ok(NamedFile::open_async(&full_path)
-            .await
+        Ok(NamedFile::open(&full_path)
             .io_context(format!("cannot open file: {}", full_path.display()))?
             .respond_to(&req))
     }

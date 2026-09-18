@@ -86,8 +86,7 @@ pub(crate) async fn get(
     }
 
     // Serve the file as-is with the appropriate Content-Encoding header
-    let log = NamedFile::open_async(&build_log)
-        .await
+    let log = NamedFile::open(&build_log)
         .io_context(format!("Failed to open build log: {}", build_log.display()))?
         .customize()
         .insert_header(cache_control_max_age_1y());
