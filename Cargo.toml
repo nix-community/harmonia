@@ -116,7 +116,7 @@ syn         = "3.0"
 hex-literal     = "1.1"
 proptest        = "1.11"
 proptest-derive = "0.8"
-rstest          = "0.26"
+rstest          = "0.27"
 tempfile        = "3.27"
 tokio-test      = "0.4"
 
