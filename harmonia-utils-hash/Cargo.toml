@@ -13,6 +13,7 @@ repository.workspace = true
 description          = "Hash utilities for Harmonia (content addressing, hash types)"
 
 [dependencies]
+aws-lc-rs                    = { workspace = true }
 blake3                       = { workspace = true }
 data-encoding                = { workspace = true }
 derive_more                  = { workspace = true }
@@ -22,8 +23,6 @@ pin-project-lite             = { workspace = true }
 proptest                     = { workspace = true, optional = true }
 proptest-derive              = { workspace = true, optional = true }
 serde                        = { workspace = true }
-sha1                         = { workspace = true }
-sha2                         = { workspace = true }
 thiserror                    = { workspace = true }
 
 [dev-dependencies]
