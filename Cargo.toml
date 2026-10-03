@@ -58,12 +58,10 @@ clap = { version = "4", default-features = false, features = [
 ] }
 data-encoding = "2.11"
 derive_more = { version = "2.1", features = [ "display" ] }
-ed25519-dalek = "3.0.0-rc.0"
 foldhash = "0.2"
 futures-core = "0.3"
 futures-sink = "0.3"
 futures-util = { version = "0.3", features = [ "sink" ] }
-getrandom = "0.4"
 libc = "0.2"
 md5 = "0.8"
 memchr = "2"

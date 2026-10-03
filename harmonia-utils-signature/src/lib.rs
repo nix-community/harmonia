@@ -16,11 +16,10 @@ use std::sync::Arc;
 
 use data_encoding::BASE64;
 
-use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+use aws_lc_rs::signature::{ED25519, Ed25519KeyPair, KeyPair, ParsedPublicKey};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
-use subtle::ConstantTimeEq;
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -205,14 +204,12 @@ pub enum ParseKeyError {
 pub struct PublicKey {
     name: Arc<String>,
     key_data: [u8; PUBLIC_KEY_BYTES],
-    key: VerifyingKey,
+    key: ParsedPublicKey,
 }
 
 impl PublicKey {
     pub fn verify<M: AsRef<[u8]>>(&self, data: M, signature: &Signature) -> bool {
-        let message = data.as_ref();
-        let sig = ed25519_dalek::Signature::from_bytes(&signature.sig.0);
-        self.key.verify(message, &sig).is_ok()
+        self.key.verify_sig(data.as_ref(), &signature.sig.0).is_ok()
     }
 
     pub fn name(&self) -> &str {
@@ -266,8 +263,8 @@ impl FromStr for PublicKey {
         }
         let mut key_data = [0u8; PUBLIC_KEY_BYTES];
         key_data.copy_from_slice(&key_buf[..PUBLIC_KEY_BYTES]);
-        let key =
-            VerifyingKey::from_bytes(&key_data).map_err(|_| ParseKeyError::InvalidPublicKey)?;
+        let key = ParsedPublicKey::new(&ED25519, key_data)
+            .map_err(|_| ParseKeyError::InvalidPublicKey)?;
         Ok(PublicKey {
             name,
             key,
@@ -283,19 +280,18 @@ pub struct GenerateKeyError;
 pub struct SecretKey {
     name: Arc<String>,
     key_data: [u8; SECRET_KEY_BYTES],
-    key: SigningKey,
+    key: Ed25519KeyPair,
 }
 
 impl SecretKey {
     pub fn generate(name: String) -> Result<SecretKey, GenerateKeyError> {
         let name = Arc::new(name);
         let mut seed = Zeroizing::new([0u8; SEED_BYTES]);
-        getrandom::fill(&mut *seed).map_err(|_| GenerateKeyError)?;
-        let key = SigningKey::from_bytes(&seed);
-        let pk = key.verifying_key();
+        aws_lc_rs::rand::fill(&mut *seed).map_err(|_| GenerateKeyError)?;
+        let key = Ed25519KeyPair::from_seed_unchecked(&*seed).map_err(|_| GenerateKeyError)?;
         let mut key_data = [0u8; SECRET_KEY_BYTES];
         key_data[0..SEED_BYTES].copy_from_slice(&*seed);
-        key_data[SEED_BYTES..SECRET_KEY_BYTES].copy_from_slice(pk.as_bytes());
+        key_data[SEED_BYTES..SECRET_KEY_BYTES].copy_from_slice(key.public_key().as_ref());
         Ok(SecretKey {
             name,
             key,
@@ -316,14 +312,20 @@ impl SecretKey {
         let sig = self.key.sign(msg);
         Signature {
             key_name: self.name.to_string(),
-            sig: RawSignature(sig.to_bytes()),
+            sig: RawSignature(
+                sig.as_ref()
+                    .try_into()
+                    .expect("an Ed25519 signature is 64 bytes"),
+            ),
         }
     }
 
     pub fn to_public_key(&self) -> PublicKey {
         let name = self.name.clone();
-        let key = self.key.verifying_key();
-        let key_data = key.to_bytes();
+        let mut key_data = [0u8; PUBLIC_KEY_BYTES];
+        key_data.copy_from_slice(self.key.public_key().as_ref());
+        let key = ParsedPublicKey::new(&ED25519, key_data)
+            .expect("an Ed25519 key pair has a valid public key");
         PublicKey {
             name,
             key,
@@ -334,7 +336,8 @@ impl SecretKey {
 
 impl Drop for SecretKey {
     fn drop(&mut self) {
-        // Wipe our copy of seed||pubkey; SigningKey zeroizes itself.
+        // Wipe our copy of seed||pubkey. aws-lc cleanses the key pair's copy
+        // when it frees it.
         self.key_data.zeroize();
     }
 }
@@ -357,7 +360,9 @@ impl fmt::Display for SecretKey {
 impl PartialEq for SecretKey {
     fn eq(&self, other: &Self) -> bool {
         // Constant-time on the secret bytes to avoid a timing oracle.
-        self.name == other.name && bool::from(self.key_data.ct_eq(&other.key_data))
+        self.name == other.name
+            && aws_lc_rs::constant_time::verify_slices_are_equal(&self.key_data, &other.key_data)
+                .is_ok()
     }
 }
 
@@ -391,10 +396,8 @@ impl FromStr for SecretKey {
         let mut seed = Zeroizing::new([0u8; SEED_BYTES]);
         seed.copy_from_slice(&key_data[0..SEED_BYTES]);
         let public_key = &key_data[SEED_BYTES..SECRET_KEY_BYTES];
-        let key = SigningKey::from_bytes(&seed);
-        if key.verifying_key().as_bytes() != public_key {
-            return Err(ParseKeyError::InvalidSecretKey);
-        }
+        let key = Ed25519KeyPair::from_seed_and_public_key(&*seed, public_key)
+            .map_err(|_| ParseKeyError::InvalidSecretKey)?;
         Ok(SecretKey {
             name,
             key,
@@ -452,6 +455,20 @@ mod unittests {
         assert_eq!(sk.to_public_key(), pk);
         assert_eq!(sk.to_string(), sk_s);
         assert_eq!(pk.to_string(), pk_s);
+    }
+
+    /// The public half of a secret key has to match its seed.
+    #[test]
+    fn test_secret_key_rejects_wrong_public_key() {
+        let sk = SecretKey::generate("k".into()).unwrap();
+        let other = SecretKey::generate("k".into()).unwrap();
+        let mut key_data = sk.key_data;
+        key_data[SEED_BYTES..].copy_from_slice(&other.key_data[SEED_BYTES..]);
+        let s = format!("k:{}", BASE64.encode(&key_data));
+        assert_eq!(
+            s.parse::<SecretKey>().unwrap_err(),
+            ParseKeyError::InvalidSecretKey
+        );
     }
 
     /// `Debug` must redact key material so it can't leak via logs/panics.
