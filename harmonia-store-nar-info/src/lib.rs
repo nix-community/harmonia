@@ -1,5 +1,9 @@
 //! NarInfo construction and formatting for the Nix binary cache protocol.
 
+mod cache_info;
+
+pub use cache_info::{CacheInfo, CacheInfoParseError};
+
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::num::NonZero;

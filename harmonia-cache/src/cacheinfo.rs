@@ -2,18 +2,15 @@ use std::error::Error;
 
 use crate::config;
 use actix_web::{HttpResponse, http, web};
+use harmonia_store_nar_info::CacheInfo;
 
 pub(crate) async fn get(config: web::Data<config::Config>) -> Result<HttpResponse, Box<dyn Error>> {
-    let priority_str = config.priority.to_string();
-
-    let store_dir = config.store.store_dir().to_string();
-    let body = crate::build_bytes!(
-        b"StoreDir: ",
-        store_dir.as_bytes(),
-        b"\nWantMassQuery: 1\nPriority: ",
-        priority_str.as_bytes(),
-        b"\n"
-    );
+    let body = CacheInfo {
+        store_dir: Some(config.store.store_dir().clone()),
+        want_mass_query: Some(true),
+        priority: Some(i32::try_from(config.priority)?),
+    }
+    .to_string();
 
     Ok(HttpResponse::Ok()
         .insert_header((http::header::CONTENT_TYPE, "text/x-nix-cache-info"))

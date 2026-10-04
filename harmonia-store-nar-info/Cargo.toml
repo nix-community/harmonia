@@ -6,7 +6,7 @@ edition.workspace    = true
 license.workspace    = true
 homepage.workspace   = true
 repository.workspace = true
-description          = "NarInfo formatting and construction for Nix binary cache protocol"
+description          = "NarInfo and nix-cache-info types for the Nix binary cache protocol"
 
 [dependencies]
 harmonia-store-content-address = { workspace = true }
@@ -22,6 +22,7 @@ harmonia-store-content-address = { workspace = true }
 harmonia-store-path-info       = { workspace = true }
 harmonia-utils-test            = { workspace = true }
 hex-literal                    = { workspace = true }
+rstest                         = { workspace = true }
 serde_json                     = { workspace = true }
 
 [[test]]
