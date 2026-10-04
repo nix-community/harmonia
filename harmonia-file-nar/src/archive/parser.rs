@@ -9,7 +9,7 @@ use tokio::io::AsyncRead;
 use tracing::trace;
 
 use crate::ByteString;
-use crate::padded_reader::PaddedReader;
+use crate::padded_reader::{PaddedReader, check_padding};
 use crate::wire::calc_aligned;
 use harmonia_utils_io::{AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending, LentReader};
 
@@ -140,6 +140,7 @@ where
                         buf = ready!(reader.as_mut().poll_force_fill_buf(cx))?;
                     }
 
+                    check_padding(&buf[len..aligned])?;
                     let target = buf.split_to(len);
                     buf.advance(aligned - len);
                     reader.as_mut().consume(aligned);
@@ -160,6 +161,7 @@ where
                         buf = ready!(reader.as_mut().poll_force_fill_buf(cx))?;
                         trace!(len = buf.len(), "Reading name");
                     }
+                    check_padding(&buf[len..aligned])?;
                     let name_buf = buf.split_to(len);
                     trace!(len = buf.len(), ?name_buf, "Read name");
                     validate_entry_name(&name_buf)?;
@@ -301,6 +303,21 @@ mod unittests {
             .await
             .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// Like Nix, padding after file contents and strings has to be zero.
+    #[tokio::test]
+    #[rstest]
+    async fn reject_nonzero_padding(#[values(1, 3, 8, 64_000)] chunk_size: usize) {
+        for (case, nar) in test_data::nonzero_padding() {
+            let err = read_nar(test_data::Chunked::new(nar.clone(), chunk_size))
+                .await
+                .unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
+            let reader = BytesReader::new(test_data::Chunked::new(nar, chunk_size));
+            let err = crate::parse_nar_listing(reader).await.unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
+        }
     }
 
     #[tokio::test]

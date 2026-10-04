@@ -10,6 +10,17 @@ use tokio::io::{AsyncRead, ReadBuf};
 use crate::wire::ZEROS;
 use harmonia_utils_io::{AsyncBytesRead, DrainInto};
 
+/// Fails unless every byte of `padding` is zero, like Nix's `readPadding`.
+pub(crate) fn check_padding(padding: &[u8]) -> io::Result<()> {
+    if padding.iter().any(|&b| b != 0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "non-zero padding",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 enum State {
     Content(u64),
@@ -113,6 +124,10 @@ where
                             *this.state = State::Eof;
                         }
                     }
+                    // Returns the contents before reading the padding, so a
+                    // bad padding fails the next read instead of one that
+                    // already filled `buf`.
+                    return Poll::Ready(Ok(()));
                 }
                 State::ReadPadding(start, end) => {
                     let mut tail_buf = ReadBuf::new(this.padding);
@@ -126,6 +141,7 @@ where
                     }
                     *end = tail_buf.filled().len() as u8;
                     if *end == 8 {
+                        check_padding(&this.padding[*this.trailer_size as usize..])?;
                         *this.state = State::Padding(*start);
                     }
                 }
@@ -162,6 +178,7 @@ where
                     while buf.len() < trailing {
                         buf = ready!(this.reader.as_mut().poll_force_fill_buf(cx))?;
                     }
+                    check_padding(&buf[rem..trailing])?;
                     Poll::Ready(Ok(buf.split_to(rem)))
                 } else {
                     Poll::Ready(Ok(buf))
@@ -180,6 +197,7 @@ where
                     }
                     *end = tail_buf.filled().len() as u8;
                 }
+                check_padding(&this.padding[*this.trailer_size as usize..])?;
                 let start = *start;
                 *this.state = State::Padding(start);
                 let mut buf = Bytes::from_owner(*this.padding);
@@ -207,6 +225,7 @@ where
                     while buf.len() < trailing {
                         buf = ready!(this.reader.as_mut().poll_force_fill_buf(cx))?;
                     }
+                    check_padding(&buf[rem..trailing])?;
                     Poll::Ready(Ok(buf.split_to(rem)))
                 } else {
                     Poll::Ready(Ok(buf))
@@ -225,6 +244,7 @@ where
                     }
                     *end = tail_buf.filled().len() as u8;
                 }
+                check_padding(&this.padding[*this.trailer_size as usize..])?;
                 let start = *start;
                 *this.state = State::Padding(start);
                 let mut buf = Bytes::from_owner(*this.padding);
@@ -309,9 +329,10 @@ mod unittests {
 
     use bytes::Bytes;
     use rstest::rstest;
+    use tokio::io::AsyncReadExt as _;
 
     use super::PaddedReader;
-    use harmonia_utils_io::AsyncBytesRead as _;
+    use harmonia_utils_io::{AsyncBytesRead as _, BytesReader};
 
     #[tokio::test]
     #[rstest]
@@ -372,6 +393,55 @@ mod unittests {
         let (_content, total, aligned) = padded.as_mut().remaining_usize();
         assert_eq!(total, usize::MAX);
         assert_eq!(aligned, usize::MAX);
+    }
+
+    /// The input of `test_consume`, with a non-zero padding byte.
+    const NONZERO_PADDING: &[u8] = b"Hello world! From Vino\0\x01After";
+
+    /// Like Nix, the padding after the contents has to be zero.
+    #[tokio::test]
+    async fn read_rejects_nonzero_padding() {
+        let mut reader = io::Cursor::new(Bytes::from_static(NONZERO_PADDING));
+        let mut padded = pin!(PaddedReader::new(&mut reader, 22));
+        let err = padded.read_to_end(&mut Vec::new()).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// Filling the buffer checks the padding too.
+    #[tokio::test]
+    #[rstest]
+    async fn fill_buf_rejects_nonzero_padding(#[values(false, true)] force: bool) {
+        let reader = BytesReader::new(NONZERO_PADDING);
+        let mut padded = pin!(PaddedReader::new(reader, 22));
+        let err = poll_fn(|cx| {
+            if force {
+                padded.as_mut().poll_force_fill_buf(cx)
+            } else {
+                padded.as_mut().poll_fill_buf(cx)
+            }
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// The same, after part of the last 8 bytes were consumed.
+    #[tokio::test]
+    #[rstest]
+    async fn fill_buf_rejects_nonzero_padding_in_trailer(#[values(false, true)] force: bool) {
+        let mut reader = io::Cursor::new(Bytes::from_static(NONZERO_PADDING));
+        let mut padded = pin!(PaddedReader::new(&mut reader, 22));
+        padded.as_mut().consume(19);
+        let err = poll_fn(|cx| {
+            if force {
+                padded.as_mut().poll_force_fill_buf(cx)
+            } else {
+                padded.as_mut().poll_fill_buf(cx)
+            }
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 
     // Read to end

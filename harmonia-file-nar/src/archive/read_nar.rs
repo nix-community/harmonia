@@ -96,6 +96,7 @@ use tokio::io::{AsyncBufRead, AsyncRead};
 use tracing::{error, trace};
 
 use super::radix_tree::{RLookup, RMatch, RTree};
+use crate::padded_reader::check_padding;
 use crate::wire::{ZEROS, calc_aligned};
 use harmonia_utils_io::{AsyncBytesRead, DrainInto};
 
@@ -350,6 +351,7 @@ impl<const P: bool> Inner<P> {
                     if !P {
                         break;
                     }
+                    check_tail_padding(buf, size, rem)?;
                     if (buf.len() as u64) < rem {
                         parsed += buf.len();
                         self.state =
@@ -482,6 +484,7 @@ impl<const P: bool> Inner<P> {
                     if !P {
                         break;
                     }
+                    check_tail_padding(buf, len, rem)?;
                     if (buf.len() as u64) < rem {
                         parsed += buf.len();
                         self.state = InnerState::ReadEntryName(len, rem - buf.len() as u64);
@@ -509,6 +512,15 @@ impl<const P: bool> Inner<P> {
         }
         Ok(parsed)
     }
+}
+
+/// `buf` holds the next bytes of a string of `len` bytes, of which `rem`,
+/// padding included, are unread. Fails if the padding among them isn't zero.
+fn check_tail_padding(buf: &[u8], len: u64, rem: u64) -> io::Result<()> {
+    let padding = calc_aligned(len) - len;
+    let take = min(buf.len() as u64, rem);
+    let start = rem.saturating_sub(padding).min(take);
+    check_padding(&buf[start as usize..take as usize])
 }
 
 pin_project! {
@@ -818,6 +830,18 @@ mod unittests {
     use crate::archive::write_nar;
 
     use super::NarReader;
+
+    /// Like Nix's copyNAR, padding after file contents and strings has to
+    /// be zero.
+    #[tokio::test]
+    #[rstest]
+    async fn reject_nonzero_padding(#[values(1, 3, 8, 64_000)] chunk_size: usize) {
+        for (case, nar) in nonzero_padding() {
+            let mut reader = NarReader::new(BufReader::new(Chunked::new(nar, chunk_size)));
+            let err = reader.read_to_end(&mut Vec::new()).await.unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
+        }
+    }
 
     #[tokio::test]
     #[rstest]
