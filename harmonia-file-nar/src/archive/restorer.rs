@@ -32,6 +32,8 @@ pub enum NarWriteOperation {
     CreateFile,
     #[display("path contains invalid UTF-8")]
     PathUTF8,
+    #[display("invalid NAR entry")]
+    InvalidEntry,
 }
 
 #[derive(Error, Debug)]
@@ -58,6 +60,13 @@ impl NarWriteError {
             io::Error::new(io::ErrorKind::InvalidData, err),
         )
     }
+    pub fn invalid_entry_error(path: PathBuf, reason: &'static str) -> Self {
+        Self::new(
+            NarWriteOperation::InvalidEntry,
+            path,
+            io::Error::new(io::ErrorKind::InvalidData, reason),
+        )
+    }
     pub fn create_dir_error(path: PathBuf, err: io::Error) -> Self {
         Self::new(NarWriteOperation::CreateDirectory, path, err)
     }
@@ -74,6 +83,10 @@ pub struct NarRestorer {
     use_case_hack: bool,
     entries: Entries,
     dir_stack: Vec<Entries>,
+    /// How many directories of the NAR are open.
+    depth: usize,
+    /// Whether the NAR's root entry has been seen.
+    root_seen: bool,
 }
 
 impl NarRestorer {
@@ -95,7 +108,53 @@ impl NarRestorer {
             use_case_hack,
             entries: Default::default(),
             dir_stack: Default::default(),
+            depth: 0,
+            root_seen: false,
         }
+    }
+
+    /// Checks that `event` stays inside the destination.
+    ///
+    /// The events don't have to come from our parser, so the names and the
+    /// nesting are checked here: the root has no name, everything below it has
+    /// a single path component, and nothing follows the root or closes it twice.
+    fn check_event<R>(&mut self, event: &NarEvent<R>) -> Result<(), NarWriteError> {
+        let invalid = |name: &[u8], reason| {
+            let name = name.to_os_str_lossy();
+            NarWriteError::invalid_entry_error(self.path.join(name), reason)
+        };
+        let name = match event {
+            NarEvent::File { name, .. }
+            | NarEvent::Symlink { name, .. }
+            | NarEvent::StartDirectory { name } => name,
+            NarEvent::EndDirectory => {
+                if self.depth == 0 {
+                    return Err(invalid(b"", "end of a directory that was not started"));
+                }
+                self.depth -= 1;
+                return Ok(());
+            }
+        };
+        if self.depth == 0 {
+            if self.root_seen {
+                return Err(invalid(name, "entry after the root"));
+            }
+            if !name.is_empty() {
+                return Err(invalid(name, "the root has a name"));
+            }
+            self.root_seen = true;
+        } else if name.is_empty()
+            || name.as_ref() == b"."
+            || name.as_ref() == b".."
+            || name.contains(&b'/')
+            || name.contains(&0)
+        {
+            return Err(invalid(name, "invalid file name"));
+        }
+        if matches!(event, NarEvent::StartDirectory { .. }) {
+            self.depth += 1;
+        }
+        Ok(())
     }
 
     /// Process a single NAR event and send its filesystem work to `writer`.
@@ -107,6 +166,7 @@ impl NarRestorer {
     where
         R: AsyncBufRead + Unpin,
     {
+        self.check_event(&event)?;
         match event {
             NarEvent::File {
                 name,
@@ -474,6 +534,98 @@ mod unittests {
             .await
             .unwrap();
         assert_eq!(s, events);
+    }
+
+    fn file(name: &'static [u8]) -> test_data::TestNarEvent {
+        NarEvent::File {
+            name: Bytes::from_static(name),
+            executable: false,
+            size: 1,
+            reader: std::io::Cursor::new(Bytes::from_static(b"x")),
+        }
+    }
+
+    fn symlink(name: &'static [u8]) -> test_data::TestNarEvent {
+        NarEvent::Symlink {
+            name: Bytes::from_static(name),
+            target: Bytes::from_static(b"/etc"),
+        }
+    }
+
+    fn start_dir(name: &'static [u8]) -> test_data::TestNarEvent {
+        NarEvent::StartDirectory {
+            name: Bytes::from_static(name),
+        }
+    }
+
+    /// `restore` doesn't trust its input: whatever the stream says, nothing
+    /// may be created outside the destination.
+    #[tokio::test]
+    #[rstest]
+    #[case::dotdot(vec![start_dir(b""), file(b"..")])]
+    #[case::dot(vec![start_dir(b""), file(b".")])]
+    #[case::slash(vec![start_dir(b""), file(b"a/b")])]
+    #[case::traversal(vec![start_dir(b""), file(b"../escape")])]
+    #[case::absolute(vec![start_dir(b""), file(b"/tmp/escape")])]
+    #[case::nul(vec![start_dir(b""), file(b"a\0b")])]
+    #[case::empty_name(vec![start_dir(b""), file(b"")])]
+    #[case::dotdot_dir(vec![start_dir(b""), start_dir(b".."), file(b"escape"), NarEvent::EndDirectory, NarEvent::EndDirectory])]
+    #[case::dotdot_symlink(vec![start_dir(b""), symlink(b"../escape")])]
+    #[case::named_root(vec![file(b"escape")])]
+    #[case::end_without_start(vec![NarEvent::EndDirectory, file(b"escape")])]
+    #[case::end_past_root(vec![start_dir(b""), NarEvent::EndDirectory, NarEvent::EndDirectory, file(b"escape")])]
+    #[case::after_root_dir(vec![start_dir(b""), NarEvent::EndDirectory, file(b"escape")])]
+    #[case::after_root_file(vec![file(b""), file(b"escape")])]
+    #[case::second_root(vec![start_dir(b""), NarEvent::EndDirectory, start_dir(b"")])]
+    async fn test_restore_rejects_escape(#[case] events: test_data::TestNarEvents) {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+
+        let err = restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+            .await
+            .unwrap_err();
+        assert_eq!(err.operation, NarWriteOperation::InvalidEntry);
+
+        // Only the destination itself may exist next to it.
+        let siblings: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n != "output")
+            .collect();
+        assert!(siblings.is_empty(), "{siblings:?}");
+        assert!(!path.join("..").join("escape").exists());
+    }
+
+    /// A symlink is never followed by a later entry of the same name.
+    #[tokio::test]
+    #[rstest]
+    #[case::dir(start_dir(b"link"), "")]
+    #[case::file(file(b"link"), "")]
+    #[case::dangling_file(file(b"link"), "missing")]
+    async fn test_restore_does_not_follow_symlink(
+        #[case] second: test_data::TestNarEvent,
+        #[case] target_name: &str,
+    ) {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let path = dir.path().join("output");
+        let link = NarEvent::Symlink {
+            name: Bytes::from_static(b"link"),
+            target: Bytes::copy_from_slice(
+                outside.join(target_name).as_os_str().as_encoded_bytes(),
+            ),
+        };
+        let mut events = vec![start_dir(b""), link, second];
+        if matches!(events[2], NarEvent::StartDirectory { .. }) {
+            events.extend([file(b"escape"), NarEvent::EndDirectory]);
+        }
+        events.push(NarEvent::EndDirectory);
+
+        restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+            .await
+            .unwrap_err();
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
     }
 
     #[tokio::test]
