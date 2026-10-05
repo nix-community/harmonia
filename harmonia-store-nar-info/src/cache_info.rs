@@ -5,36 +5,53 @@ use std::str::FromStr;
 
 use harmonia_store_path::StoreDir;
 
-/// Parsed `nix-cache-info`.
+/// Contents of a binary cache's `nix-cache-info` file.
 ///
-/// Fields are `None` when the file leaves them out. Nix then keeps the
-/// substituter's own settings, so a missing field isn't a default value.
-/// Nix also rejects a cache whose `StoreDir` differs from the local store's.
-/// Callers have to check that themselves.
+/// Every field is `None` when the file leaves it out. Nix only uses these
+/// values as defaults for the substituter's settings, so a missing field is
+/// not the same as Nix's default value.
+///
+/// Parsing does not check [`store_dir`](Self::store_dir) against the local
+/// store. Nix refuses a cache for a different store directory, so clients
+/// have to compare it themselves.
+///
+/// # Examples
+///
+/// ```
+/// use harmonia_store_nar_info::CacheInfo;
+///
+/// let text = "StoreDir: /nix/store\nWantMassQuery: 1\nPriority: 40\n";
+/// let info: CacheInfo = text.parse().unwrap();
+/// assert_eq!(info.priority, Some(40));
+/// assert_eq!(info.to_string(), text);
+/// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CacheInfo {
-    /// Store directory the cache's paths live in.
+    /// `StoreDir`: the store directory of the cache's paths.
     pub store_dir: Option<StoreDir>,
-    /// Whether Nix may query the cache for many paths at once.
+    /// `WantMassQuery`: whether Nix may query the cache for many paths at once.
     pub want_mass_query: Option<bool>,
-    /// Substituter priority. Nix tries a cache with a lower value first.
+    /// `Priority`: a lower value makes Nix try the cache earlier.
     pub priority: Option<i32>,
 }
 
-/// Errors from parsing `nix-cache-info`.
+/// Error returned when a `nix-cache-info` line has a value that cannot be parsed.
 #[derive(Debug, thiserror::Error)]
 pub enum CacheInfoParseError {
+    /// The value of a known key is malformed.
     #[error("line {line}: invalid {field} ({message})")]
     InvalidField {
+        /// One-based line number in the input.
         line: usize,
+        /// Key of the offending line.
         field: &'static str,
+        /// Why the value was rejected.
         message: String,
     },
 }
 
-/// Parses the way Nix's `BinaryCacheStore::init` does. It splits each line at
-/// the first `:` and trims only the value. It skips lines without a `:` and
-/// unknown keys, and a later line overrides an earlier one with the same key.
+/// Parses the way Nix does: unknown keys and lines without a `:` are ignored,
+/// and a later line overrides an earlier one with the same key.
 impl FromStr for CacheInfo {
     type Err = CacheInfoParseError;
 
@@ -67,7 +84,7 @@ impl FromStr for CacheInfo {
     }
 }
 
-/// Writes the fields that are set, one `Key: value` line each.
+/// Writes one `Key: value` line for each field that is set.
 impl fmt::Display for CacheInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(store_dir) = &self.store_dir {
