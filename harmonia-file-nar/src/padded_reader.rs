@@ -11,14 +11,18 @@ use crate::wire::ZEROS;
 use harmonia_utils_io::{AsyncBytesRead, DrainInto};
 
 /// Fails unless every byte of `padding` is zero, like Nix's `readPadding`.
+#[inline]
 pub(crate) fn check_padding(padding: &[u8]) -> io::Result<()> {
-    if padding.iter().any(|&b| b != 0) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "non-zero padding",
-        ));
+    // Padding is at most 7 bytes, so OR-ing them avoids a branch per byte.
+    if padding.iter().fold(0, |acc, &b| acc | b) != 0 {
+        return Err(non_zero_padding());
     }
     Ok(())
+}
+
+#[cold]
+fn non_zero_padding() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "non-zero padding")
 }
 
 #[derive(Debug, Clone)]

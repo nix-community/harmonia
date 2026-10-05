@@ -516,6 +516,7 @@ impl<const P: bool> Inner<P> {
 
 /// `buf` holds the next bytes of a string of `len` bytes, of which `rem`,
 /// padding included, are unread. Fails if the padding among them isn't zero.
+#[inline]
 fn check_tail_padding(buf: &[u8], len: u64, rem: u64) -> io::Result<()> {
     let padding = calc_aligned(len) - len;
     let take = min(buf.len() as u64, rem);
