@@ -12,20 +12,6 @@ use url::Url;
 use actix_web::{App, HttpResponse, HttpServer, http, web};
 use harmonia_store_path::{StorePath, StorePathHash};
 
-/// Macro for building byte vectors efficiently from parts
-#[macro_export]
-macro_rules! build_bytes {
-    ($($part:expr),* $(,)?) => {{
-        let parts: &[&[u8]] = &[$($part),*];
-        let capacity = parts.iter().map(|p| p.len()).sum();
-        let mut result = Vec::with_capacity(capacity);
-        for part in parts {
-            result.extend_from_slice(part);
-        }
-        result
-    }};
-}
-
 mod buildlog;
 mod cacheinfo;
 mod config;

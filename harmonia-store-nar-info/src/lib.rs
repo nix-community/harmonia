@@ -1,4 +1,12 @@
-//! NarInfo construction and formatting for the Nix binary cache protocol.
+//! Types for the metadata files of the Nix binary cache protocol.
+//!
+//! - [`NarInfo`] is the per-path `<hash>.narinfo` file, which can be parsed
+//!   with [`parse_narinfo_txt`] and rendered with [`format_narinfo_txt`].
+//! - [`CacheInfo`] is the `nix-cache-info` file at the root of a cache.
+
+mod cache_info;
+
+pub use cache_info::{CacheInfo, CacheInfoParseError};
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
