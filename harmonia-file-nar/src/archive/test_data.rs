@@ -226,3 +226,63 @@ where
     write(path.join("testing.txt"), b"Hello world!")?;
     Ok(())
 }
+
+#[cfg(any(test, feature = "test"))]
+/// NARs that Nix rejects, each with one non-zero padding byte after a string
+/// or file contents. Each comes with the name of what the padding follows.
+pub fn nonzero_padding() -> Vec<(&'static str, Bytes)> {
+    let dir = vec![
+        NarEvent::StartDirectory { name: Bytes::new() },
+        NarEvent::File {
+            name: Bytes::from_static(b"foo"),
+            executable: false,
+            size: 0,
+            reader: Cursor::new(Bytes::new()),
+        },
+        NarEvent::EndDirectory,
+    ];
+    let cases: [(_, _, &[u8]); 4] = [
+        ("contents", text_file(), b"Hello world!"),
+        ("symlink target", symlink(), b"../deep"),
+        ("entry name", dir, b"foo"),
+        ("token", text_file(), b"type"),
+    ];
+    cases
+        .into_iter()
+        .map(|(case, events, before)| {
+            let mut nar = Vec::from(super::write_nar(events.iter()));
+            let at = nar.windows(before.len()).position(|w| w == before).unwrap() + before.len();
+            assert_eq!(nar[at], 0, "{case}");
+            nar[at] = 1;
+            (case, Bytes::from(nar))
+        })
+        .collect()
+}
+
+#[cfg(any(test, feature = "test"))]
+/// Returns at most `size` bytes per read, so readers get the data in pieces.
+pub struct Chunked {
+    data: Bytes,
+    size: usize,
+}
+
+#[cfg(any(test, feature = "test"))]
+impl Chunked {
+    pub fn new(data: Bytes, size: usize) -> Self {
+        Self { data, size }
+    }
+}
+
+#[cfg(any(test, feature = "test"))]
+impl tokio::io::AsyncRead for Chunked {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let n = this.size.min(this.data.len()).min(buf.remaining());
+        buf.put_slice(&this.data.split_to(n));
+        std::task::Poll::Ready(Ok(()))
+    }
+}
