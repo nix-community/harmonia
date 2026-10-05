@@ -1285,6 +1285,7 @@ dependencies = [
  "harmonia-utils-signature",
  "harmonia-utils-test",
  "hex-literal",
+ "rstest",
  "serde",
  "serde_json",
  "thiserror",

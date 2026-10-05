@@ -22,6 +22,7 @@ harmonia-store-content-address = { workspace = true }
 harmonia-store-path-info       = { workspace = true }
 harmonia-utils-test            = { workspace = true }
 hex-literal                    = { workspace = true }
+rstest                         = { workspace = true }
 serde_json                     = { workspace = true }
 
 [[test]]
