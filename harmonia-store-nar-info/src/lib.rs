@@ -11,7 +11,7 @@ use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_store_path_info::{
     NarHash, StorePathKeyed, UnkeyedValidPathInfo, ValidPathInfo, fingerprint_path,
 };
-use harmonia_utils_hash::{Hash, fmt::Base32};
+use harmonia_utils_hash::{Hash, fmt::Any};
 use harmonia_utils_signature::{SecretKey, Signature};
 
 /// A keyed NarInfo: store path plus narinfo metadata.
@@ -204,10 +204,11 @@ pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarIn
             }
             "URL" => url = Some(value.to_owned()),
             "Compression" => compression = Some(value.to_owned()),
+            // Nix accepts any encoding here, and Cachix writes base16.
             "FileHash" => {
                 download_hash = Some(
                     value
-                        .parse::<Base32<Hash>>()
+                        .parse::<Any<Hash>>()
                         .map_err(|e| invalid("FileHash", &e))?
                         .into_hash(),
                 );
@@ -216,12 +217,13 @@ pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarIn
                 download_size = Some(value.parse::<u64>().map_err(|e| invalid("FileSize", &e))?);
             }
             "NarHash" => {
-                nar_hash = Some(
-                    value
-                        .parse::<Base32<NarHash>>()
-                        .map_err(|e| invalid("NarHash", &e))?
-                        .into_hash(),
-                );
+                // Parse as `Hash`, which has no implied algorithm, so that the
+                // `sha256:` prefix is required like in Nix.
+                let hash = value
+                    .parse::<Any<Hash>>()
+                    .map_err(|e| invalid("NarHash", &e))?
+                    .into_hash();
+                nar_hash = Some(NarHash::try_from(hash).map_err(|e| invalid("NarHash", &e))?);
             }
             "NarSize" => {
                 nar_size = Some(value.parse::<u64>().map_err(|e| invalid("NarSize", &e))?);
@@ -396,6 +398,9 @@ impl<'de> Deserialize<'de> for UnkeyedNarInfo {
 
 #[cfg(test)]
 mod tests {
+    use harmonia_utils_hash::HashView as _;
+    use rstest::rstest;
+
     use super::*;
 
     #[test]
@@ -483,33 +488,100 @@ mod tests {
         assert_eq!(parsed, original);
     }
 
-    #[test]
-    fn test_parse_full_store_path_field() {
-        let store_dir = StoreDir::default();
-        let text = "StorePath: /nix/store/55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3
-URL: nar/abc.nar
-Compression: none
-NarHash: sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0
-NarSize: 196040
-";
-        let parsed = parse_narinfo_txt(&store_dir, text).unwrap();
+    const SHA256: [u8; 32] =
+        hex_literal::hex!("407bcd9b608b7a78f9885930c2ce1fcafae0977d31ccd43fc1e998cb475a9aac");
+    const SHA1: [u8; 20] = hex_literal::hex!("da39a3ee5e6b4b0d3255bfef95601890afd80709");
+    const B32: &str = "1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0";
+    const HEX: &str = "407bcd9b608b7a78f9885930c2ce1fcafae0977d31ccd43fc1e998cb475a9aac";
+    const B64: &str = "QHvNm2CLenj5iFkwws4fyvrgl30xzNQ/wemYy0damqw=";
+    const SHA1_HEX: &str = "da39a3ee5e6b4b0d3255bfef95601890afd80709";
+
+    /// Parses a valid narinfo in which `field` is replaced by `value`, or dropped if `None`.
+    fn parse_with(field: &str, value: Option<&str>) -> Result<NarInfo, NarInfoParseError> {
+        let defaults = [
+            (
+                "StorePath",
+                "/nix/store/55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3",
+            ),
+            ("URL", "nar/abc.nar.zst"),
+            ("Compression", "zstd"),
+            ("FileHash", &format!("sha256:{B32}")),
+            ("FileSize", "12345"),
+            ("NarHash", &format!("sha256:{B32}")),
+            ("NarSize", "196040"),
+        ];
+        let mut fields: Vec<(&str, &str)> = defaults
+            .into_iter()
+            .filter(|(name, _)| *name != field)
+            .collect();
+        fields.extend(value.map(|v| (field, v)));
+        let text: String = fields.iter().map(|(n, v)| format!("{n}: {v}\n")).collect();
+        parse_narinfo_txt(&StoreDir::default(), &text)
+    }
+
+    // Nix accepts any encoding (Cachix writes base16) but requires the type prefix.
+    // Only FileHash may be something other than sha256.
+    #[rstest]
+    #[case::base32(format!("sha256:{B32}"), &SHA256, true)]
+    #[case::base16(format!("sha256:{HEX}"), &SHA256, true)]
+    #[case::base16_upper(format!("sha256:{}", HEX.to_uppercase()), &SHA256, true)]
+    #[case::base64(format!("sha256:{B64}"), &SHA256, true)]
+    #[case::sri(format!("sha256-{B64}"), &SHA256, true)]
+    #[case::sha1(format!("sha1:{SHA1_HEX}"), &SHA1, false)]
+    fn test_parse_hash_accepted(
+        #[values("FileHash", "NarHash")] field: &str,
+        #[case] value: String,
+        #[case] digest: &[u8],
+        #[case] allowed_in_nar_hash: bool,
+    ) {
+        let result = parse_with(field, Some(&value));
+        if field == "NarHash" && !allowed_in_nar_hash {
+            assert!(matches!(
+                result,
+                Err(NarInfoParseError::InvalidField {
+                    field: "NarHash",
+                    ..
+                })
+            ));
+            return;
+        }
+        let info = result.unwrap();
+        let actual = match field {
+            "FileHash" => info.info.download_hash.unwrap(),
+            _ => info.info.info.nar_hash.into(),
+        };
+        assert_eq!(actual.digest_bytes(), digest);
         assert_eq!(
-            parsed.path.to_string(),
+            info.path.to_string(),
             "55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3"
         );
     }
 
-    #[test]
-    fn test_parse_missing_store_path() {
-        let store_dir = StoreDir::default();
-        let text = "URL: nar/abc.nar
-NarHash: sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0
-NarSize: 1
-";
-        let err = parse_narinfo_txt(&store_dir, text).unwrap_err();
+    #[rstest]
+    #[case::bare_base32(B32.to_owned())]
+    #[case::bare_base16(HEX.to_owned())]
+    #[case::bare_base64(B64.to_owned())]
+    #[case::unpadded_base64(format!("sha256:{}", B64.trim_end_matches('=')))]
+    #[case::wrong_length("sha256:abcd".to_owned())]
+    fn test_parse_hash_rejected(
+        #[values("FileHash", "NarHash")] field: &'static str,
+        #[case] value: String,
+    ) {
         assert!(matches!(
-            err,
-            NarInfoParseError::Missing { field: "StorePath" }
+            parse_with(field, Some(&value)),
+            Err(NarInfoParseError::InvalidField { field: f, .. }) if f == field
+        ));
+    }
+
+    #[rstest]
+    #[case("StorePath")]
+    #[case("URL")]
+    #[case("NarHash")]
+    #[case("NarSize")]
+    fn test_parse_missing_field(#[case] field: &'static str) {
+        assert!(matches!(
+            parse_with(field, None),
+            Err(NarInfoParseError::Missing { field: f }) if f == field
         ));
     }
 }
