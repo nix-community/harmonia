@@ -44,6 +44,7 @@ version = "3.3.0"
 
 [workspace.dependencies]
 async-stream = "0.3"
+aws-lc-rs = "1"
 blake3 = "1.8"
 bstr = "1.11"
 bytes = "1.11"
@@ -85,7 +86,6 @@ rayon = "1"
 rusqlite = { version = "0.40", features = [ "bundled" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
-aws-lc-rs = "1"
 sha1 = "0.11"
 sha2 = "0.11"
 thiserror = "2"
