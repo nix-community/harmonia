@@ -44,6 +44,7 @@ version = "3.3.0"
 
 [workspace.dependencies]
 async-stream = "0.3"
+aws-lc-rs = "1"
 blake3 = "1.8"
 bstr = "1.11"
 bytes = "1.11"
