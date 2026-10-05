@@ -5,6 +5,7 @@ mod borrowed;
 mod context;
 pub mod fmt;
 mod owned;
+mod sha;
 mod sha256;
 mod view;
 

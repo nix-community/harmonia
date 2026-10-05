@@ -22,9 +22,16 @@ pin-project-lite             = { workspace = true }
 proptest                     = { workspace = true, optional = true }
 proptest-derive              = { workspace = true, optional = true }
 serde                        = { workspace = true }
-sha1                         = { workspace = true }
-sha2                         = { workspace = true }
 thiserror                    = { workspace = true }
+
+# aws-lc has hand-written assembly for CPUs without SHA extensions, where
+# sha1/sha2 fall back to portable Rust. It does not build for wasm.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+aws-lc-rs = { workspace = true }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+sha1 = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 harmonia-utils-hash = { path = ".", features = [ "test" ] }

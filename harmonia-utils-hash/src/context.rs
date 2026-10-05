@@ -1,15 +1,12 @@
 use std::fmt as sfmt;
 
-use sha1::Digest;
-
+use crate::sha::ShaContext;
 use crate::{Algorithm, Hash};
 
 #[derive(Clone)]
 enum InnerContext {
     MD5(md5::Context),
-    SHA1(sha1::Sha1),
-    SHA256(sha2::Sha256),
-    SHA512(sha2::Sha512),
+    Sha(ShaContext),
     BLAKE3(Box<blake3::Hasher>),
 }
 
@@ -38,9 +35,9 @@ impl Context {
     pub fn new(algorithm: Algorithm) -> Self {
         let inner = match algorithm {
             Algorithm::MD5 => InnerContext::MD5(md5::Context::new()),
-            Algorithm::SHA1 => InnerContext::SHA1(sha1::Sha1::new()),
-            Algorithm::SHA256 => InnerContext::SHA256(sha2::Sha256::new()),
-            Algorithm::SHA512 => InnerContext::SHA512(sha2::Sha512::new()),
+            Algorithm::SHA1 | Algorithm::SHA256 | Algorithm::SHA512 => {
+                InnerContext::Sha(ShaContext::new(algorithm))
+            }
             Algorithm::BLAKE3 => InnerContext::BLAKE3(Box::new(blake3::Hasher::new())),
         };
         Context(algorithm, inner)
@@ -52,9 +49,7 @@ impl Context {
         let data = data.as_ref();
         match &mut self.1 {
             InnerContext::MD5(ctx) => ctx.consume(data),
-            InnerContext::SHA1(ctx) => ctx.update(data),
-            InnerContext::SHA256(ctx) => ctx.update(data),
-            InnerContext::SHA512(ctx) => ctx.update(data),
+            InnerContext::Sha(ctx) => ctx.update(data),
             InnerContext::BLAKE3(ctx) => {
                 ctx.update(data);
             }
@@ -68,9 +63,7 @@ impl Context {
     pub fn finish(self) -> Hash {
         match self.1 {
             InnerContext::MD5(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
-            InnerContext::SHA1(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
-            InnerContext::SHA256(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
-            InnerContext::SHA512(ctx) => Hash::new(self.0, ctx.finalize().as_ref()),
+            InnerContext::Sha(ctx) => Hash::new(self.0, ctx.finish().as_ref()),
             InnerContext::BLAKE3(ctx) => Hash::new(self.0, ctx.finalize().as_bytes()),
         }
     }
