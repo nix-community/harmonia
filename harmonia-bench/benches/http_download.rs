@@ -1,7 +1,4 @@
-mod common;
-
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use std::process::Command;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -174,30 +171,6 @@ impl Conn {
 }
 
 /// Get all store paths in the closure of a path.
-fn get_closure_paths(store_path: &str) -> Vec<String> {
-    let output = Command::new("nix")
-        .args([
-            "--extra-experimental-features",
-            "nix-command flakes",
-            "path-info",
-            "--recursive",
-            store_path,
-        ])
-        .output()
-        .expect("nix path-info failed");
-    assert!(
-        output.status.success(),
-        "nix path-info failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .unwrap()
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect()
-}
-
 /// Extract the hash part from a store path (e.g., `/nix/store/abc123-name` -> `abc123`).
 fn store_path_hash(path: &str) -> String {
     let basename = path.rsplit('/').next().unwrap();
@@ -251,14 +224,14 @@ async fn download_nar(conn: &mut Conn, nar_url: &str) -> u64 {
 }
 
 fn benchmark_http_download(c: &mut Criterion) {
-    let harmonia_bin = common::build_harmonia();
-    let closure_path = common::build_closure();
+    let harmonia_bin = harmonia_bench::build_harmonia();
+    let closure_path = harmonia_bench::build_closure();
 
-    let paths = get_closure_paths(&closure_path);
+    let paths = harmonia_bench::closure_paths(&closure_path);
     eprintln!("Closure has {} store paths", paths.len());
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let (port, _guard) = rt.block_on(common::start_harmonia(&harmonia_bin));
+    let (port, _guard) = rt.block_on(harmonia_bench::start_harmonia(&harmonia_bin));
     let addr = format!("127.0.0.1:{}", port);
     eprintln!("Harmonia server running on {}", addr);
 
@@ -325,9 +298,7 @@ fn benchmark_http_download(c: &mut Criterion) {
         group.finish();
     }
 
-    let mut group = c.benchmark_group("http");
-    group.sample_size(10);
-    group.measurement_time(Duration::from_secs(5));
+    let mut group = harmonia_bench::slow_group(c, "http");
 
     for encoding in ["identity", "zstd"] {
         group.bench_function(format!("sequential_{encoding}"), |b| {

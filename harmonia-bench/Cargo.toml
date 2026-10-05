@@ -3,13 +3,18 @@ name              = "harmonia-bench"
 version.workspace = true
 edition.workspace = true
 
+[dependencies]
+criterion          = { version = "0.8", features = [ "html_reports" ] }
+nix.workspace      = true
+tempfile.workspace = true
+tokio              = { workspace = true, features = [ "rt-multi-thread", "time", "net", "io-util" ] }
+
 [dev-dependencies]
-criterion                         = { version = "0.8", features = [ "html_reports" ] }
+bytes                             = { workspace = true }
+futures-util                      = { workspace = true }
+harmonia-file-nar.workspace       = true
 harmonia-store-path.workspace     = true
 harmonia-store-ref-scan.workspace = true
-nix.workspace                     = true
-tempfile.workspace                = true
-tokio                             = { workspace = true, features = [ "rt-multi-thread", "time", "net", "io-util" ] }
 
 [[bench]]
 harness = false
@@ -18,6 +23,10 @@ name    = "closure_download"
 [[bench]]
 harness = false
 name    = "http_download"
+
+[[bench]]
+harness = false
+name    = "nar_restore"
 
 [[bench]]
 harness = false

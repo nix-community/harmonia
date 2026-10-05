@@ -983,7 +983,10 @@ dependencies = [
 name = "harmonia-bench"
 version = "3.3.0"
 dependencies = [
+ "bytes",
  "criterion",
+ "futures-util",
+ "harmonia-file-nar",
  "harmonia-store-path",
  "harmonia-store-ref-scan",
  "nix",

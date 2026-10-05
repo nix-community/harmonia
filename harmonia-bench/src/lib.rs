@@ -1,3 +1,5 @@
+//! Helpers shared by the benchmarks.
+
 use std::io::Write;
 use std::process::{Child, Command};
 use std::time::Duration;
@@ -203,4 +205,40 @@ pub fn build_closure() -> String {
     let closure_path = nix_build(&closure_flake);
     eprintln!("Closure built: {}", closure_path);
     closure_path
+}
+
+/// List the store paths in the runtime closure of `store_path`.
+pub fn closure_paths(store_path: &str) -> Vec<String> {
+    let output = Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "path-info",
+            "--recursive",
+            store_path,
+        ])
+        .output()
+        .expect("nix path-info failed");
+    assert!(
+        output.status.success(),
+        "nix path-info failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+/// Start a criterion group for the slow, closure-sized benchmarks.
+pub fn slow_group<'a>(
+    c: &'a mut criterion::Criterion,
+    name: &str,
+) -> criterion::BenchmarkGroup<'a, criterion::measurement::WallTime> {
+    let mut group = c.benchmark_group(name);
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(5));
+    group
 }
