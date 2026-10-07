@@ -1,21 +1,17 @@
-mod common;
-
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 fn benchmark_closure_download(c: &mut Criterion) {
-    let harmonia_bin = common::build_harmonia();
-    let closure_path = common::build_closure();
+    let harmonia_bin = harmonia_bench::build_harmonia();
+    let closure_path = harmonia_bench::build_closure();
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let (port, _guard) = rt.block_on(common::start_harmonia(&harmonia_bin));
+    let (port, _guard) = rt.block_on(harmonia_bench::start_harmonia(&harmonia_bin));
     eprintln!("Harmonia server running on port {}", port);
 
-    let mut group = c.benchmark_group("closure");
-    group.sample_size(10);
-    group.measurement_time(Duration::from_secs(5));
+    let mut group = harmonia_bench::slow_group(c, "closure");
 
     group.bench_function("download", |b| {
         b.iter_custom(|iters| {
