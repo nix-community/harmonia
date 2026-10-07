@@ -108,6 +108,9 @@ let
       pnameSuffix = "-llvm-cov";
       doInstallCargoArtifacts = false;
 
+      # The integration tests bind to localhost, which the darwin sandbox denies.
+      __darwinAllowLocalNetworking = true;
+
       # Use same RUSTFLAGS as cargoArtifactsCov to avoid rebuilding dependencies
       CARGO_BUILD_RUSTFLAGS = coverageRustflags;
 
