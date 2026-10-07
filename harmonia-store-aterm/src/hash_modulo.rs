@@ -100,16 +100,17 @@ fn modulo_drvs<E>(
         if !oi.dynamic_outputs.is_empty() {
             return Ok(None);
         }
-        // Nix `insert_or_assign`s on a hash-key collision; replicate that
-        // exactly since this is the preimage for output paths.
+        // Nix merges the output names on a hash-key collision
+        // (`drvInputs[drvHash].insert(...)` in derivation/masked.cc);
+        // replicate that exactly since this is the preimage for output paths.
         let mut add = |h: Sha256, outputs: BTreeSet<OutputName>| {
-            drvs.insert(
-                h,
-                OutputInputs {
-                    outputs,
+            drvs.entry(h)
+                .or_insert_with(|| OutputInputs {
+                    outputs: BTreeSet::new(),
                     dynamic_outputs: BTreeMap::new(),
-                },
-            );
+                })
+                .outputs
+                .extend(outputs);
         };
         match lookup(drv_path).map_err(InputModuloError::Lookup)? {
             HashModulo::DeferredDrv => return Ok(None),
@@ -394,9 +395,9 @@ mod tests {
         drv
     }
 
-    /// Nix replaces (not merges) on hash-modulo key collision.
+    /// Nix merges (not replaces) on hash-modulo key collision.
     #[test]
-    fn modulo_drvs_collision_replaces_like_nix() {
+    fn modulo_drvs_collision_merges_like_nix() {
         let h = Sha256::digest(b"same");
         let mut inputs = DerivationInputs::default();
         let mk = |outs: &[&str]| OutputInputs {
@@ -414,7 +415,7 @@ mod tests {
         let res = modulo_drvs(&inputs, |_| Ok::<_, Infallible>(HashModulo::DrvHash(h)))
             .unwrap()
             .unwrap();
-        assert_eq!(res[&h], mk(&["out"]));
+        assert_eq!(res[&h], mk(&["dev", "out"]));
     }
 
     fn no_lookup(_: &StorePath) -> Result<HashModulo, Infallible> {
