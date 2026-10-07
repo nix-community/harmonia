@@ -289,6 +289,13 @@ impl StoreDb {
                      (SELECT id FROM DeadPaths)",
             )?;
         }
+        // Nix >= 2.35: outputPath is text, nothing cascades.
+        if crate::graph::has_table(&self.conn, "BuildTraceV3")? {
+            self.conn.execute_batch(
+                "DELETE FROM BuildTraceV3 WHERE outputPath IN \
+                     (SELECT path FROM ValidPaths WHERE id IN (SELECT id FROM DeadPaths))",
+            )?;
+        }
         self.conn
             .execute_batch("DELETE FROM ValidPaths WHERE id IN (SELECT id FROM DeadPaths)")?;
         Ok(())
