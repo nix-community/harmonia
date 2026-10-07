@@ -622,7 +622,11 @@ mod unittests {
         }
         events.push(NarEvent::EndDirectory);
 
-        restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+        // The case hack, on by default on macOS, would rename the second
+        // entry instead of letting it collide with the symlink.
+        RestoreOptions::new()
+            .use_case_hack(false)
+            .restore(iter(events).map(Ok::<_, NarWriteError>), &path)
             .await
             .unwrap_err();
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
