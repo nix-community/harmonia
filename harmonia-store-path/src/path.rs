@@ -296,12 +296,25 @@ impl std_hash::Hash for StorePathHash {
 }
 
 impl Ord for StorePathHash {
+    // Other crates can only inline this with #[inline], and BTreeSet, sort
+    // and binary_search call it for every comparison.
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.iter().rev().cmp(other.0.iter().rev())
+        // Nix base32 writes the last byte first, so the text order is the
+        // order of the digest read as a little-endian integer. Compare the
+        // top 4 bytes, then the low 16.
+        const _: () = assert!(STORE_PATH_HASH_SIZE == 4 + 16);
+        let key = |h: &Self| {
+            let high = u32::from_le_bytes(*h.0.last_chunk().unwrap());
+            let low = u128::from_le_bytes(*h.0.first_chunk().unwrap());
+            (high, low)
+        };
+        key(self).cmp(&key(other))
     }
 }
 
 impl PartialOrd for StorePathHash {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
@@ -930,7 +943,42 @@ mod unittests {
 mod proptests {
     use proptest::prelude::*;
 
-    use crate::{StoreDir, StorePath, StorePathName};
+    use crate::{StoreDir, StorePath, StorePathHash, StorePathName};
+
+    /// Two hashes that share bytes `n..20` for a random `n`. The highest
+    /// byte that differs decides the order, so the pairs reach every byte
+    /// position, and `n == 0` gives equal hashes.
+    fn arb_hash_pair() -> impl Strategy<Value = (StorePathHash, StorePathHash)> {
+        (
+            any::<StorePathHash>(),
+            any::<StorePathHash>(),
+            0..=StorePathHash::len(),
+        )
+            .prop_map(|(a, mut b, n)| {
+                b.0[n..].copy_from_slice(&a.0[n..]);
+                (a, b)
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_store_path_hash_ord_reversed_bytes((a, b) in arb_hash_pair()) {
+            prop_assert_eq!(a.cmp(&b), a.0.iter().rev().cmp(b.0.iter().rev()));
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_store_path_ord_matches_string(
+            (hash_a, hash_b) in arb_hash_pair(),
+            name_a in any::<StorePathName>(),
+            name_b in any::<StorePathName>(),
+        ) {
+            let a = StorePath { hash: hash_a, name: name_a };
+            let b = StorePath { hash: hash_b, name: name_b };
+            prop_assert_eq!(a.cmp(&b), a.to_string().cmp(&b.to_string()));
+        }
+    }
 
     proptest! {
         #[test]
