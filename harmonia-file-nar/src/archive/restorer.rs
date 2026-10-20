@@ -184,10 +184,8 @@ impl NarRestorer {
                     self.path.push(OsStr::from_bytes(&name));
                 }
                 drop(name);
-                writer
-                    .send(Op::CreateFile(self.path.clone(), executable))
-                    .await?;
                 let mut left = size;
+                let mut created = false;
                 loop {
                     // The parser's reads are small, so this collects bigger
                     // chunks for the writer. Reading to the end of the file
@@ -199,19 +197,27 @@ impl NarRestorer {
                         .await
                         .map_err(|err| NarWriteError::create_file_error(self.path.clone(), err))?;
                     left = left.saturating_sub(chunk.len() as u64);
-                    let last = chunk.len() < FILE_CHUNK_SIZE;
-                    if !chunk.is_empty() {
-                        // The permit counts the bytes read, not `size`, so a
-                        // reader that returns more than `size` still stays
-                        // inside the budget.
-                        let permit = writer
-                            .data
-                            .clone()
-                            .acquire_many_owned(chunk.len() as u32)
-                            .await
-                            .expect("the semaphore is never closed");
-                        writer.send(Op::Write(chunk, permit)).await?;
+                    // A file that fills its last chunk ends with an empty read.
+                    if created && chunk.is_empty() {
+                        break;
                     }
+                    let last = chunk.len() < FILE_CHUNK_SIZE;
+                    // The permit counts the bytes read, not `size`, so a
+                    // reader that returns more than `size` still stays inside
+                    // the budget.
+                    let permit = writer
+                        .data
+                        .clone()
+                        .acquire_many_owned(chunk.len() as u32)
+                        .await
+                        .expect("the semaphore is never closed");
+                    let op = if created {
+                        Op::Write(chunk, permit)
+                    } else {
+                        Op::CreateFile(self.path.clone(), executable, chunk, permit)
+                    };
+                    writer.send(op).await?;
+                    created = true;
                     if last {
                         break;
                     }
@@ -344,7 +350,8 @@ const DATA_IN_FLIGHT: usize = 8 * FILE_CHUNK_SIZE;
 enum Op {
     CreateDirectory(PathBuf),
     CreateSymlink(PathBuf, Bytes),
-    CreateFile(PathBuf, bool),
+    /// Carries the file's first chunk, so small files take one op.
+    CreateFile(PathBuf, bool, Vec<u8>, OwnedSemaphorePermit),
     /// More data for the last created file. The permit is its share of
     /// [`DATA_IN_FLIGHT`].
     Write(Vec<u8>, OwnedSemaphorePermit),
@@ -408,6 +415,11 @@ fn set_canonical_mtime(path: &Path) -> io::Result<()> {
     )?)
 }
 
+fn append((path, file): &mut (PathBuf, File), data: &[u8]) -> Result<(), NarWriteError> {
+    file.write_all(data)
+        .map_err(|err| NarWriteError::create_file_error(path.clone(), err))
+}
+
 struct Disk {
     canonical: bool,
     /// The last created file, which [`Op::Write`] appends to.
@@ -420,11 +432,12 @@ impl Disk {
     fn apply(&mut self, op: Op) -> Result<(), NarWriteError> {
         match op {
             Op::Write(data, _permit) => {
-                let (path, file) = self.file.as_mut().expect("file data follows its file");
-                file.write_all(&data)
-                    .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
+                append(
+                    self.file.as_mut().expect("file data follows its file"),
+                    &data,
+                )?;
             }
-            Op::CreateFile(path, executable) => {
+            Op::CreateFile(path, executable, data, _permit) => {
                 self.close_file()?;
                 trace!("Writing to file {:?}", path);
                 let mut mode = if executable { 0o777 } else { 0o666 };
@@ -438,7 +451,7 @@ impl Disk {
                 let created = options
                     .open(&path)
                     .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-                self.file = Some((path, created));
+                append(self.file.insert((path, created)), &data)?;
             }
             Op::CreateDirectory(path) => {
                 self.close_file()?;
