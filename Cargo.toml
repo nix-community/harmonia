@@ -100,7 +100,6 @@ tokio = { version = "1.41", features = [
     "net",
     "signal",
     "process",
-    "test-util",
 ] }
 tokio-util = "0.7"
 toml = "1.1"
