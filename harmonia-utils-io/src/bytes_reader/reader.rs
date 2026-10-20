@@ -206,10 +206,13 @@ where
 
     fn prepare(self: std::pin::Pin<&mut Self>, additional: usize) {
         let me = self.project();
-        let len = me.buf.len() + me.buf.len();
-        if additional > len && me.buf.capacity() + additional < *me.max_buf_size {
+        // Include the spare room `poll_force_fill_buf` wants before each
+        // read, so reading the rest of the string doesn't grow `buf` again.
+        // `additional` comes off the wire, hence saturating.
+        let needed = additional.saturating_add(*me.reserved_buf_size);
+        if additional > me.buf.len() && needed < *me.max_buf_size && me.buf.capacity() < needed {
             *me.view = None;
-            me.buf.reserve(additional - len);
+            me.buf.reserve(needed - me.buf.len());
         }
     }
 
@@ -383,6 +386,22 @@ mod unittests {
         assert_eq!(4, n1);
         assert_eq!(hex!("0123 4567 89AB CDEF 0100 0000"), buf);
         assert_eq!(0, reader.read(&mut buf[..]).await.unwrap());
+    }
+
+    /// A length near `usize::MAX` from the wire must not overflow `prepare`'s
+    /// size check.
+    #[tokio::test]
+    async fn test_prepare_huge_length() {
+        let mut mock = Builder::new();
+        mock.read(&[1; 12]);
+        let mut reader = BytesReader::new(mock.build());
+        assert_eq!(reader.force_fill().await.unwrap().len(), 12);
+
+        let capacity = reader.buf.capacity();
+        for additional in [usize::MAX, usize::MAX - 4] {
+            Pin::new(&mut reader).prepare(additional);
+            assert_eq!(reader.buf.capacity(), capacity);
+        }
     }
 
     #[tokio::test]
