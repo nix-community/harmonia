@@ -34,7 +34,8 @@ pub struct UnkeyedNarInfo {
     pub info: UnkeyedValidPathInfo,
     /// URL to fetch the NAR.
     pub url: Option<String>,
-    /// Compression method (e.g. "xz", "none").
+    /// Compression method (e.g. "xz", "none"). Like Nix, [`parse_narinfo_txt`]
+    /// sets "bzip2" when the field is missing or empty.
     pub compression: Option<String>,
     /// Hash of the (possibly compressed) download file.
     pub download_hash: Option<Hash>,
@@ -157,7 +158,7 @@ pub enum NarInfoParseError {
 pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarInfoParseError> {
     let mut path = Option::<StorePath>::None;
     let mut url = Option::<String>::None;
-    let mut compression = Option::<String>::None;
+    let mut compression = Option::<&str>::None;
     let mut download_hash = Option::<Hash>::None;
     let mut download_size = Option::<u64>::None;
     let mut nar_hash = Option::<NarHash>::None;
@@ -194,7 +195,7 @@ pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarIn
                 );
             }
             "URL" => url = Some(value.to_owned()),
-            "Compression" => compression = Some(value.to_owned()),
+            "Compression" => compression = Some(value),
             // Nix accepts any encoding here, and Cachix writes base16.
             "FileHash" => {
                 download_hash = Some(
@@ -275,7 +276,12 @@ pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarIn
                 store_dir: store_dir.clone(),
             },
             url: Some(url.ok_or(NarInfoParseError::Missing { field: "URL" })?),
-            compression,
+            compression: Some(
+                compression
+                    .filter(|c| !c.is_empty())
+                    .unwrap_or("bzip2")
+                    .to_owned(),
+            ),
             download_hash,
             download_size,
         },
@@ -597,5 +603,13 @@ mod tests {
     #[test]
     fn test_parse_empty_ca() {
         assert_eq!(parse_with("CA", Some("")).unwrap().info.info.ca, None);
+    }
+
+    #[rstest]
+    #[case::missing(None)]
+    #[case::empty(Some(""))]
+    fn test_parse_default_compression(#[case] value: Option<&str>) {
+        let info = parse_with("Compression", value).unwrap();
+        assert_eq!(info.info.compression.as_deref(), Some("bzip2"));
     }
 }
