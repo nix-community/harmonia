@@ -246,11 +246,14 @@ pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarIn
                 if ca.is_some() {
                     return Err(NarInfoParseError::Duplicate { field: "CA" });
                 }
-                ca = Some(
-                    value
-                        .parse::<ContentAddress>()
-                        .map_err(|e| invalid("CA", &e))?,
-                );
+                // Nix reads an empty value as no CA.
+                if !value.is_empty() {
+                    ca = Some(
+                        value
+                            .parse::<ContentAddress>()
+                            .map_err(|e| invalid("CA", &e))?,
+                    );
+                }
             }
             // Unknown keys are ignored
             _ => {}
@@ -589,5 +592,10 @@ mod tests {
             parse_with(field, None),
             Err(NarInfoParseError::Missing { field: f }) if f == field
         ));
+    }
+
+    #[test]
+    fn test_parse_empty_ca() {
+        assert_eq!(parse_with("CA", Some("")).unwrap().info.info.ca, None);
     }
 }
