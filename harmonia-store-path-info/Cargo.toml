@@ -27,7 +27,14 @@ hex-literal              = { workspace = true }
 serde_json               = { workspace = true }
 
 [features]
-test = [ "proptest", "proptest-derive", "harmonia-utils-hash/test" ]
+test = [
+    "proptest",
+    "proptest-derive",
+    "harmonia-store-content-address/test",
+    "harmonia-store-path/test",
+    "harmonia-utils-hash/test",
+    "harmonia-utils-signature/test",
+]
 
 [[test]]
 name = "json_upstream"
