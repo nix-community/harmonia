@@ -296,12 +296,22 @@ impl std_hash::Hash for StorePathHash {
 }
 
 impl Ord for StorePathHash {
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.iter().rev().cmp(other.0.iter().rev())
+        // Nix base32 writes the last byte first, so text order is the
+        // digest's little-endian integer order.
+        const _: () = assert!(STORE_PATH_HASH_SIZE == 4 + 16);
+        let key = |h: &Self| {
+            let high = u32::from_le_bytes(*h.0.last_chunk().unwrap());
+            let low = u128::from_le_bytes(*h.0.first_chunk().unwrap());
+            (high, low)
+        };
+        key(self).cmp(&key(other))
     }
 }
 
 impl PartialOrd for StorePathHash {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
@@ -930,7 +940,27 @@ mod unittests {
 mod proptests {
     use proptest::prelude::*;
 
-    use crate::{StoreDir, StorePath, StorePathName};
+    use crate::{StoreDir, StorePath, StorePathHash, StorePathName};
+
+    /// Hashes sharing bytes `n..`, so every byte position decides the order.
+    fn arb_hash_pair() -> impl Strategy<Value = (StorePathHash, StorePathHash)> {
+        (
+            any::<StorePathHash>(),
+            any::<StorePathHash>(),
+            0..=StorePathHash::len(),
+        )
+            .prop_map(|(a, mut b, n)| {
+                b.0[n..].copy_from_slice(&a.0[n..]);
+                (a, b)
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_store_path_hash_ord_reversed_bytes((a, b) in arb_hash_pair()) {
+            prop_assert_eq!(a.cmp(&b), a.0.iter().rev().cmp(b.0.iter().rev()));
+        }
+    }
 
     proptest! {
         #[test]
