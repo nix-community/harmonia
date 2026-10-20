@@ -289,9 +289,8 @@ impl FromStr for StorePathHash {
 
 impl std_hash::Hash for StorePathHash {
     fn hash<H: std_hash::Hasher>(&self, state: &mut H) {
-        for c in self.0.iter().rev() {
-            c.hash(state);
-        }
+        // The digest has a fixed length, so it needs no length prefix.
+        state.write(&self.0);
     }
 }
 
@@ -598,6 +597,22 @@ mod unittests {
     fn parse_hash_error(#[case] hash: &str, #[case] expected: StorePathError) {
         let err = hash.parse::<StorePathHash>().expect_err("parse failure");
         assert_eq!(err, expected);
+    }
+
+    #[test]
+    fn store_path_hash() {
+        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+
+        let a: StorePath = "00ljmhbmf3d12aq4l5l7yr7bxn03yqvf-a".parse().unwrap();
+        let b: StorePath = "00ljmhbmf3d12aq4l5l7yr7bxn03yqvf-b".parse().unwrap();
+        let c: StorePath = "0sbwqgpi6jbqr710w5vn0b4s5w6z8n8n-a".parse().unwrap();
+
+        // Parsing doesn't check the digest against the name, so untrusted
+        // input can hold many paths with one digest. They must still hash
+        // differently.
+        let state = BuildHasherDefault::<DefaultHasher>::default();
+        assert_ne!(state.hash_one(&a), state.hash_one(&b));
+        assert_ne!(state.hash_one(&a), state.hash_one(&c));
     }
 
     #[test]
