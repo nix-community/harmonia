@@ -62,13 +62,28 @@ pub fn encode_mut(input: &[u8], output: &mut [u8]) {
     output.reverse();
 }
 
+/// `decode_mut` reverses inputs up to this length on the stack instead of the
+/// heap. It is the nix32 length of a SHA-512 digest, the longest hash Nix
+/// writes in nix32.
+const STACK_DECODE_LEN: usize = encode_len(64);
+
 pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartial> {
-    // Reverse the input for decoding
-    let mut reversed = input.to_vec();
+    // Nix base32 is reversed, so decode a reversed copy of the input.
+    let mut stack = [0u8; STACK_DECODE_LEN];
+    let mut heap;
+    let reversed: &mut [u8] = match stack.get_mut(..input.len()) {
+        Some(buf) => {
+            buf.copy_from_slice(input);
+            buf
+        }
+        None => {
+            heap = input.to_vec();
+            &mut heap
+        }
+    };
     reversed.reverse();
 
-    // Decode using data-encoding
-    NIX_BASE32.decode_mut(&reversed, output).map_err(|err| {
+    NIX_BASE32.decode_mut(reversed, output).map_err(|err| {
         // Adjust error position to account for reversal
         let adjusted_pos = input.len() - err.error.position - 1;
         DecodePartial {
@@ -255,6 +270,30 @@ mod unittests {
     fn test_decode_bytes_fail(#[case] data: &str, #[case] expected: Result<usize, DecodePartial>) {
         let mut output = vec![0u8; decode_len(data.len())];
         assert_eq!(decode_mut(data.as_bytes(), &mut output), expected);
+    }
+
+    #[test]
+    fn test_decode_stack_and_heap() {
+        // A 64-byte SHA-512 digest encodes to STACK_DECODE_LEN characters, so
+        // decode_mut reverses the encodings of longer data on the heap.
+        for len in 0..=80 {
+            let data: Vec<u8> = (0..len as u8).collect();
+            let encoded = encode_string(&data).into_bytes();
+            let mut output = vec![0u8; len];
+            assert_eq!(decode_mut(&encoded, &mut output), Ok(len));
+            assert_eq!(output, data);
+
+            for pos in 0..encoded.len() {
+                let mut input = encoded.clone();
+                input[pos] = b'|';
+                assert_eq!(
+                    decode_mut(&input, &mut output),
+                    fail(pos, DecodeKind::Symbol),
+                    "symbol at {pos} of {}",
+                    input.len()
+                );
+            }
+        }
     }
 }
 
