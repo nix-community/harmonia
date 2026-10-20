@@ -177,8 +177,15 @@ impl NarRestorer {
                     name
                 };
 
+                // Drop `name` before reading so the parser can reuse the read
+                // buffer it points into.
+                let pushed = !name.is_empty();
+                if pushed {
+                    self.path.push(OsStr::from_bytes(&name));
+                }
+                drop(name);
                 writer
-                    .send(Op::CreateFile(join_name(&self.path, &name), executable))
+                    .send(Op::CreateFile(self.path.clone(), executable))
                     .await?;
                 let mut left = size;
                 loop {
@@ -190,9 +197,7 @@ impl NarRestorer {
                         .take(FILE_CHUNK_SIZE as u64)
                         .read_to_end(&mut chunk)
                         .await
-                        .map_err(|err| {
-                            NarWriteError::create_file_error(join_name(&self.path, &name), err)
-                        })?;
+                        .map_err(|err| NarWriteError::create_file_error(self.path.clone(), err))?;
                     left = left.saturating_sub(chunk.len() as u64);
                     let last = chunk.len() < FILE_CHUNK_SIZE;
                     if !chunk.is_empty() {
@@ -210,6 +215,9 @@ impl NarRestorer {
                     if last {
                         break;
                     }
+                }
+                if pushed {
+                    self.path.pop();
                 }
             }
             NarEvent::Symlink { name, target } => {
