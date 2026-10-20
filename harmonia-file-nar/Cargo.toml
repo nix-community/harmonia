@@ -32,6 +32,7 @@ tracing            = { workspace = true }
 walkdir            = "2.5"
 
 [dev-dependencies]
+harmonia-file-nar   = { path = ".", features = [ "test" ] }
 harmonia-utils-test = { workspace = true }
 proptest            = { workspace = true }
 rstest              = { workspace = true }

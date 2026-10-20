@@ -29,7 +29,10 @@ pin_project! {
         // Last entry name per open directory; entries must be strictly
         // increasing like Nix requires, which also rules out duplicates.
         // Empty means no entry seen yet (valid names are never empty).
-        prev_names: Vec<ByteString>,
+        // Stored back to back, starting at `prev_starts`; copied because
+        // `Bytes` slices would pin a read buffer per open directory.
+        prev_names: Vec<u8>,
+        prev_starts: Vec<usize>,
         // Bytes consumed so far; see [`NarParser::position`].
         position: u64,
         state: Inner<false>,
@@ -59,6 +62,7 @@ where
             position: 0,
             name: None,
             prev_names: Vec::new(),
+            prev_starts: Vec::new(),
             state: Inner {
                 level: 0,
                 state: InnerState::Root(0),
@@ -165,14 +169,15 @@ where
                     let name_buf = buf.split_to(len);
                     trace!(len = buf.len(), ?name_buf, "Read name");
                     validate_entry_name(&name_buf)?;
-                    if let Some(prev) = this.prev_names.last_mut() {
-                        if name_buf <= *prev {
+                    if let Some(&start) = this.prev_starts.last() {
+                        if name_buf[..] <= this.prev_names[start..] {
                             return Poll::Ready(Some(Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
                                 "NAR directory entries are not sorted or contain duplicates",
                             ))));
                         }
-                        *prev = name_buf.clone();
+                        this.prev_names.truncate(start);
+                        this.prev_names.extend_from_slice(&name_buf);
                     }
                     *this.name = Some(name_buf);
                     buf.advance(aligned - len);
@@ -182,11 +187,13 @@ where
                 }
                 InnerState::ReadDir => {
                     let name = this.name.take().unwrap_or_default();
-                    this.prev_names.push(ByteString::new());
+                    this.prev_starts.push(this.prev_names.len());
                     return Poll::Ready(Some(Ok(NarEvent::StartDirectory { name })));
                 }
                 InnerState::FinishReadEntry => {
-                    this.prev_names.pop();
+                    if let Some(start) = this.prev_starts.pop() {
+                        this.prev_names.truncate(start);
+                    }
                     return Poll::Ready(Some(Ok(NarEvent::EndDirectory)));
                 }
                 InnerState::Eof => return Poll::Ready(None),
@@ -300,6 +307,45 @@ mod unittests {
         #[case] second: &'static [u8],
     ) {
         let err = read_nar(Cursor::new(dir_nar(&[first, second])))
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// Each directory's entries are only compared with each other. After a
+    /// subdirectory closes, the parent's next entry is compared with the
+    /// subdirectory's name.
+    #[tokio::test]
+    async fn sort_check_is_per_directory() {
+        use NarEvent::EndDirectory as End;
+        let dir = |name: &'static [u8]| NarEvent::StartDirectory {
+            name: Bytes::from_static(name),
+        };
+        let file = |name: &'static [u8]| NarEvent::File {
+            name: Bytes::from_static(name),
+            executable: false,
+            size: 0,
+            reader: Cursor::new(Bytes::new()),
+        };
+
+        // "aa" is compared with "a", not with "a/z", and "aa/a" is the first
+        // entry of its directory.
+        let events = [
+            dir(b""),
+            dir(b"a"),
+            file(b"z"),
+            End,
+            dir(b"aa"),
+            file(b"a"),
+            End,
+            End,
+        ];
+        let actual = read_nar(Cursor::new(write_nar(events.iter()))).await;
+        assert_eq!(actual.unwrap(), events);
+
+        // After "b/z", the root's last entry is still "b".
+        let events = [dir(b""), dir(b"b"), file(b"z"), End, file(b"a"), End];
+        let err = read_nar(Cursor::new(write_nar(events.iter())))
             .await
             .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
