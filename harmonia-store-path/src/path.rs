@@ -60,7 +60,11 @@ impl StorePath {
 
     /// Convert to base path (just the hash-name part, without store directory)
     pub fn to_base_path(&self) -> String {
-        self.to_string()
+        let mut s = String::with_capacity(STORE_PATH_HASH_ENCODED_SIZE + 1 + self.name.len());
+        s.push_str(self.hash.encode().as_str());
+        s.push('-');
+        s.push_str(&self.name);
+        s
     }
 
     /// Convert to absolute path by combining with the store directory
@@ -109,7 +113,9 @@ impl fmt::Debug for StorePath {
 
 impl fmt::Display for StorePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}-{}", self.hash, self.name)
+        fmt::Display::fmt(&self.hash, f)?;
+        f.write_str("-")?;
+        f.write_str(&self.name)
     }
 }
 
@@ -198,7 +204,9 @@ impl FromStoreDirStr for StorePath {
 
 impl StoreDirDisplay for StorePath {
     fn fmt(&self, store_dir: &StoreDir, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{store_dir}/{self}")
+        f.write_str(store_dir.to_str())?;
+        f.write_str("/")?;
+        fmt::Display::fmt(self, f)
     }
 }
 
@@ -257,14 +265,26 @@ impl fmt::Debug for StorePathHash {
     }
 }
 
+struct EncodedHash([u8; STORE_PATH_HASH_ENCODED_SIZE]);
+
+impl EncodedHash {
+    fn as_str(&self) -> &str {
+        // SAFETY: Nix Base32 is a subset of ASCII, which guarantees valid UTF-8.
+        unsafe { std::str::from_utf8_unchecked(&self.0) }
+    }
+}
+
+impl StorePathHash {
+    fn encode(&self) -> EncodedHash {
+        let mut output = [0u8; STORE_PATH_HASH_ENCODED_SIZE];
+        base32::encode_mut(&self.0, &mut output);
+        EncodedHash(output)
+    }
+}
+
 impl fmt::Display for StorePathHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut output = [0u8; base32::encode_len(STORE_PATH_HASH_SIZE)];
-        base32::encode_mut(&self.0, &mut output);
-
-        // SAFETY: Nix Base32 is a subset of ASCII, which guarantees valid UTF-8.
-        let s = unsafe { std::str::from_utf8_unchecked(&output) };
-        f.write_str(s)
+        f.write_str(self.encode().as_str())
     }
 }
 
