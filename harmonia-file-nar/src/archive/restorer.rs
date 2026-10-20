@@ -329,6 +329,12 @@ fn join_name(path: &Path, name: &[u8]) -> Result<PathBuf, NarWriteError> {
 /// How many entries the writer thread's queue holds.
 const OPS_IN_FLIGHT: usize = 64;
 
+/// How many entries the writer thread takes from its queue at once. Taking
+/// them from a full queue wakes the task that fills it once per batch instead
+/// of once per entry. File data in a batch still counts towards
+/// [`DATA_IN_FLIGHT`].
+const OPS_PER_BATCH: usize = 32;
+
 /// How much file data the writer thread's queue holds, so a slow disk can't
 /// make a restore use much memory.
 const DATA_IN_FLIGHT: usize = 8 * FILE_CHUNK_SIZE;
@@ -365,40 +371,49 @@ impl Writer {
 /// is cancelled, it returns before the next entry and skips the rest.
 fn write(mut ops: mpsc::Receiver<Op>, dropped: &CancellationToken) -> Result<(), NarWriteError> {
     let mut file: Option<(PathBuf, File)> = None;
-    while let Some(op) = ops.blocking_recv() {
-        // The caller dropped `restore`, so nobody waits for this work, and
-        // the caller may already be removing the destination.
-        if dropped.is_cancelled() {
-            break;
+    let mut batch = Vec::with_capacity(OPS_PER_BATCH);
+    while ops.blocking_recv_many(&mut batch, OPS_PER_BATCH) > 0 {
+        for op in batch.drain(..) {
+            // The caller dropped `restore`, so nobody waits for this work, and
+            // the caller may already be removing the destination.
+            if dropped.is_cancelled() {
+                return Ok(());
+            }
+            apply(op, &mut file)?;
         }
-        match op {
-            Op::Write(data, _permit) => {
-                let (path, file) = file.as_mut().expect("file data follows its file");
-                file.write_all(&data)
-                    .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-            }
-            Op::CreateFile(path, executable) => {
-                trace!("Writing to file {:?}", path);
-                let mut options = OpenOptions::new();
-                options.write(true).create_new(true);
-                #[cfg(unix)]
-                options.mode(if executable { 0o777 } else { 0o666 });
-                let created = options
-                    .open(&path)
-                    .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-                file = Some((path, created));
-            }
-            Op::CreateDirectory(path) => {
-                file = None;
-                std::fs::create_dir(&path)
-                    .map_err(|err| NarWriteError::create_dir_error(path, err))?;
-            }
-            Op::CreateSymlink(path, target) => {
-                file = None;
-                #[cfg(unix)]
-                std::os::unix::fs::symlink(target, &path)
-                    .map_err(|err| NarWriteError::create_symlink_error(path, err))?;
-            }
+    }
+    Ok(())
+}
+
+/// Does the filesystem work for one `op`. `file` is the last created file,
+/// which [`Op::Write`] appends to.
+fn apply(op: Op, file: &mut Option<(PathBuf, File)>) -> Result<(), NarWriteError> {
+    match op {
+        Op::Write(data, _permit) => {
+            let (path, file) = file.as_mut().expect("file data follows its file");
+            file.write_all(&data)
+                .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
+        }
+        Op::CreateFile(path, executable) => {
+            trace!("Writing to file {:?}", path);
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            options.mode(if executable { 0o777 } else { 0o666 });
+            let created = options
+                .open(&path)
+                .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
+            *file = Some((path, created));
+        }
+        Op::CreateDirectory(path) => {
+            *file = None;
+            std::fs::create_dir(&path).map_err(|err| NarWriteError::create_dir_error(path, err))?;
+        }
+        Op::CreateSymlink(path, target) => {
+            *file = None;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(target, &path)
+                .map_err(|err| NarWriteError::create_symlink_error(path, err))?;
         }
     }
     Ok(())
@@ -520,6 +535,7 @@ mod unittests {
     #[case::symlink(test_data::symlink())]
     #[case::dir_example(test_data::dir_example())]
     #[case::case_hack_sorting(test_data::case_hack_sorting())]
+    #[case::many_files(many_files())]
     async fn test_restore(#[case] events: test_data::TestNarEvents) {
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
         let path = dir.path().join("output");
@@ -556,6 +572,25 @@ mod unittests {
         NarEvent::StartDirectory {
             name: Bytes::from_static(name),
         }
+    }
+
+    /// Events for more files than the writer thread's queue and one batch
+    /// hold. Each file contains its own name, so data written to the wrong
+    /// file fails the test.
+    fn many_files() -> test_data::TestNarEvents {
+        let files = (0..2 * (OPS_IN_FLIGHT + OPS_PER_BATCH)).map(|i| {
+            let name = Bytes::from(format!("{i:04}"));
+            NarEvent::File {
+                name: name.clone(),
+                executable: false,
+                size: name.len() as u64,
+                reader: std::io::Cursor::new(name),
+            }
+        });
+        std::iter::once(start_dir(b""))
+            .chain(files)
+            .chain([NarEvent::EndDirectory])
+            .collect()
     }
 
     /// `restore` doesn't trust its input: whatever the stream says, nothing
