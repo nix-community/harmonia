@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::ffi::OsString;
+use std::ffi::OsStr;
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
-#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,8 +30,6 @@ pub enum NarWriteOperation {
     CreateSymlink,
     #[display("creating file")]
     CreateFile,
-    #[display("path contains invalid UTF-8")]
-    PathUTF8,
     #[display("invalid NAR entry")]
     InvalidEntry,
 }
@@ -52,13 +50,6 @@ impl NarWriteError {
             path,
             source,
         }
-    }
-    pub fn path_utf8_error(path: PathBuf, err: bstr::Utf8Error) -> Self {
-        Self::new(
-            NarWriteOperation::PathUTF8,
-            path,
-            io::Error::new(io::ErrorKind::InvalidData, err),
-        )
     }
     pub fn invalid_entry_error(path: PathBuf, reason: &'static str) -> Self {
         Self::new(
@@ -180,9 +171,8 @@ impl NarRestorer {
                     name
                 };
 
-                let path = join_name(&self.path, &name)?;
                 writer
-                    .send(Op::CreateFile(path.clone(), executable))
+                    .send(Op::CreateFile(join_name(&self.path, &name), executable))
                     .await?;
                 let mut left = size;
                 loop {
@@ -194,7 +184,9 @@ impl NarRestorer {
                         .take(FILE_CHUNK_SIZE as u64)
                         .read_to_end(&mut chunk)
                         .await
-                        .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
+                        .map_err(|err| {
+                            NarWriteError::create_file_error(join_name(&self.path, &name), err)
+                        })?;
                     left = left.saturating_sub(chunk.len() as u64);
                     let last = chunk.len() < FILE_CHUNK_SIZE;
                     if !chunk.is_empty() {
@@ -221,16 +213,9 @@ impl NarRestorer {
                     name
                 };
 
-                let path = join_name(&self.path, &name)?;
-                let target_os = target
-                    .to_os_str()
-                    .map_err(|err| {
-                        let lossy = target.to_os_str_lossy().into_owned();
-                        let path = PathBuf::from(lossy);
-                        NarWriteError::path_utf8_error(path, err)
-                    })?
-                    .to_owned();
-                writer.send(Op::CreateSymlink(path, target_os)).await?;
+                writer
+                    .send(Op::CreateSymlink(join_name(&self.path, &name), target))
+                    .await?;
             }
             NarEvent::StartDirectory { name } => {
                 let name = if self.use_case_hack {
@@ -244,8 +229,10 @@ impl NarRestorer {
                     name
                 };
 
-                let path = join_name(&self.path, &name)?;
-                self.path = path;
+                // In place, so entering a directory doesn't allocate a new path.
+                if !name.is_empty() {
+                    self.path.push(OsStr::from_bytes(&name));
+                }
                 writer.send(Op::CreateDirectory(self.path.clone())).await?;
             }
             NarEvent::EndDirectory => {
@@ -313,17 +300,14 @@ impl NarRestorer {
     }
 }
 
-fn join_name(path: &Path, name: &[u8]) -> Result<PathBuf, NarWriteError> {
-    if name.is_empty() {
-        Ok(path.to_owned())
-    } else {
-        let name_os = name.to_os_str().map_err(|err| {
-            let lossy = name.to_os_str_lossy();
-            let path = path.join(lossy);
-            NarWriteError::path_utf8_error(path, err)
-        })?;
-        Ok(path.join(name_os))
+/// Returns the path of entry `name` in `dir` with a single allocation.
+fn join_name(dir: &Path, name: &[u8]) -> PathBuf {
+    let mut path = PathBuf::with_capacity(dir.as_os_str().len() + 1 + name.len());
+    path.push(dir);
+    if !name.is_empty() {
+        path.push(OsStr::from_bytes(name));
     }
+    path
 }
 
 /// How many entries the writer thread's queue holds.
@@ -342,7 +326,7 @@ const DATA_IN_FLIGHT: usize = 8 * FILE_CHUNK_SIZE;
 /// Filesystem work for the writer thread, in NAR order.
 enum Op {
     CreateDirectory(PathBuf),
-    CreateSymlink(PathBuf, OsString),
+    CreateSymlink(PathBuf, Bytes),
     CreateFile(PathBuf, bool),
     /// More data for the last created file. The permit is its share of
     /// [`DATA_IN_FLIGHT`].
@@ -398,7 +382,6 @@ fn apply(op: Op, file: &mut Option<(PathBuf, File)>) -> Result<(), NarWriteError
             trace!("Writing to file {:?}", path);
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
-            #[cfg(unix)]
             options.mode(if executable { 0o777 } else { 0o666 });
             let created = options
                 .open(&path)
@@ -411,8 +394,7 @@ fn apply(op: Op, file: &mut Option<(PathBuf, File)>) -> Result<(), NarWriteError
         }
         Op::CreateSymlink(path, target) => {
             *file = None;
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(target, &path)
+            std::os::unix::fs::symlink(OsStr::from_bytes(&target), &path)
                 .map_err(|err| NarWriteError::create_symlink_error(path, err))?;
         }
     }
@@ -712,6 +694,39 @@ mod unittests {
         let err = restore(events, &path).await.unwrap_err();
         assert_eq!(err.path, PathBuf::from("stream"));
         assert!(path.is_dir());
+    }
+
+    /// A read error names the file being read. For the root, that is the
+    /// destination itself, without a trailing slash.
+    #[tokio::test]
+    async fn test_restore_read_error_path() {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let broken = |name: &'static [u8]| NarEvent::File {
+            name: Bytes::from_static(name),
+            executable: false,
+            size: 2,
+            reader: tokio_util::io::StreamReader::new(iter([
+                Ok(Bytes::from_static(b"x")),
+                Err(io::Error::other("broken")),
+            ])),
+        };
+
+        let path = dir.path().join("root");
+        let events = iter([broken(b"")]).map(Ok::<_, NarWriteError>);
+        let err = restore(events, &path).await.unwrap_err();
+        assert_eq!(err.operation, NarWriteOperation::CreateFile);
+        assert_eq!(err.path.as_os_str(), path.as_os_str());
+
+        let path = dir.path().join("nested");
+        let events = [
+            NarEvent::StartDirectory { name: Bytes::new() },
+            broken(b"f"),
+        ];
+        let err = restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+            .await
+            .unwrap_err();
+        assert_eq!(err.operation, NarWriteOperation::CreateFile);
+        assert_eq!(err.path.as_os_str(), path.join("f").as_os_str());
     }
 
     #[test]
