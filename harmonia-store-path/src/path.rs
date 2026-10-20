@@ -60,7 +60,10 @@ impl StorePath {
 
     /// Convert to base path (just the hash-name part, without store directory)
     pub fn to_base_path(&self) -> String {
-        self.to_string()
+        use fmt::Write as _;
+        let mut s = String::with_capacity(STORE_PATH_HASH_ENCODED_SIZE + 1 + self.name.len());
+        write!(s, "{self}").expect("writing to a String cannot fail");
+        s
     }
 
     /// Convert to absolute path by combining with the store directory
@@ -109,7 +112,9 @@ impl fmt::Debug for StorePath {
 
 impl fmt::Display for StorePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}-{}", self.hash, self.name)
+        fmt::Display::fmt(&self.hash, f)?;
+        f.write_str("-")?;
+        f.write_str(&self.name)
     }
 }
 
@@ -198,7 +203,9 @@ impl FromStoreDirStr for StorePath {
 
 impl StoreDirDisplay for StorePath {
     fn fmt(&self, store_dir: &StoreDir, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{store_dir}/{self}")
+        f.write_str(store_dir.to_str())?;
+        f.write_str("/")?;
+        fmt::Display::fmt(self, f)
     }
 }
 
@@ -1019,6 +1026,25 @@ mod proptests {
             let s = store_dir.display(&path).to_string();
             let parsed = store_dir.parse::<StorePath>(&s).expect("Parsing display");
             prop_assert_eq!(path, parsed);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_display_format(store_dir in any::<StoreDir>(), path in any::<StorePath>()) {
+            let base = format!("{}-{}", path.hash(), path.name());
+            let full = format!("{}/{base}", store_dir.to_str());
+            let display = store_dir.display(&path);
+            prop_assert_eq!(path.to_string(), base.as_str());
+            prop_assert_eq!(path.to_base_path(), base.as_str());
+            prop_assert_eq!(store_dir.to_string(), store_dir.to_str());
+            prop_assert_eq!(display.to_string(), full.as_str());
+
+            // Width and fill are ignored.
+            let w = full.len() + 1;
+            prop_assert_eq!(format!("{path:>w$}"), base.as_str());
+            prop_assert_eq!(format!("{store_dir:>w$}"), store_dir.to_str());
+            prop_assert_eq!(format!("{display:>w$}"), full.as_str());
         }
     }
 }
