@@ -289,9 +289,8 @@ impl FromStr for StorePathHash {
 
 impl std_hash::Hash for StorePathHash {
     fn hash<H: std_hash::Hasher>(&self, state: &mut H) {
-        for c in self.0.iter().rev() {
-            c.hash(state);
-        }
+        // The digest has a fixed length, so it needs no length prefix.
+        state.write(&self.0);
     }
 }
 
