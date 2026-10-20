@@ -80,77 +80,60 @@ pub fn build_narinfo(
     }
 }
 
-/// Helper macro for adding lines to narinfo
-macro_rules! push_line {
-    ($buf:expr, $prefix:literal, $value:expr) => {
-        $buf.extend_from_slice($prefix);
-        $buf.extend_from_slice($value);
-        $buf.push(b'\n');
-    };
-}
-
 /// Format a `NarInfo` as the textual narinfo format used by the binary cache protocol.
 pub fn format_narinfo_txt(store_dir: &StoreDir, narinfo: &NarInfo) -> Vec<u8> {
-    use harmonia_utils_hash::HashFormat as _;
+    let mut out = String::with_capacity(1024);
+    write_narinfo_txt(&mut out, store_dir, narinfo).expect("writing to a String cannot fail");
+    out.into_bytes()
+}
 
-    let path = &narinfo.path;
+fn write_narinfo_txt(
+    out: &mut String,
+    store_dir: &StoreDir,
+    narinfo: &NarInfo,
+) -> std::fmt::Result {
+    use harmonia_utils_hash::HashFormat as _;
+    use std::fmt::Write as _;
+
     let ni = &narinfo.info;
     let pi = &ni.info;
-
-    let nar_hash_obj: Hash = pi.nar_hash.into();
-    let nar_hash_str = format!("{}", nar_hash_obj.as_base32());
-    let nar_size_str = pi.nar_size.to_string();
-
-    let store_path_display = store_dir.display(path).to_string();
-
-    let mut result = Vec::new();
-
-    let file_hash_str = ni
-        .download_hash
-        .map(|h| format!("{}", h.as_base32()))
-        .unwrap_or_else(|| nar_hash_str.clone());
-    let file_size_str = ni
-        .download_size
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| nar_size_str.clone());
-
-    let url = ni.url.as_deref().unwrap_or("");
-    let compression = ni.compression.as_deref().unwrap_or("none");
+    let nar_hash = Hash::from(pi.nar_hash);
 
     // Required fields
-    push_line!(result, b"StorePath: ", store_path_display.as_bytes());
-    push_line!(result, b"URL: ", url.as_bytes());
-    push_line!(result, b"Compression: ", compression.as_bytes());
-    push_line!(result, b"FileHash: ", file_hash_str.as_bytes());
-    push_line!(result, b"FileSize: ", file_size_str.as_bytes());
-    push_line!(result, b"NarHash: ", nar_hash_str.as_bytes());
-    push_line!(result, b"NarSize: ", nar_size_str.as_bytes());
+    writeln!(out, "StorePath: {}", store_dir.display(&narinfo.path))?;
+    writeln!(out, "URL: {}", ni.url.as_deref().unwrap_or(""))?;
+    let compression = ni.compression.as_deref().unwrap_or("none");
+    writeln!(out, "Compression: {compression}")?;
+    let file_hash = ni.download_hash.unwrap_or(nar_hash);
+    writeln!(out, "FileHash: {}", file_hash.as_base32())?;
+    writeln!(out, "FileSize: {}", ni.download_size.unwrap_or(pi.nar_size))?;
+    writeln!(out, "NarHash: {}", nar_hash.as_base32())?;
+    writeln!(out, "NarSize: {}", pi.nar_size)?;
 
     // References
     if !pi.references.is_empty() {
-        result.extend_from_slice(b"References:");
+        out.push_str("References:");
         for r in &pi.references {
-            result.push(b' ');
-            result.extend_from_slice(r.to_string().as_bytes());
+            write!(out, " {r}")?;
         }
-        result.push(b'\n');
+        out.push('\n');
     }
 
     // Optional fields
     if let Some(drv) = &pi.deriver {
-        push_line!(result, b"Deriver: ", drv.to_string().as_bytes());
+        writeln!(out, "Deriver: {drv}")?;
     }
 
     // All signatures (DB sigs + cache signing key sigs).
     for sig in &pi.signatures {
-        push_line!(result, b"Sig: ", sig.to_string().as_bytes());
+        writeln!(out, "Sig: {sig}")?;
     }
 
     if let Some(ca) = &pi.ca {
-        push_line!(result, b"CA: ", ca.to_string().as_bytes());
+        writeln!(out, "CA: {ca}")?;
     }
 
-    result
+    Ok(())
 }
 
 /// Errors from parsing the textual narinfo format.
