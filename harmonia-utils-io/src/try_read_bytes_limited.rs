@@ -77,7 +77,8 @@ impl TryReadBytesLimited {
                 Self::Fill(len, aligned) => {
                     let mut buf = ready!(reader.as_mut().poll_fill_buf(cx))?;
                     while buf.len() < *aligned {
-                        let _ = buf.split_to(0);
+                        // Unshare the buffer so the reader can reuse it.
+                        drop(buf);
                         buf = ready!(reader.as_mut().poll_force_fill_buf(cx))?;
                     }
                     let mut contents = buf.split_to(*aligned);
