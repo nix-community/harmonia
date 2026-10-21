@@ -31,3 +31,7 @@ name    = "nar_restore"
 [[bench]]
 harness = false
 name    = "ref_scan"
+
+[[bench]]
+harness = false
+name    = "store_path"
