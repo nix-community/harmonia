@@ -11,6 +11,7 @@ mod nar_hash;
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use std::num::NonZero;
 
 #[cfg(any(test, feature = "test"))]
@@ -20,7 +21,7 @@ use serde::{Deserialize, Serialize, Serializer};
 pub use nar_hash::NarHash;
 
 use harmonia_store_content_address::ContentAddress;
-use harmonia_store_path::{StoreDir, StorePath};
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_utils_hash::HashFormat as _;
 use harmonia_utils_signature::Signature;
 #[cfg(any(test, feature = "test"))]
@@ -44,53 +45,25 @@ pub fn fingerprint_path(
     nar_size: u64,
     references: &BTreeSet<StorePath>,
 ) -> Vec<u8> {
-    let nar_hash_str = format!("{}", nar_hash.as_base32());
-    let nar_hash_bytes = nar_hash_str.as_bytes();
-    let nar_size_str = nar_size.to_string();
-    let nar_size_bytes = nar_size_str.as_bytes();
-
-    // Construct full store path string using StoreDir's display functionality
-    let store_path_str = format!("{}", store_dir.display(store_path));
-    let store_path_bytes = store_path_str.as_bytes();
-
-    // Calculate capacity
-    let fixed_len = 2 + // "1;"
-        store_path_bytes.len() + 1 + // store path + ";"
-        nar_hash_bytes.len() + 1 + // nar hash + ";"
-        nar_size_bytes.len() + 1; // nar size + ";"
-
-    let refs_len = if references.is_empty() {
-        0
-    } else {
-        // Each reference formatted with store_dir
-        references
-            .iter()
-            .map(|r| format!("{}", store_dir.display(r)).len())
-            .sum::<usize>()
-            + references.len().saturating_sub(1) // commas between refs
+    let path_len = |p: &StorePath| {
+        store_dir.to_str().len() + 2 + StorePathHash::encoded_len() + p.name().len()
     };
-
-    let mut result = Vec::with_capacity(fixed_len + refs_len);
-
-    // Add fixed parts
-    result.extend_from_slice(b"1;");
-    result.extend_from_slice(store_path_bytes);
-    result.push(b';');
-    result.extend_from_slice(nar_hash_bytes);
-    result.push(b';');
-    result.extend_from_slice(nar_size_bytes);
-    result.push(b';');
-
-    // Add references (comma-separated)
+    let capacity = 128 + path_len(store_path) + references.iter().map(path_len).sum::<usize>();
+    let mut out = String::with_capacity(capacity);
+    write!(
+        out,
+        "1;{};{};{nar_size};",
+        store_dir.display(store_path),
+        nar_hash.as_base32()
+    )
+    .expect("writing to a String cannot fail");
     for (i, reference) in references.iter().enumerate() {
         if i > 0 {
-            result.push(b',');
+            out.push(',');
         }
-        let ref_str = format!("{}", store_dir.display(reference));
-        result.extend_from_slice(ref_str.as_bytes());
+        write!(out, "{}", store_dir.display(reference)).expect("writing to a String cannot fail");
     }
-
-    result
+    out.into_bytes()
 }
 
 /// Serializes in "pure" format, omitting impure fields when they have default values.
@@ -312,6 +285,10 @@ mod tests {
         );
         let fingerprint = fingerprint_path(&store_dir, &store_path, &nar_hash, 196040, &references);
         let expected = b"1;/nix/store/syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin;sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0;196040;/nix/store/0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0";
+        assert_eq!(fingerprint, expected);
+
+        let fingerprint = fingerprint_path(&store_dir, &store_path, &nar_hash, 0, &BTreeSet::new());
+        let expected = b"1;/nix/store/syd87l2rxw8cbsxmxl853h0r6pdwhwjr-curl-7.82.0-bin;sha256:1b4sb93wp679q4zx9k1ignby1yna3z7c4c2ri3wphylbc2dwsys0;0;";
         assert_eq!(fingerprint, expected);
     }
 }
