@@ -110,6 +110,16 @@ where
         edge.prefix = prefix;
     }
 
+    pub(crate) const fn from_tokens(tokens: &[(&'static [u8], R)]) -> Self {
+        let mut tree = Self::new();
+        let mut idx = 0;
+        while idx < tokens.len() {
+            tree.insert(tokens[idx].0, tokens[idx].1);
+            idx += 1;
+        }
+        tree
+    }
+
     pub const fn insert(&mut self, token: &'static [u8], value: R) {
         if self.nodes_len == 0 {
             let (edge_idx, len) = self.add_edge_list(1, token);

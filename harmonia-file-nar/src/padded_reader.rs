@@ -51,7 +51,12 @@ impl<R> PaddedReader<R> {
             reader,
             trailer_size,
             padding: ZEROS,
-            state: State::Content(content),
+            // `Content(0)` would still poll `reader` and could block.
+            state: if len == 0 {
+                State::Eof
+            } else {
+                State::Content(content)
+            },
         }
     }
     fn remaining_usize(self: Pin<&mut Self>) -> (usize, usize, usize) {
