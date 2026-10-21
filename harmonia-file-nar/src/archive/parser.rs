@@ -22,6 +22,12 @@ const MAX_ENTRY_NAME_LEN: u64 = 4096;
 const MAX_SYMLINK_TARGET_LEN: u64 = 64 * 1024;
 
 pin_project! {
+    /// Parses a NAR into a stream of [`NarEvent`]s.
+    ///
+    /// Each [`NarEvent::File`] carries the parser's own reader. Read it to the
+    /// end or drop it before polling the parser again. The parser skips any
+    /// contents left unread without copying them, and still checks their
+    /// padding.
     pub struct NarParser<R> {
         #[pin]
         reader: Lending<R, PaddedReader<R>>,
@@ -317,6 +323,37 @@ mod unittests {
             let reader = BytesReader::new(test_data::Chunked::new(nar, chunk_size));
             let err = crate::parse_nar_listing(reader).await.unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
+        }
+    }
+
+    /// A NAR that ends inside a file's contents or their padding fails, even
+    /// when the listing skips the contents.
+    #[tokio::test]
+    #[rstest]
+    async fn reject_truncated_contents(
+        #[values(1, 3, 8, 64_000)] chunk_size: usize,
+        #[values(false, true)] in_padding: bool,
+    ) {
+        for (events, contents) in [
+            (test_data::text_file(), b"Hello world!".as_slice()),
+            (test_data::dir_example(), b"Very cool stuff".as_slice()),
+        ] {
+            let nar = write_nar(events.iter());
+            let at = nar.windows(contents.len()).position(|w| w == contents);
+            // In the padding, cut before its last byte.
+            let end = if in_padding {
+                contents.len().next_multiple_of(8) - 1
+            } else {
+                5
+            };
+            let nar = nar.slice(..at.unwrap() + end);
+            let err = read_nar(test_data::Chunked::new(nar.clone(), chunk_size))
+                .await
+                .unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+            let reader = BytesReader::new(test_data::Chunked::new(nar, chunk_size));
+            let err = crate::parse_nar_listing(reader).await.unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
         }
     }
 

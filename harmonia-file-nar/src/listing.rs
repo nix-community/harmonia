@@ -41,12 +41,13 @@ where
                 name,
                 executable,
                 size,
-                mut reader,
+                reader,
             } => {
                 let nar_offset = parser.position();
 
-                // Drain the file contents (we only want metadata)
-                tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
+                // We only want metadata. The parser skips the unread contents
+                // of a dropped reader without copying them.
+                drop(reader);
 
                 let info = NarFileInfo {
                     size,
