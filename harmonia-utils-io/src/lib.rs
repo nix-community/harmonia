@@ -9,6 +9,7 @@
 
 mod async_bytes_read;
 mod bytes_reader;
+mod bytes_stream_reader;
 mod compat;
 mod lending;
 mod read_u64;
@@ -20,6 +21,7 @@ mod writer;
 
 pub use async_bytes_read::AsyncBytesRead;
 pub use bytes_reader::{BytesReader, DEFAULT_MAX_BUF_SIZE, DEFAULT_RESERVED_BUF_SIZE};
+pub use bytes_stream_reader::BytesStreamReader;
 pub use compat::AsyncBufReadCompat;
 pub use lending::{DrainInto, Lending, LentReader};
 pub use read_u64::TryReadU64;

@@ -2,7 +2,7 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use futures_core::Stream;
 use pin_project_lite::pin_project;
 use tokio::io::AsyncRead;
@@ -11,7 +11,9 @@ use tracing::trace;
 use crate::ByteString;
 use crate::padded_reader::{PaddedReader, check_padding};
 use crate::wire::calc_aligned;
-use harmonia_utils_io::{AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending, LentReader};
+use harmonia_utils_io::{
+    AsyncBufReadCompat, AsyncBytesRead, BytesReader, BytesStreamReader, Lending, LentReader,
+};
 
 use super::read_nar::{Inner, InnerState, NodeType};
 use super::{NarEvent, is_valid_entry_name};
@@ -216,6 +218,17 @@ where
     NarParser::new(reader)
 }
 
+/// Parses a NAR from a stream of chunks without copying them. Holding on to
+/// a name, target or file keeps its whole chunk in memory.
+pub fn parse_nar_stream<S>(
+    stream: S,
+) -> impl Stream<Item = io::Result<NarEvent<ParsedReader<BytesStreamReader<S>>>>>
+where
+    S: Stream<Item = io::Result<Bytes>> + Unpin,
+{
+    NarParser::new(BytesStreamReader::new(stream))
+}
+
 #[cfg(any(test, feature = "test"))]
 pub async fn read_nar<R>(source: R) -> io::Result<crate::archive::test_data::TestNarEvents>
 where
@@ -231,16 +244,39 @@ where
 #[cfg(test)]
 mod unittests {
     use std::io::{self, Cursor};
+    use std::path::PathBuf;
 
     use bytes::Bytes;
 
+    use futures_util::stream::{self, TryStreamExt as _};
+    use proptest::prelude::*;
     use rstest::rstest;
     use tokio::fs::File;
 
     use crate::archive::read_nar::{TOK_DIR, TOK_ENTRY, TOK_ROOT, TOK_SYM};
     use crate::archive::{test_data, write_nar};
+    use crate::test::arbitrary::archive::arb_nar_events;
 
     use super::*;
+
+    /// Splits `nar` into chunks of the given sizes, cycling through them.
+    fn chunked(mut nar: Bytes, sizes: &[usize]) -> impl Stream<Item = io::Result<Bytes>> + Unpin {
+        let mut chunks = Vec::new();
+        for &size in sizes.iter().cycle() {
+            if nar.is_empty() {
+                break;
+            }
+            chunks.push(Ok(nar.split_to(size.min(nar.len()))));
+        }
+        stream::iter(chunks)
+    }
+
+    async fn read_nar_stream(nar: Bytes, sizes: &[usize]) -> io::Result<test_data::TestNarEvents> {
+        parse_nar_stream(chunked(nar, sizes))
+            .and_then(NarEvent::read_file)
+            .try_collect()
+            .await
+    }
 
     #[tokio::test]
     #[rstest]
@@ -363,8 +399,10 @@ mod unittests {
                 .await
                 .unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
-            let reader = BytesReader::new(test_data::Chunked::new(nar, chunk_size));
+            let reader = BytesReader::new(test_data::Chunked::new(nar.clone(), chunk_size));
             let err = crate::parse_nar_listing(reader).await.unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
+            let err = read_nar_stream(nar, &[chunk_size]).await.unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
         }
     }
@@ -437,5 +475,43 @@ mod unittests {
         };
         let read = reader.read_to_end(&mut Vec::new()).now_or_never();
         assert_eq!(read.expect("the reader waited").unwrap(), 0);
+    }
+
+    #[test]
+    fn proptest_parse_stream() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        proptest!(|(
+            events in arb_nar_events(8, 256, 10),
+            sizes in prop::collection::vec(1..256usize, 1..16),
+        )| {
+            let nar = write_nar(events.iter());
+            let actual = rt.block_on(read_nar_stream(nar, &sizes))?;
+            prop_assert_eq!(actual, events);
+        });
+    }
+
+    /// `restore` can run the stream's parser in a spawned task.
+    #[tokio::test]
+    async fn restore_stream() {
+        let events = test_data::dir_example();
+        let nar = write_nar(events.iter());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("output");
+
+        let parsed = parse_nar_stream(chunked(nar, &[5]))
+            .map_err(|err| crate::NarWriteError::create_file_error(PathBuf::new(), err));
+        tokio::spawn(crate::restore(parsed, path.clone()))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let restored = crate::archive::dump(path)
+            .and_then(NarEvent::read_file)
+            .try_collect::<test_data::TestNarEvents>()
+            .await
+            .unwrap();
+        assert_eq!(restored, events);
     }
 }

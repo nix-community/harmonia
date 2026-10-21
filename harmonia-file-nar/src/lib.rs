@@ -38,7 +38,8 @@ pub mod archive;
 // Re-export commonly used types from archive
 pub use archive::{
     CASE_HACK_SUFFIX, DumpOptions, DumpedFile, NarByteStream, NarDumper, NarEvent, NarParser,
-    NarReader, NarRestorer, NarWriteError, NarWriter, RestoreOptions, dump, parse_nar, restore,
+    NarReader, NarRestorer, NarWriteError, NarWriter, RestoreOptions, dump, parse_nar,
+    parse_nar_stream, restore,
 };
 pub use listing::{NarFileInfo, parse_nar_listing};
 
