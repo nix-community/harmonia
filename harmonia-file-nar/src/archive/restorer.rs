@@ -9,7 +9,6 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bstr::ByteSlice as _;
 use bytes::Bytes;
 use derive_more::Display;
 use futures_core::Stream;
@@ -117,8 +116,7 @@ impl NarRestorer {
     /// a single path component, and nothing follows the root or closes it twice.
     fn check_event<R>(&mut self, event: &NarEvent<R>) -> Result<(), NarWriteError> {
         let invalid = |name: &[u8], reason| {
-            let name = name.to_os_str_lossy();
-            NarWriteError::invalid_entry_error(self.path.join(name), reason)
+            NarWriteError::invalid_entry_error(join_name(&self.path, name), reason)
         };
         let name = match event {
             NarEvent::File { name, .. }
@@ -267,7 +265,10 @@ impl NarRestorer {
                 if self.use_case_hack {
                     self.entries = self.dir_stack.pop().unwrap_or_default();
                 }
-                self.path.pop();
+                // Keep the destination itself for error messages.
+                if self.depth > 0 {
+                    self.path.pop();
+                }
                 if self.canonical {
                     writer.send(Op::EndDirectory).await?;
                 }
@@ -332,11 +333,13 @@ impl NarRestorer {
 }
 
 /// Returns the path of entry `name` in `dir` with a single allocation.
+/// Unlike [`PathBuf::push`], a leading slash in `name` doesn't replace `dir`.
 fn join_name(dir: &Path, name: &[u8]) -> PathBuf {
     let mut path = PathBuf::with_capacity(dir.as_os_str().len() + 1 + name.len());
     path.push(dir);
     if !name.is_empty() {
-        path.push(OsStr::from_bytes(name));
+        path.push("");
+        path.as_mut_os_string().push(OsStr::from_bytes(name));
     }
     path
 }
@@ -718,22 +721,26 @@ mod unittests {
     /// may be created outside the destination.
     #[tokio::test]
     #[rstest]
-    #[case::dotdot(vec![start_dir(b""), file(b"..")])]
-    #[case::dot(vec![start_dir(b""), file(b".")])]
-    #[case::slash(vec![start_dir(b""), file(b"a/b")])]
-    #[case::traversal(vec![start_dir(b""), file(b"../escape")])]
-    #[case::absolute(vec![start_dir(b""), file(b"/tmp/escape")])]
-    #[case::nul(vec![start_dir(b""), file(b"a\0b")])]
-    #[case::empty_name(vec![start_dir(b""), file(b"")])]
-    #[case::dotdot_dir(vec![start_dir(b""), start_dir(b".."), file(b"escape"), NarEvent::EndDirectory, NarEvent::EndDirectory])]
-    #[case::dotdot_symlink(vec![start_dir(b""), symlink(b"../escape")])]
-    #[case::named_root(vec![file(b"escape")])]
-    #[case::end_without_start(vec![NarEvent::EndDirectory, file(b"escape")])]
-    #[case::end_past_root(vec![start_dir(b""), NarEvent::EndDirectory, NarEvent::EndDirectory, file(b"escape")])]
-    #[case::after_root_dir(vec![start_dir(b""), NarEvent::EndDirectory, file(b"escape")])]
-    #[case::after_root_file(vec![file(b""), file(b"escape")])]
-    #[case::second_root(vec![start_dir(b""), NarEvent::EndDirectory, start_dir(b"")])]
-    async fn test_restore_rejects_escape(#[case] events: test_data::TestNarEvents) {
+    #[case::dotdot(vec![start_dir(b""), file(b"..")], "output/..")]
+    #[case::dot(vec![start_dir(b""), file(b".")], "output/.")]
+    #[case::slash(vec![start_dir(b""), file(b"a/b")], "output/a/b")]
+    #[case::traversal(vec![start_dir(b""), file(b"../escape")], "output/../escape")]
+    #[case::absolute(vec![start_dir(b""), file(b"/tmp/escape")], "output//tmp/escape")]
+    #[case::nul(vec![start_dir(b""), file(b"a\0b")], "output/a\0b")]
+    #[case::empty_name(vec![start_dir(b""), file(b"")], "output")]
+    #[case::dotdot_dir(vec![start_dir(b""), start_dir(b".."), file(b"escape"), NarEvent::EndDirectory, NarEvent::EndDirectory], "output/..")]
+    #[case::dotdot_symlink(vec![start_dir(b""), symlink(b"../escape")], "output/../escape")]
+    #[case::named_root(vec![file(b"escape")], "output/escape")]
+    #[case::end_without_start(vec![NarEvent::EndDirectory, file(b"escape")], "output")]
+    #[case::end_past_root(vec![start_dir(b""), NarEvent::EndDirectory, NarEvent::EndDirectory, file(b"escape")], "output")]
+    #[case::after_root_dir(vec![start_dir(b""), NarEvent::EndDirectory, file(b"escape")], "output/escape")]
+    #[case::after_root_file(vec![file(b""), file(b"escape")], "output/escape")]
+    #[case::second_root(vec![start_dir(b""), NarEvent::EndDirectory, start_dir(b"")], "output")]
+    #[case::after_nested_dir(vec![start_dir(b""), start_dir(b"a"), NarEvent::EndDirectory, file(b"..")], "output/..")]
+    async fn test_restore_rejects_escape(
+        #[case] events: test_data::TestNarEvents,
+        #[case] reported: &str,
+    ) {
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
         let path = dir.path().join("output");
 
@@ -741,6 +748,7 @@ mod unittests {
             .await
             .unwrap_err();
         assert_eq!(err.operation, NarWriteOperation::InvalidEntry);
+        assert_eq!(err.path.as_os_str(), dir.path().join(reported).as_os_str());
 
         // Only the destination itself may exist next to it.
         let siblings: Vec<_> = std::fs::read_dir(dir.path())
