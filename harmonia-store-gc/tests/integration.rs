@@ -928,6 +928,25 @@ fn gc_keeps_ca_deriver_via_deriver_field_not_build_trace() {
 }
 
 #[test]
+fn gc_drops_build_trace_of_deleted_output() {
+    // A stale row makes Nix refuse to register a differing rebuild.
+    let store = TestStore::new();
+
+    let drv = store.add_path("ca-pkg.drv", 50);
+    let out = store.add_path("ca-pkg-out", 200);
+    store.add_build_trace(&drv, "out", &out);
+
+    store.run_gc_ok(&[]);
+
+    assert!(!out.path.exists(), "unrooted CA output kept");
+    let rows: i64 = store
+        .db()
+        .query_row("SELECT count(*) FROM BuildTraceV3", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rows, 0, "BuildTraceV3 row of a deleted output survived");
+}
+
+#[test]
 fn gc_store_dir_trailing_slash_is_normalized() {
     // "--store-dir /path/" must behave like "--store-dir /path"; an
     // unnormalized prefix would make every DB path look dead.
