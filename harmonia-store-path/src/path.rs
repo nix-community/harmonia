@@ -60,7 +60,11 @@ impl StorePath {
 
     /// Convert to base path (just the hash-name part, without store directory)
     pub fn to_base_path(&self) -> String {
-        self.to_string()
+        let mut s = String::with_capacity(STORE_PATH_HASH_ENCODED_SIZE + 1 + self.name.len());
+        s.push_str(self.hash.encode().as_str());
+        s.push('-');
+        s.push_str(&self.name);
+        s
     }
 
     /// Convert to absolute path by combining with the store directory
@@ -109,7 +113,9 @@ impl fmt::Debug for StorePath {
 
 impl fmt::Display for StorePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}-{}", self.hash, self.name)
+        fmt::Display::fmt(&self.hash, f)?;
+        f.write_str("-")?;
+        f.write_str(&self.name)
     }
 }
 
@@ -198,7 +204,9 @@ impl FromStoreDirStr for StorePath {
 
 impl StoreDirDisplay for StorePath {
     fn fmt(&self, store_dir: &StoreDir, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{store_dir}/{self}")
+        f.write_str(store_dir.to_str())?;
+        f.write_str("/")?;
+        fmt::Display::fmt(self, f)
     }
 }
 
@@ -257,14 +265,26 @@ impl fmt::Debug for StorePathHash {
     }
 }
 
+struct EncodedHash([u8; STORE_PATH_HASH_ENCODED_SIZE]);
+
+impl EncodedHash {
+    fn as_str(&self) -> &str {
+        // SAFETY: Nix Base32 is a subset of ASCII, which guarantees valid UTF-8.
+        unsafe { std::str::from_utf8_unchecked(&self.0) }
+    }
+}
+
+impl StorePathHash {
+    fn encode(&self) -> EncodedHash {
+        let mut output = [0u8; STORE_PATH_HASH_ENCODED_SIZE];
+        base32::encode_mut(&self.0, &mut output);
+        EncodedHash(output)
+    }
+}
+
 impl fmt::Display for StorePathHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut output = [0u8; base32::encode_len(STORE_PATH_HASH_SIZE)];
-        base32::encode_mut(&self.0, &mut output);
-
-        // SAFETY: Nix Base32 is a subset of ASCII, which guarantees valid UTF-8.
-        let s = unsafe { std::str::from_utf8_unchecked(&output) };
-        f.write_str(s)
+        f.write_str(self.encode().as_str())
     }
 }
 
@@ -289,19 +309,28 @@ impl FromStr for StorePathHash {
 
 impl std_hash::Hash for StorePathHash {
     fn hash<H: std_hash::Hasher>(&self, state: &mut H) {
-        for c in self.0.iter().rev() {
-            c.hash(state);
-        }
+        // The digest has a fixed length, so it needs no length prefix.
+        state.write(&self.0);
     }
 }
 
 impl Ord for StorePathHash {
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.iter().rev().cmp(other.0.iter().rev())
+        // Nix base32 writes the last byte first, so text order is the
+        // digest's little-endian integer order.
+        const _: () = assert!(STORE_PATH_HASH_SIZE == 4 + 16);
+        let key = |h: &Self| {
+            let high = u32::from_le_bytes(*h.0.last_chunk().unwrap());
+            let low = u128::from_le_bytes(*h.0.first_chunk().unwrap());
+            (high, low)
+        };
+        key(self).cmp(&key(other))
     }
 }
 
 impl PartialOrd for StorePathHash {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
@@ -930,7 +959,27 @@ mod unittests {
 mod proptests {
     use proptest::prelude::*;
 
-    use crate::{StoreDir, StorePath, StorePathName};
+    use crate::{StoreDir, StorePath, StorePathHash, StorePathName};
+
+    /// Hashes sharing bytes `n..`, so every byte position decides the order.
+    fn arb_hash_pair() -> impl Strategy<Value = (StorePathHash, StorePathHash)> {
+        (
+            any::<StorePathHash>(),
+            any::<StorePathHash>(),
+            0..=StorePathHash::len(),
+        )
+            .prop_map(|(a, mut b, n)| {
+                b.0[n..].copy_from_slice(&a.0[n..]);
+                (a, b)
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_store_path_hash_ord_reversed_bytes((a, b) in arb_hash_pair()) {
+            prop_assert_eq!(a.cmp(&b), a.0.iter().rev().cmp(b.0.iter().rev()));
+        }
+    }
 
     proptest! {
         #[test]

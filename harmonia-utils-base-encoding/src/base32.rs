@@ -48,26 +48,89 @@ pub const fn decode_len(len: usize) -> usize {
 
 #[allow(unsafe_code)]
 pub fn encode_string(input: &[u8]) -> String {
-    let mut output = NIX_BASE32.encode(input);
-    // Nix base32 is reversed
-    unsafe { output.as_bytes_mut() }.reverse();
-    output
+    let mut output = vec![0; encode_len(input.len())];
+    encode_mut(input, &mut output);
+    // SAFETY: Nix base32 is a subset of ASCII, which guarantees valid UTF-8.
+    unsafe { String::from_utf8_unchecked(output) }
+}
+
+fn encode_block(block: &[u8; 5], out: &mut [u8; 8]) {
+    let mut word = [0; 8];
+    word[..5].copy_from_slice(block);
+    let bits = u64::from_le_bytes(word);
+    for (k, c) in out.iter_mut().rev().enumerate() {
+        *c = ALPHABET_BYTES[(bits >> (5 * k)) as usize & 0x1f];
+    }
 }
 
 pub fn encode_mut(input: &[u8], output: &mut [u8]) {
-    // Encode directly into output buffer
-    NIX_BASE32.encode_mut(input, output);
+    assert_eq!(output.len(), encode_len(input.len()));
+    let (blocks, tail) = input.as_chunks::<5>();
+    let (head, out_blocks) = output.split_at_mut(output.len() - blocks.len() * 8);
+    let out_blocks = out_blocks.as_chunks_mut::<8>().0.iter_mut().rev();
+    for (block, out) in blocks.iter().zip(out_blocks) {
+        encode_block(block, out);
+    }
+    if !tail.is_empty() {
+        let mut block = [0; 5];
+        block[..tail.len()].copy_from_slice(tail);
+        let mut out = [0; 8];
+        encode_block(&block, &mut out);
+        head.copy_from_slice(&out[8 - head.len()..]);
+    }
+}
 
-    // Reverse for Nix format
-    output.reverse();
+const INVALID: u8 = 0xff;
+
+const DECODE: [u8; 256] = {
+    let mut table = [INVALID; 256];
+    let mut i = 0;
+    while i < ALPHABET_BYTES.len() {
+        table[ALPHABET_BYTES[i] as usize] = i as u8;
+        i += 1;
+    }
+    table
+};
+
+fn decode_block(block: &[u8; 8]) -> Option<[u8; 8]> {
+    let mut bits = 0u64;
+    let mut invalid = 0;
+    for (k, &c) in block.iter().rev().enumerate() {
+        let digit = DECODE[usize::from(c)];
+        invalid |= digit;
+        bits |= u64::from(digit) << (5 * k);
+    }
+    (invalid != INVALID).then(|| bits.to_le_bytes())
+}
+
+/// Decodes valid input; `None` leaves the error to `data-encoding`.
+fn decode_fast(input: &[u8], output: &mut [u8]) -> Option<usize> {
+    if decode_len_internal(input.len()) != (input.len(), output.len()) {
+        return None;
+    }
+    let (out_blocks, tail) = output.as_chunks_mut::<5>();
+    let (head, blocks) = input.split_at(input.len() - out_blocks.len() * 8);
+    let blocks = blocks.as_chunks::<8>().0.iter().rev();
+    for (block, out) in blocks.zip(out_blocks) {
+        out.copy_from_slice(&decode_block(block)?[..5]);
+    }
+    if !head.is_empty() {
+        let mut block = [ALPHABET_BYTES[0]; 8];
+        block[8 - head.len()..].copy_from_slice(head);
+        let bytes = decode_block(&block)?;
+        if bytes[tail.len()..].iter().any(|&b| b != 0) {
+            return None;
+        }
+        tail.copy_from_slice(&bytes[..tail.len()]);
+    }
+    Some(output.len())
 }
 
 pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartial> {
-    // Reverse the input for decoding
-    let mut reversed = input.to_vec();
-    reversed.reverse();
-
-    // Decode using data-encoding
+    if let Some(len) = decode_fast(input, output) {
+        return Ok(len);
+    }
+    let reversed: Vec<u8> = input.iter().rev().copied().collect();
     NIX_BASE32.decode_mut(&reversed, output).map_err(|err| {
         // Adjust error position to account for reversal
         let adjusted_pos = input.len() - err.error.position - 1;
@@ -260,9 +323,44 @@ mod unittests {
 
 #[cfg(test)]
 mod proptests {
-    use proptest::{prop_assert_eq, proptest};
+    use proptest::prelude::*;
 
     use super::*;
+
+    fn reference_encode(input: &[u8]) -> Vec<u8> {
+        let mut output = NIX_BASE32.encode(input).into_bytes();
+        output.reverse();
+        output
+    }
+
+    fn reference_decode(input: &[u8]) -> (Result<usize, DecodeError>, Vec<u8>) {
+        let mut reversed = input.to_vec();
+        reversed.reverse();
+        let mut output = vec![0; decode_len_internal(input.len()).1];
+        let res = NIX_BASE32
+            .decode_mut(&reversed, &mut output)
+            .map_err(|err| DecodeError {
+                position: input.len() - err.error.position - 1,
+                kind: err.error.kind,
+            });
+        (res, output)
+    }
+
+    fn arb_nix32() -> impl Strategy<Value = Vec<u8>> {
+        (
+            prop::collection::vec(prop::sample::select(ALPHABET_BYTES.as_slice()), 0..120),
+            any::<prop::sample::Index>(),
+            prop::option::of(any::<u8>()),
+        )
+            .prop_map(|(mut s, idx, byte)| {
+                s.truncate(decode_len_internal(s.len()).0);
+                if let (Some(byte), false) = (byte, s.is_empty()) {
+                    let i = idx.index(s.len());
+                    s[i] = byte;
+                }
+                s
+            })
+    }
 
     proptest! {
         #[test]
@@ -273,6 +371,22 @@ mod proptests {
             let mut decoded = vec![0u8; decode_len(encoded.len())];
             decode_mut(&encoded, &mut decoded).unwrap();
             prop_assert_eq!(data, decoded);
+        }
+
+        #[test]
+        fn proptest_encode_matches_reference(data: Vec<u8>) {
+            prop_assert_eq!(encode_string(&data).into_bytes(), reference_encode(&data));
+        }
+
+        #[test]
+        fn proptest_decode_matches_reference(input in arb_nix32()) {
+            let (expected, expected_output) = reference_decode(&input);
+            let mut output = vec![0; expected_output.len()];
+            let actual = decode_mut(&input, &mut output).map_err(|err| err.error);
+            prop_assert_eq!(&actual, &expected);
+            if actual.is_ok() {
+                prop_assert_eq!(output, expected_output);
+            }
         }
     }
 }
