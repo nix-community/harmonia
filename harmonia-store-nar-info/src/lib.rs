@@ -226,7 +226,8 @@ pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarIn
                     });
                 }
                 have_references = true;
-                for r in value.split_whitespace() {
+                // Like Nix's `tokenizeString(value, " ")`.
+                for r in value.split(' ').filter(|t| !t.is_empty()) {
                     references.insert(
                         StorePath::from_bytes(r.as_bytes())
                             .map_err(|e| invalid("References", &e))?,
@@ -562,6 +563,20 @@ mod tests {
             parse_with(field, Some(&value)),
             Err(NarInfoParseError::InvalidField { field: f, .. }) if f == field
         ));
+    }
+
+    const REF_A: &str = "0jqd0rlxzra1rs38rdxl43yh6rxchgc6-curl-7.82.0";
+    const REF_B: &str = "55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3";
+
+    #[rstest]
+    #[case::multiple_spaces(format!("{REF_A}   {REF_B}"), Some(&[REF_A, REF_B][..]))]
+    #[case::leading_and_trailing_spaces(format!("  {REF_A} {REF_B} "), Some(&[REF_A, REF_B][..]))]
+    #[case::empty(String::new(), Some(&[][..]))]
+    #[case::tab(format!("{REF_A}\t{REF_B}"), None)]
+    fn test_parse_references(#[case] value: String, #[case] expected: Option<&[&str]>) {
+        let actual = parse_with("References", Some(&value)).map(|i| i.info.info.references);
+        let expected = expected.map(|e| e.iter().map(|p| p.parse().unwrap()).collect());
+        assert_eq!(actual.ok(), expected);
     }
 
     #[rstest]
