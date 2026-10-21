@@ -196,15 +196,23 @@ impl NarRestorer {
                         .read_to_end(&mut chunk)
                         .await
                         .map_err(|err| NarWriteError::create_file_error(self.path.clone(), err))?;
-                    left = left.saturating_sub(chunk.len() as u64);
+                    let last = chunk.len() < FILE_CHUNK_SIZE;
+                    // Events don't have to come from the parser, which checks this.
+                    left = left
+                        .checked_sub(chunk.len() as u64)
+                        .filter(|&left| !last || left == 0)
+                        .ok_or_else(|| {
+                            NarWriteError::invalid_entry_error(
+                                self.path.clone(),
+                                "file size doesn't match",
+                            )
+                        })?;
                     // A file that fills its last chunk ends with an empty read.
                     if created && chunk.is_empty() {
                         break;
                     }
-                    let last = chunk.len() < FILE_CHUNK_SIZE;
-                    // The permit counts the bytes read, not `size`, so a
-                    // reader that returns more than `size` still stays inside
-                    // the budget.
+                    // A file can be bigger than the whole budget, so each
+                    // chunk takes its own permit.
                     let permit = writer
                         .data
                         .clone()
@@ -798,6 +806,33 @@ mod unittests {
     }
 
     #[tokio::test]
+    #[rstest]
+    #[case::longer(1, 2)]
+    #[case::shorter(2, 1)]
+    #[case::not_empty(0, 1)]
+    #[case::longer_than_chunk(FILE_CHUNK_SIZE, FILE_CHUNK_SIZE + 1)]
+    #[case::shorter_by_chunk(FILE_CHUNK_SIZE + 1, FILE_CHUNK_SIZE)]
+    async fn test_restore_checks_file_size(#[case] size: usize, #[case] len: usize) {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let events = [
+            start_dir(b""),
+            NarEvent::File {
+                name: Bytes::from_static(b"f"),
+                executable: false,
+                size: size as u64,
+                reader: std::io::Cursor::new(Bytes::from(vec![0; len])),
+            },
+            NarEvent::EndDirectory,
+        ];
+        let err = restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+            .await
+            .unwrap_err();
+        assert_eq!(err.operation, NarWriteOperation::InvalidEntry);
+        assert_eq!(err.path, path.join("f"));
+    }
+
+    #[tokio::test]
     async fn test_restore_errors() {
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
 
@@ -907,7 +942,6 @@ mod unittests {
             let (release, wait) = std::sync::mpsc::channel::<()>();
             let busy = spawn_blocking(move || wait.recv().unwrap());
 
-            // The file says it is empty, but its reader returns 8 MiB.
             let data = std::io::Cursor::new(vec![0; 4 * DATA_IN_FLIGHT]);
             let counted = tokio_util::io::InspectReader::new(data, {
                 let read = read.clone();
@@ -918,7 +952,7 @@ mod unittests {
             let events = iter([NarEvent::File {
                 name: Bytes::new(),
                 executable: false,
-                size: 0,
+                size: 4 * DATA_IN_FLIGHT as u64,
                 reader: tokio::io::BufReader::new(counted),
             }]);
             let restored = restore(events.map(Ok::<_, NarWriteError>), &path);
@@ -929,7 +963,7 @@ mod unittests {
             spawn_blocking(|| ()).await.unwrap();
         });
         // `restore` reads one chunk past the budget and then waits for the
-        // writer thread. If it trusted `size`, it would read all 8 MiB.
+        // writer thread instead of reading all 8 MiB.
         assert!(read.load(Ordering::Relaxed) < 2 * DATA_IN_FLIGHT);
     }
 }
