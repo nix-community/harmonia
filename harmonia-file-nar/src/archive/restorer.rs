@@ -23,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
 
 use super::dumper::FILE_CHUNK_SIZE;
-use super::{CASE_HACK_SUFFIX, NarEvent};
+use super::{CASE_HACK_SUFFIX, NarEvent, is_valid_entry_name};
 
 #[derive(Display, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum NarWriteOperation {
@@ -138,12 +138,7 @@ impl NarRestorer {
                 return Err(invalid(name, "the root has a name"));
             }
             self.root_seen = true;
-        } else if name.is_empty()
-            || name.as_ref() == b"."
-            || name.as_ref() == b".."
-            || name.contains(&b'/')
-            || name.contains(&0)
-        {
+        } else if !is_valid_entry_name(name) {
             return Err(invalid(name, "invalid file name"));
         }
         if matches!(event, NarEvent::StartDirectory { .. }) {
