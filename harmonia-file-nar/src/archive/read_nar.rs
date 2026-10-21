@@ -209,20 +209,58 @@ pub(crate) struct Inner<const P: bool> {
 
 macro_rules! read_token {
     ($state:ident, $token:ident, $self:ident, $read:ident, $parsed:ident, $buf:ident) => {
-        let rem = &$token[$read as usize..];
-        let cmp = min(rem.len(), $buf.len());
-        if rem[..cmp] != $buf[..cmp] {
-            error!(rem=?rem[..cmp], buf=?$buf[..cmp], "Invalid data");
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid data in NAR"));
+        if $read == 0 && $buf.starts_with($token) {
+            $parsed += $token.len();
+            $buf = &$buf[$token.len()..];
+        } else {
+            let rem = &$token[$read as usize..];
+            let cmp = min(rem.len(), $buf.len());
+            if rem[..cmp] != $buf[..cmp] {
+                error!(rem=?rem[..cmp], buf=?$buf[..cmp], "Invalid data");
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid data in NAR"));
+            }
+            $parsed += cmp;
+            if cmp < rem.len() {
+                $self.state = InnerState::$state($read + cmp as u8);
+                break;
+            }
+            $buf = &$buf[cmp..];
         }
-        $parsed += cmp;
-        if cmp < rem.len() {
-            $self.state = InnerState::$state($read + cmp as u8);
-            break;
-        }
-        $buf = &$buf[cmp..];
     };
 }
+
+/// Fast path for tokens fully in `buf`; the radix tree handles split ones.
+#[inline]
+fn whole_token(buf: &[u8], tokens: &[(&[u8], InnerState)]) -> Option<(usize, InnerState)> {
+    tokens
+        .iter()
+        .find(|(token, _)| buf.starts_with(token))
+        .map(|&(token, next)| (token.len(), next))
+}
+
+/// Most common first.
+const NODE_TYPES: [(&[u8], InnerState); 4] = [
+    (
+        TOK_FILE,
+        InnerState::ReadContentsLen(NodeType::File, ZEROS, 0),
+    ),
+    (TOK_DIR, InnerState::ReadDir),
+    (
+        TOK_FILE_E,
+        InnerState::ReadContentsLen(NodeType::ExecutableFile, ZEROS, 0),
+    ),
+    (
+        TOK_SYM,
+        InnerState::ReadContentsLen(NodeType::Symlink, ZEROS, 0),
+    ),
+];
+const NODE_SELECT: RTree<7, 6, 2, InnerState> = RTree::from_tokens(&NODE_TYPES);
+
+const DIR_ITEMS: [(&[u8], InnerState); 2] = [
+    (TOK_ENTRY, InnerState::ReadEntryNameLen(ZEROS, 0)),
+    (TOK_PAR, InnerState::FinishReadEntry),
+];
+const ENTRY_SELECT: RTree<3, 2, 2, InnerState> = RTree::from_tokens(&DIR_ITEMS);
 
 impl<const P: bool> Inner<P> {
     pub(crate) fn is_eof(&self) -> bool {
@@ -269,24 +307,14 @@ impl<const P: bool> Inner<P> {
                 */
                 InnerState::SelectNode(mut state) => {
                     trace!(self.level, ?state, parsed, "InnerState::SelectNode");
-                    const NODE_SELECT: RTree<7, 6, 2, InnerState> = {
-                        let mut tree = RTree::new();
-                        tree.insert(TOK_DIR, InnerState::ReadDir);
-                        tree.insert(
-                            TOK_SYM,
-                            InnerState::ReadContentsLen(NodeType::Symlink, ZEROS, 0),
-                        );
-                        tree.insert(
-                            TOK_FILE,
-                            InnerState::ReadContentsLen(NodeType::File, ZEROS, 0),
-                        );
-                        tree.insert(
-                            TOK_FILE_E,
-                            InnerState::ReadContentsLen(NodeType::ExecutableFile, ZEROS, 0),
-                        );
-                        tree
-                    };
-
+                    if state == RLookup::default()
+                        && let Some((len, next)) = whole_token(buf, &NODE_TYPES)
+                    {
+                        parsed += len;
+                        buf = &buf[len..];
+                        self.state = next;
+                        continue;
+                    }
                     match NODE_SELECT.lookup(&mut state, buf) {
                         RMatch::Matched(read) => {
                             parsed += read;
@@ -311,6 +339,15 @@ impl<const P: bool> Inner<P> {
                 u64 => ReadContents
                 */
                 InnerState::ReadContentsLen(node_type, mut value, read) => {
+                    if read == 0
+                        && let Some((len, rest)) = buf.split_first_chunk()
+                    {
+                        let len = u64::from_le_bytes(*len);
+                        parsed += 8;
+                        buf = rest;
+                        self.state = InnerState::ReadContents(node_type, len, calc_aligned(len));
+                        continue;
+                    }
                     let rem = min(buf.len(), 8 - read as usize);
                     let new_read = read + rem as u8;
                     value[read as usize..new_read as usize].copy_from_slice(&buf[..rem]);
@@ -417,12 +454,14 @@ impl<const P: bool> Inner<P> {
                         buf = buf.len(),
                         "InnerState::ReadEntries"
                     );
-                    const ENTRY_SELECT: RTree<3, 2, 2, InnerState> = {
-                        let mut tree = RTree::new();
-                        tree.insert(TOK_ENTRY, InnerState::ReadEntryNameLen(ZEROS, 0));
-                        tree.insert(TOK_PAR, InnerState::FinishReadEntry);
-                        tree
-                    };
+                    if state == RLookup::default()
+                        && let Some((len, next)) = whole_token(buf, &DIR_ITEMS)
+                    {
+                        parsed += len;
+                        buf = &buf[len..];
+                        self.state = next;
+                        continue;
+                    }
                     match ENTRY_SELECT.lookup(&mut state, buf) {
                         RMatch::Matched(read) => {
                             parsed += read;
@@ -462,6 +501,15 @@ impl<const P: bool> Inner<P> {
                 */
                 InnerState::ReadEntryNameLen(mut value, read) => {
                     trace!(self.level, read, parsed, "InnerState::ReadEntryNameLen");
+                    if read == 0
+                        && let Some((len, rest)) = buf.split_first_chunk()
+                    {
+                        let len = u64::from_le_bytes(*len);
+                        parsed += 8;
+                        buf = rest;
+                        self.state = InnerState::ReadEntryName(len, calc_aligned(len));
+                        continue;
+                    }
                     let rem = min(buf.len(), 8 - read as usize);
                     let new_read = read + rem as u8;
                     value[read as usize..new_read as usize].copy_from_slice(&buf[..rem]);
