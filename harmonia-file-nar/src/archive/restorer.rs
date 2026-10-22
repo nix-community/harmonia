@@ -13,7 +13,9 @@ use derive_more::Display;
 use futures_core::Stream;
 use nix::errno::Errno;
 use nix::fcntl::{AT_FDCWD, OFlag, openat};
-use nix::sys::stat::{FchmodatFlags, Mode, UtimensatFlags, fchmodat, futimens, mkdirat, utimensat};
+use nix::sys::stat::{
+    FchmodatFlags, Mode, UtimensatFlags, fchmod, fchmodat, futimens, mkdirat, utimensat,
+};
 use nix::sys::time::TimeSpec;
 use nix::unistd::symlinkat;
 use thiserror::Error;
@@ -471,11 +473,16 @@ impl Disk {
                     // The mode only applies to later opens.
                     mode &= !0o222;
                 }
+                let mode = Mode::from_bits_truncate(mode);
                 // `O_EXCL` also refuses to follow a symlink.
                 let flags = OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC;
+                let err = |err: Errno| NarWriteError::create_file_error(path.clone(), err.into());
                 let (dir, name) = self.locate(&path);
-                let created = openat(dir, name, flags, Mode::from_bits_truncate(mode))
-                    .map_err(|err| NarWriteError::create_file_error(path.clone(), err.into()))?;
+                let created = openat(dir, name, flags, mode).map_err(err)?;
+                if self.canonical {
+                    // Undo the umask.
+                    fchmod(&created, mode).map_err(err)?;
+                }
                 append(self.file.insert((path, created.into())), &data)?;
             }
             Op::CreateDirectory(path) => {
@@ -600,7 +607,7 @@ impl RestoreOptions {
     }
 
     /// Give entries the metadata of store paths while restoring: mode
-    /// 0o444/0o555 (subject to the umask for files) and mtime 1.
+    /// 0o444/0o555, regardless of the umask, and mtime 1.
     pub fn canonical(mut self, canonical: bool) -> Self {
         self.canonical = canonical;
         self
@@ -647,6 +654,9 @@ mod unittests {
     use rstest::rstest;
     use tempfile::Builder;
 
+    /// The umask is per process, and tests run in parallel threads.
+    static UMASK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test]
     #[rstest]
     #[case::text_file(test_data::text_file())]
@@ -663,6 +673,7 @@ mod unittests {
         #[case] events: test_data::TestNarEvents,
         #[values(false, true)] canonical: bool,
     ) {
+        let _umask = UMASK.lock().await;
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
         let path = dir.path().join("output");
 
@@ -699,7 +710,7 @@ mod unittests {
                 assert_eq!(mode, 0o555, "{at:?}");
                 std::fs::set_permissions(at, Permissions::from_mode(0o755)).unwrap();
             } else if meta.is_file() {
-                assert_eq!(mode & 0o222, 0, "{at:?}");
+                assert!(matches!(mode, 0o444 | 0o555), "{at:?}: {mode:o}");
             }
         }
     }
@@ -941,6 +952,38 @@ mod unittests {
         let err = restore(events, &path).await.unwrap_err();
         assert_eq!(err.path, PathBuf::from("stream"));
         assert!(path.is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_restore_canonical_umask() {
+        use nix::sys::stat::umask;
+
+        struct Restore(Mode);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                umask(self.0);
+            }
+        }
+
+        let _umask = UMASK.lock().await;
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let events = test_data::dir_example();
+        let old = Restore(umask(Mode::from_bits_truncate(0o077)));
+        let restored = RestoreOptions::new()
+            .canonical(true)
+            .restore(iter(events.clone()).map(Ok::<_, NarWriteError>), &path)
+            .await;
+        drop(old);
+        restored.unwrap();
+
+        let dumped = dump(&path)
+            .and_then(NarEvent::read_file)
+            .try_collect::<test_data::TestNarEvents>()
+            .await
+            .unwrap();
+        assert_eq!(dumped, events);
+        check_canonical(&path);
     }
 
     /// With `canonical`, a directory that ended is read-only even if the
