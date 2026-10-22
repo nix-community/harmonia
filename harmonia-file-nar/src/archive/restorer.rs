@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt;
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, Permissions};
 use std::io::{self, Write as _};
 use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::OpenOptionsExt as _;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -12,6 +13,9 @@ use bstr::ByteSlice as _;
 use bytes::Bytes;
 use derive_more::Display;
 use futures_core::Stream;
+use nix::fcntl::AT_FDCWD;
+use nix::sys::stat::{UtimensatFlags, futimens, utimensat};
+use nix::sys::time::TimeSpec;
 use thiserror::Error;
 use tokio::io::{AsyncBufRead, AsyncReadExt as _};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
@@ -78,18 +82,19 @@ pub struct NarRestorer {
     depth: usize,
     /// Whether the NAR's root entry has been seen.
     root_seen: bool,
+    canonical: bool,
 }
 
 impl NarRestorer {
     pub fn new<P: Into<PathBuf>>(path: P) -> Self {
-        Self::new_restorer(path, false)
+        Self::new_restorer(path, false, false)
     }
 
     pub fn with_case_hack<P: Into<PathBuf>>(path: P) -> Self {
-        Self::new_restorer(path, true)
+        Self::new_restorer(path, true, false)
     }
 
-    fn new_restorer<P>(path: P, use_case_hack: bool) -> Self
+    fn new_restorer<P>(path: P, use_case_hack: bool, canonical: bool) -> Self
     where
         P: Into<PathBuf>,
     {
@@ -101,6 +106,7 @@ impl NarRestorer {
             dir_stack: Default::default(),
             depth: 0,
             root_seen: false,
+            canonical,
         }
     }
 
@@ -171,10 +177,15 @@ impl NarRestorer {
                     name
                 };
 
-                writer
-                    .send(Op::CreateFile(join_name(&self.path, &name), executable))
-                    .await?;
+                // Drop `name` before reading so the parser can reuse the read
+                // buffer it points into.
+                let pushed = !name.is_empty();
+                if pushed {
+                    self.path.push(OsStr::from_bytes(&name));
+                }
+                drop(name);
                 let mut left = size;
+                let mut created = false;
                 loop {
                     // The parser's reads are small, so this collects bigger
                     // chunks for the writer. Reading to the end of the file
@@ -184,26 +195,35 @@ impl NarRestorer {
                         .take(FILE_CHUNK_SIZE as u64)
                         .read_to_end(&mut chunk)
                         .await
-                        .map_err(|err| {
-                            NarWriteError::create_file_error(join_name(&self.path, &name), err)
-                        })?;
+                        .map_err(|err| NarWriteError::create_file_error(self.path.clone(), err))?;
                     left = left.saturating_sub(chunk.len() as u64);
-                    let last = chunk.len() < FILE_CHUNK_SIZE;
-                    if !chunk.is_empty() {
-                        // The permit counts the bytes read, not `size`, so a
-                        // reader that returns more than `size` still stays
-                        // inside the budget.
-                        let permit = writer
-                            .data
-                            .clone()
-                            .acquire_many_owned(chunk.len() as u32)
-                            .await
-                            .expect("the semaphore is never closed");
-                        writer.send(Op::Write(chunk, permit)).await?;
+                    // A file that fills its last chunk ends with an empty read.
+                    if created && chunk.is_empty() {
+                        break;
                     }
+                    let last = chunk.len() < FILE_CHUNK_SIZE;
+                    // The permit counts the bytes read, not `size`, so a
+                    // reader that returns more than `size` still stays inside
+                    // the budget.
+                    let permit = writer
+                        .data
+                        .clone()
+                        .acquire_many_owned(chunk.len() as u32)
+                        .await
+                        .expect("the semaphore is never closed");
+                    let op = if created {
+                        Op::Write(chunk, permit)
+                    } else {
+                        Op::CreateFile(self.path.clone(), executable, chunk, permit)
+                    };
+                    writer.send(op).await?;
+                    created = true;
                     if last {
                         break;
                     }
+                }
+                if pushed {
+                    self.path.pop();
                 }
             }
             NarEvent::Symlink { name, target } => {
@@ -240,6 +260,9 @@ impl NarRestorer {
                     self.entries = self.dir_stack.pop().unwrap_or_default();
                 }
                 self.path.pop();
+                if self.canonical {
+                    writer.send(Op::EndDirectory).await?;
+                }
             }
         }
         Ok(())
@@ -265,7 +288,7 @@ impl NarRestorer {
         let dropped = CancellationToken::new();
         let written = spawn_blocking({
             let dropped = dropped.clone();
-            move || write(queued, &dropped)
+            move || write(queued, &dropped, self.canonical)
         });
         let writer = Writer {
             ops,
@@ -327,10 +350,13 @@ const DATA_IN_FLIGHT: usize = 8 * FILE_CHUNK_SIZE;
 enum Op {
     CreateDirectory(PathBuf),
     CreateSymlink(PathBuf, Bytes),
-    CreateFile(PathBuf, bool),
+    /// Carries the file's first chunk, so small files take one op.
+    CreateFile(PathBuf, bool, Vec<u8>, OwnedSemaphorePermit),
     /// More data for the last created file. The permit is its share of
     /// [`DATA_IN_FLIGHT`].
     Write(Vec<u8>, OwnedSemaphorePermit),
+    /// Only sent with [`RestoreOptions::canonical`].
+    EndDirectory,
 }
 
 /// The queue to the writer thread, and the budget for the file data in it.
@@ -353,8 +379,16 @@ impl Writer {
 
 /// Does the filesystem work in `ops`, in order, with `std::fs`. If `dropped`
 /// is cancelled, it returns before the next entry and skips the rest.
-fn write(mut ops: mpsc::Receiver<Op>, dropped: &CancellationToken) -> Result<(), NarWriteError> {
-    let mut file: Option<(PathBuf, File)> = None;
+fn write(
+    mut ops: mpsc::Receiver<Op>,
+    dropped: &CancellationToken,
+    canonical: bool,
+) -> Result<(), NarWriteError> {
+    let mut disk = Disk {
+        canonical,
+        file: None,
+        dirs: Vec::new(),
+    };
     let mut batch = Vec::with_capacity(OPS_PER_BATCH);
     while ops.blocking_recv_many(&mut batch, OPS_PER_BATCH) > 0 {
         for op in batch.drain(..) {
@@ -363,42 +397,98 @@ fn write(mut ops: mpsc::Receiver<Op>, dropped: &CancellationToken) -> Result<(),
             if dropped.is_cancelled() {
                 return Ok(());
             }
-            apply(op, &mut file)?;
+            disk.apply(op)?;
         }
     }
-    Ok(())
+    disk.close_file()
 }
 
-/// Does the filesystem work for one `op`. `file` is the last created file,
-/// which [`Op::Write`] appends to.
-fn apply(op: Op, file: &mut Option<(PathBuf, File)>) -> Result<(), NarWriteError> {
-    match op {
-        Op::Write(data, _permit) => {
-            let (path, file) = file.as_mut().expect("file data follows its file");
-            file.write_all(&data)
-                .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
+const CANONICAL_MTIME: TimeSpec = TimeSpec::new(1, 0);
+
+fn set_canonical_mtime(path: &Path) -> io::Result<()> {
+    Ok(utimensat(
+        AT_FDCWD,
+        path,
+        &TimeSpec::UTIME_OMIT,
+        &CANONICAL_MTIME,
+        UtimensatFlags::NoFollowSymlink,
+    )?)
+}
+
+fn append((path, file): &mut (PathBuf, File), data: &[u8]) -> Result<(), NarWriteError> {
+    file.write_all(data)
+        .map_err(|err| NarWriteError::create_file_error(path.clone(), err))
+}
+
+struct Disk {
+    canonical: bool,
+    /// The last created file, which [`Op::Write`] appends to.
+    file: Option<(PathBuf, File)>,
+    /// Open directories, only tracked with `canonical`.
+    dirs: Vec<PathBuf>,
+}
+
+impl Disk {
+    fn apply(&mut self, op: Op) -> Result<(), NarWriteError> {
+        match op {
+            Op::Write(data, _permit) => {
+                append(
+                    self.file.as_mut().expect("file data follows its file"),
+                    &data,
+                )?;
+            }
+            Op::CreateFile(path, executable, data, _permit) => {
+                self.close_file()?;
+                trace!("Writing to file {:?}", path);
+                let mut mode = if executable { 0o777 } else { 0o666 };
+                if self.canonical {
+                    // The mode only applies to later opens.
+                    mode &= !0o222;
+                }
+                let mut options = OpenOptions::new();
+                options.write(true).create_new(true);
+                options.mode(mode);
+                let created = options
+                    .open(&path)
+                    .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
+                append(self.file.insert((path, created)), &data)?;
+            }
+            Op::CreateDirectory(path) => {
+                self.close_file()?;
+                std::fs::create_dir(&path)
+                    .map_err(|err| NarWriteError::create_dir_error(path.clone(), err))?;
+                if self.canonical {
+                    self.dirs.push(path);
+                }
+            }
+            Op::CreateSymlink(path, target) => {
+                self.close_file()?;
+                let err = |err| NarWriteError::create_symlink_error(path.clone(), err);
+                std::os::unix::fs::symlink(OsStr::from_bytes(&target), &path).map_err(err)?;
+                if self.canonical {
+                    set_canonical_mtime(&path).map_err(err)?;
+                }
+            }
+            Op::EndDirectory => {
+                self.close_file()?;
+                let path = self.dirs.pop().expect("a directory ends after it starts");
+                std::fs::set_permissions(&path, Permissions::from_mode(0o555))
+                    .and_then(|()| set_canonical_mtime(&path))
+                    .map_err(|err| NarWriteError::create_dir_error(path, err))?;
+            }
         }
-        Op::CreateFile(path, executable) => {
-            trace!("Writing to file {:?}", path);
-            let mut options = OpenOptions::new();
-            options.write(true).create_new(true);
-            options.mode(if executable { 0o777 } else { 0o666 });
-            let created = options
-                .open(&path)
-                .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-            *file = Some((path, created));
-        }
-        Op::CreateDirectory(path) => {
-            *file = None;
-            std::fs::create_dir(&path).map_err(|err| NarWriteError::create_dir_error(path, err))?;
-        }
-        Op::CreateSymlink(path, target) => {
-            *file = None;
-            std::os::unix::fs::symlink(OsStr::from_bytes(&target), &path)
-                .map_err(|err| NarWriteError::create_symlink_error(path, err))?;
-        }
+        Ok(())
     }
-    Ok(())
+
+    fn close_file(&mut self) -> Result<(), NarWriteError> {
+        if let Some((path, file)) = self.file.take()
+            && self.canonical
+        {
+            futimens(&file, &TimeSpec::UTIME_OMIT, &CANONICAL_MTIME)
+                .map_err(|err| NarWriteError::create_file_error(path, err.into()))?;
+        }
+        Ok(())
+    }
 }
 
 struct CIString(Bytes, String);
@@ -453,6 +543,7 @@ impl Entries {
 
 pub struct RestoreOptions {
     use_case_hack: bool,
+    canonical: bool,
 }
 
 impl RestoreOptions {
@@ -461,11 +552,21 @@ impl RestoreOptions {
         let use_case_hack = true;
         #[cfg(not(target_os = "macos"))]
         let use_case_hack = false;
-        Self { use_case_hack }
+        Self {
+            use_case_hack,
+            canonical: false,
+        }
     }
 
     pub fn use_case_hack(mut self, use_case_hack: bool) -> Self {
         self.use_case_hack = use_case_hack;
+        self
+    }
+
+    /// Give entries the metadata of store paths while restoring: mode
+    /// 0o444/0o555 (subject to the umask for files) and mtime 1.
+    pub fn canonical(mut self, canonical: bool) -> Self {
+        self.canonical = canonical;
         self
     }
 
@@ -476,8 +577,9 @@ impl RestoreOptions {
         P: Into<PathBuf>,
         R: AsyncBufRead + Send + Unpin,
     {
-        let restorer = NarRestorer::new_restorer(path, self.use_case_hack);
-        restorer.restore(stream).await
+        NarRestorer::new_restorer(path, self.use_case_hack, self.canonical)
+            .restore(stream)
+            .await
     }
 }
 
@@ -518,20 +620,49 @@ mod unittests {
     #[case::dir_example(test_data::dir_example())]
     #[case::case_hack_sorting(test_data::case_hack_sorting())]
     #[case::many_files(many_files())]
-    async fn test_restore(#[case] events: test_data::TestNarEvents) {
+    async fn test_restore(
+        #[case] events: test_data::TestNarEvents,
+        #[values(false, true)] canonical: bool,
+    ) {
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
         let path = dir.path().join("output");
 
         let events_s = iter(events.clone().into_iter())
             .map(|e| Ok(e) as Result<test_data::TestNarEvent, NarWriteError>);
-        restore(events_s, &path).await.unwrap();
+        RestoreOptions::new()
+            .canonical(canonical)
+            .restore(events_s, &path)
+            .await
+            .unwrap();
 
-        let s = dump(path)
+        let s = dump(&path)
             .and_then(NarEvent::read_file)
             .try_collect::<test_data::TestNarEvents>()
             .await
             .unwrap();
         assert_eq!(s, events);
+        if canonical {
+            check_canonical(&path);
+        }
+    }
+
+    /// Also makes directories writable again so the tempdir can be removed.
+    fn check_canonical(path: &Path) {
+        use std::os::unix::fs::MetadataExt as _;
+
+        for entry in walkdir::WalkDir::new(path).follow_root_links(false) {
+            let entry = entry.unwrap();
+            let meta = entry.metadata().unwrap();
+            let at = entry.path();
+            assert_eq!((meta.mtime(), meta.mtime_nsec()), (1, 0), "{at:?}");
+            let mode = meta.mode() & 0o7777;
+            if meta.is_dir() {
+                assert_eq!(mode, 0o555, "{at:?}");
+                std::fs::set_permissions(at, Permissions::from_mode(0o755)).unwrap();
+            } else if meta.is_file() {
+                assert_eq!(mode & 0o222, 0, "{at:?}");
+            }
+        }
     }
 
     fn file(name: &'static [u8]) -> test_data::TestNarEvent {
