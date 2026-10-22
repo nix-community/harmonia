@@ -3,8 +3,8 @@
 use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::ptr::{self, NonNull};
+use std::slice;
 use std::sync::Arc;
-use std::{cmp, slice};
 
 use bytes::{Buf, BufMut};
 
@@ -115,189 +115,48 @@ impl BufferMut {
         self.cap
     }
 
-    /// Reserves capacity for at least `additional` more bytes to be inserted
-    /// into the given `BytesMut`.
-    ///
-    /// More than `additional` bytes may be reserved in order to avoid frequent
-    /// reallocations. A call to `reserve` may result in an allocation.
-    ///
-    /// Before allocating new buffer space, the function will attempt to reclaim
-    /// space in the existing buffer. If the current handle references a view
-    /// into a larger original buffer, and all other handles referencing part
-    /// of the same original buffer have been dropped, then the current view
-    /// can be copied/shifted to the front of the buffer and the handle can take
-    /// ownership of the full buffer, provided that the full buffer is large
-    /// enough to fit the requested additional capacity.
-    ///
-    /// This optimization will only happen if shifting the data from the current
-    /// view to the front of the buffer is not too expensive in terms of the
-    /// (amortized) time required. The precise condition is subject to change;
-    /// as of now, the length of the data being shifted needs to be at least as
-    /// large as the distance that it's shifted by. If the current view is empty
-    /// and the original buffer is large enough to fit the requested additional
-    /// capacity, then reallocations will never happen.
-    ///
-    /// # Examples
-    ///
-    /// In the following example, a new buffer is allocated.
-    ///
-    /// ```
-    /// use bytes::BytesMut;
-    ///
-    /// let mut buf = BytesMut::from(&b"hello"[..]);
-    /// buf.reserve(64);
-    /// assert!(buf.capacity() >= 69);
-    /// ```
-    ///
-    /// In the following example, the existing buffer is reclaimed.
-    ///
-    /// ```
-    /// use bytes::{BytesMut, BufMut};
-    ///
-    /// let mut buf = BytesMut::with_capacity(128);
-    /// buf.put(&[0; 64][..]);
-    ///
-    /// let ptr = buf.as_ptr();
-    /// let other = buf.split();
-    ///
-    /// assert!(buf.is_empty());
-    /// assert_eq!(buf.capacity(), 64);
-    ///
-    /// drop(other);
-    /// buf.reserve(128);
-    ///
-    /// assert_eq!(buf.capacity(), 128);
-    /// assert_eq!(buf.as_ptr(), ptr);
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if the new capacity overflows `usize`.
+    /// Makes room for `additional` more bytes, capped at `limit` in total.
+    /// Doubles the allocation unless shifting the held bytes to the front
+    /// frees enough, so filling a little at a time copies each byte O(1) times.
     #[inline]
-    pub fn reserve(&mut self, additional: usize) {
-        let len = self.len();
-        let rem = self.capacity() - len;
-
-        if additional <= rem {
-            // The handle can already store at least `additional` more bytes, so
-            // there is no further work needed to be done.
+    pub fn reserve(&mut self, additional: usize, limit: usize) {
+        let additional = additional.min(limit.saturating_sub(self.len));
+        if additional <= self.cap - self.len {
             return;
         }
-
-        // will always succeed
-        let _ = self.reserve_inner(additional, true);
+        self.reserve_inner(additional, limit);
     }
 
-    // In separate function to allow the short-circuits in `reserve` and `try_reclaim` to
-    // be inline-able. Significantly helps performance. Returns false if it did not succeed.
-    fn reserve_inner(&mut self, additional: usize, allocate: bool) -> bool {
-        let len = self.len();
+    // In a separate function so the check in `reserve` can be inlined.
+    fn reserve_inner(&mut self, additional: usize, limit: usize) {
+        let len = self.len;
+        // `reserve` keeps this within `limit`.
+        let needed = len + additional;
+        let size = self.data.capacity();
+        // SAFETY: `ptr` points into the allocation of `data`.
+        let offset = unsafe { self.ptr.as_ptr().offset_from_unsigned(self.data.as_ptr()) };
 
-        // Reserving involves abandoning the currently shared buffer and
-        // allocating a new vector with the requested capacity.
-        //
-        // Compute the new capacity
-        let mut new_cap = match len.checked_add(additional) {
-            Some(new_cap) => new_cap,
-            None if !allocate => return false,
-            None => panic!("overflow"),
+        let new_cap = if size >= needed && offset >= len {
+            size
+        } else {
+            size.saturating_mul(2)
         };
-
-        if let Some(v) = Arc::get_mut(&mut self.data) {
-            unsafe {
-                let v_capacity = v.capacity();
-                let ptr = v.as_mut_ptr();
-
-                let offset = self.ptr.as_ptr().offset_from(ptr) as usize;
-
-                // Only reuse space if we can satisfy the requested additional space.
-                //
-                // Also check if the value of `off` suggests that enough bytes
-                // have been read to account for the overhead of shifting all
-                // the data (in an amortized analysis).
-                // Hence the condition `off >= self.len()`.
-                //
-                // This condition also already implies that the buffer is going
-                // to be (at least) half-empty in the end; so we do not break
-                // the (amortized) runtime with future resizes of the underlying
-                // `Vec`.
-                //
-                // [For more details check issue bytes#524, and PR bytes#525.]
-                if v_capacity >= new_cap && offset >= len {
-                    // The capacity is sufficient, and copying is not too much
-                    // overhead: reclaim the buffer!
-
-                    // `offset >= len` means: no overlap
-                    ptr::copy_nonoverlapping(self.ptr.as_ptr(), ptr, len);
-
-                    self.ptr = vptr(ptr);
-                    self.cap = v.capacity();
-                } else {
-                    if !allocate {
-                        return false;
-                    }
-
-                    // new_cap is calculated in terms of `BytesMut`, not the underlying
-                    // `Vec`, so it does not take the offset into account.
-                    //
-                    // Thus we have to manually add it here.
-                    new_cap = new_cap.checked_add(offset).expect("overflow");
-
-                    // The vector capacity is not sufficient. The reserve request is
-                    // asking for more than the initial buffer capacity. Allocate more
-                    // than requested if `new_cap` is not much bigger than the current
-                    // capacity.
-                    //
-                    // There are some situations, using `reserve_exact` that the
-                    // buffer capacity could be below `original_capacity`, so do a
-                    // check.
-                    let double = v.capacity().checked_shl(1).unwrap_or(new_cap);
-
-                    new_cap = cmp::max(double, new_cap);
-
-                    // No space - allocate more
-                    //
-                    // The length field of `Shared::vec` is not used by the `BytesMut`;
-                    // instead we use the `len` field in the `BytesMut` itself. However,
-                    // when calling `reserve`, it doesn't guarantee that data stored in
-                    // the unused capacity of the vector is copied over to the new
-                    // allocation, so we need to ensure that we don't have any data we
-                    // care about in the unused capacity before calling `reserve`.
-                    debug_assert!(offset + len <= v.capacity());
-                    v.set_len(offset + len);
-                    v.reserve(new_cap - v.len());
-
-                    // Update the info
-                    self.ptr = vptr(v.as_mut_ptr().add(offset));
-                    self.cap = v.capacity() - offset;
-                }
-            }
-
-            return true;
+        let new_cap = new_cap.min(limit).max(needed);
+        if new_cap <= size
+            && let Some(v) = Arc::get_mut(&mut self.data)
+        {
+            let start = v.as_mut_ptr();
+            // SAFETY: both ranges are inside `v`.
+            unsafe { ptr::copy(self.ptr.as_ptr(), start, len) };
+            self.ptr = vptr(start);
+            self.cap = size;
+            return;
         }
-        if !allocate {
-            return false;
-        }
-        // Arc is still shared (a `Filled`/`Bytes` handle outlives this reserve),
-        // so we cannot grow in place and must reallocate + copy. This is normal
-        // during streaming.
-        new_cap = cmp::max(new_cap, self.data.capacity());
-
-        // Create a new vector to store the data
         let mut v = Vec::with_capacity(new_cap);
-
-        // Copy the bytes
-        v.extend_from_slice(self.as_ref());
-
-        let ptr = vptr(v.as_mut_ptr());
-        let cap = v.capacity();
+        v.extend_from_slice(self.as_slice());
+        self.ptr = vptr(v.as_mut_ptr());
+        self.cap = v.capacity();
         self.data = Arc::new(v);
-
-        // Update self
-        self.ptr = ptr;
-        self.cap = cap;
-        debug_assert_eq!(self.len, self.data.len());
-        true
     }
 
     #[inline]
