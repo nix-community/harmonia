@@ -1,17 +1,20 @@
-use std::io;
+use std::io::{self, Cursor};
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use futures_core::Stream;
 use pin_project_lite::pin_project;
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
+use tokio_util::either::Either;
 use tracing::trace;
 
 use crate::ByteString;
 use crate::padded_reader::{PaddedReader, check_padding};
 use crate::wire::calc_aligned;
-use harmonia_utils_io::{AsyncBufReadCompat, AsyncBytesRead, BytesReader, Lending, LentReader};
+use harmonia_utils_io::{
+    AsyncBufReadCompat, AsyncBytesRead, BytesReader, BytesStreamReader, Lending, LentReader,
+};
 
 use super::read_nar::{Inner, InnerState, NodeType};
 use super::{NarEvent, is_valid_entry_name};
@@ -79,19 +82,49 @@ where
     }
 }
 
-type ParsedReader<R> = AsyncBufReadCompat<LentReader<PaddedReader<R>>>;
+/// The contents of a file from [`NarParser`]: a slice of the parser's buffer
+/// if it holds the whole file, otherwise a reader the parser lends out.
+/// Read it to the end or drop it before asking for the next event.
+pub struct ParsedFile<R>(Either<Cursor<Bytes>, AsyncBufReadCompat<LentReader<PaddedReader<R>>>>);
+
+impl<R> AsyncRead for ParsedFile<R>
+where
+    R: AsyncBytesRead + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().0).poll_read(cx, buf)
+    }
+}
+
+impl<R> AsyncBufRead for ParsedFile<R>
+where
+    R: AsyncBytesRead + Unpin,
+{
+    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
+        Pin::new(&mut self.get_mut().0).poll_fill_buf(cx)
+    }
+
+    fn consume(self: Pin<&mut Self>, amt: usize) {
+        Pin::new(&mut self.get_mut().0).consume(amt)
+    }
+}
+
 impl<R> Stream for NarParser<R>
 where
     R: AsyncBytesRead + Unpin,
 {
-    type Item = io::Result<NarEvent<ParsedReader<R>>>;
+    type Item = io::Result<NarEvent<ParsedFile<R>>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
         let mut reader = ready!(this.reader.as_mut().poll_reader(cx))?;
         match this.state.state {
             InnerState::ReadContents(NodeType::ExecutableFile | NodeType::File, size, _) => {
-                // The file's reader has drained the contents and their padding.
+                // The contents and their padding have been consumed.
                 *this.position = this.position.saturating_add(calc_aligned(size));
                 this.state.bump_next();
             }
@@ -124,15 +157,27 @@ where
                 InnerState::ReadContents(
                     node_type @ (NodeType::ExecutableFile | NodeType::File),
                     size,
-                    _,
+                    aligned,
                 ) => {
-                    let reader = this.reader.lend(|r| PaddedReader::new(r, size));
+                    // `size` is checked too in case `aligned` wrapped
+                    // around. On bad padding, lend the reader so it fails.
+                    let buffered = buf.len() as u64;
+                    let in_buf = size <= buffered && aligned <= buffered;
+                    let (len, aligned) = (size as usize, aligned as usize);
+                    let contents = if in_buf && check_padding(&buf[len..aligned]).is_ok() {
+                        reader.as_mut().consume(aligned);
+                        buf.truncate(len);
+                        Either::Left(Cursor::new(buf))
+                    } else {
+                        let reader = this.reader.lend(|r| PaddedReader::new(r, size));
+                        Either::Right(AsyncBufReadCompat::new(reader))
+                    };
                     let name = this.name.take().unwrap_or_default();
                     return Poll::Ready(Some(Ok(NarEvent::File {
                         name,
                         executable: node_type == NodeType::ExecutableFile,
                         size,
-                        reader: AsyncBufReadCompat::new(reader),
+                        reader: ParsedFile(contents),
                     })));
                 }
                 InnerState::ReadContents(NodeType::Symlink, len, aligned) => {
@@ -208,12 +253,23 @@ where
 
 pub fn parse_nar<R>(
     reader: R,
-) -> impl Stream<Item = io::Result<NarEvent<ParsedReader<BytesReader<R>>>>>
+) -> impl Stream<Item = io::Result<NarEvent<ParsedFile<BytesReader<R>>>>>
 where
     R: AsyncRead + Unpin,
 {
     let reader = BytesReader::new(reader);
     NarParser::new(reader)
+}
+
+/// Parses a NAR from a stream of chunks without copying them. Holding on to
+/// a name, target or file keeps its whole chunk in memory.
+pub fn parse_nar_stream<S>(
+    stream: S,
+) -> impl Stream<Item = io::Result<NarEvent<ParsedFile<BytesStreamReader<S>>>>>
+where
+    S: Stream<Item = io::Result<Bytes>> + Unpin,
+{
+    NarParser::new(BytesStreamReader::new(stream))
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -231,16 +287,40 @@ where
 #[cfg(test)]
 mod unittests {
     use std::io::{self, Cursor};
+    use std::path::PathBuf;
+    use std::pin::pin;
 
     use bytes::Bytes;
 
+    use futures_util::stream::{self, TryStreamExt as _};
+    use proptest::prelude::*;
     use rstest::rstest;
     use tokio::fs::File;
 
-    use crate::archive::read_nar::{TOK_DIR, TOK_ENTRY, TOK_ROOT, TOK_SYM};
+    use crate::archive::read_nar::{TOK_DIR, TOK_ENTRY, TOK_FILE, TOK_PAR, TOK_ROOT, TOK_SYM};
     use crate::archive::{test_data, write_nar};
+    use crate::test::arbitrary::archive::arb_nar_events;
 
     use super::*;
+
+    /// Splits `nar` into chunks of the given sizes, cycling through them.
+    fn chunked(mut nar: Bytes, sizes: &[usize]) -> impl Stream<Item = io::Result<Bytes>> + Unpin {
+        let mut chunks = Vec::new();
+        for &size in sizes.iter().cycle() {
+            if nar.is_empty() {
+                break;
+            }
+            chunks.push(Ok(nar.split_to(size.min(nar.len()))));
+        }
+        stream::iter(chunks)
+    }
+
+    async fn read_nar_stream(nar: Bytes, sizes: &[usize]) -> io::Result<test_data::TestNarEvents> {
+        parse_nar_stream(chunked(nar, sizes))
+            .and_then(NarEvent::read_file)
+            .try_collect()
+            .await
+    }
 
     #[tokio::test]
     #[rstest]
@@ -268,6 +348,71 @@ mod unittests {
 
         let err = read_nar(Cursor::new(nar)).await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// A file size near `u64::MAX` must fail as a short NAR, not panic.
+    #[tokio::test]
+    async fn huge_file_size() {
+        let mut nar = [TOK_ROOT, TOK_FILE].concat();
+        nar.extend_from_slice(&u64::MAX.to_le_bytes());
+        nar.extend_from_slice(&[0u8; 64]);
+        let err = read_nar(Cursor::new(nar)).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    /// After bad padding, the file's ")" mustn't be parsed as a token.
+    #[tokio::test]
+    async fn bad_padding_after_file_keeps_failing() {
+        use futures_util::StreamExt as _;
+        use tokio::io::AsyncReadExt as _;
+
+        let contents = [TOK_PAR, b"x"].concat();
+        let events = [NarEvent::File {
+            name: Bytes::new(),
+            executable: false,
+            size: contents.len() as u64,
+            reader: Cursor::new(Bytes::from(contents.clone())),
+        }];
+        let mut nar = Vec::from(write_nar(events.iter()));
+        let at = nar
+            .windows(contents.len())
+            .position(|w| w == contents)
+            .unwrap();
+        nar[at + contents.len()] = 1;
+
+        let mut parser = pin!(parse_nar(Cursor::new(nar)));
+        let mut failed = false;
+        for _ in 0..3 {
+            match parser.next().await {
+                Some(Ok(NarEvent::File { mut reader, .. })) if !failed => {
+                    failed = reader.read_to_end(&mut Vec::new()).await.is_err();
+                }
+                Some(Err(err)) => {
+                    assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+                    failed = true;
+                }
+                other => panic!("expected an error, got {:?}", other.map(|e| e.is_ok())),
+            }
+        }
+        assert!(failed);
+    }
+
+    #[tokio::test]
+    async fn buffered_file_does_not_block_parser() {
+        use futures_util::{FutureExt as _, StreamExt as _};
+        use tokio::io::AsyncReadExt as _;
+
+        let nar = write_nar(test_data::text_file().iter());
+        let mut parser = pin!(parse_nar(Cursor::new(nar)));
+        let Some(Ok(NarEvent::File { mut reader, .. })) = parser.next().await else {
+            panic!("expected a file");
+        };
+        let next = parser.next().now_or_never().expect("the parser waited");
+        assert!(next.is_none());
+
+        let mut contents = String::new();
+        reader.read_to_string(&mut contents).await.unwrap();
+        assert_eq!(contents, "Hello world!");
     }
 
     /// Build a NAR of a directory containing one empty file per name.
@@ -363,8 +508,10 @@ mod unittests {
                 .await
                 .unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
-            let reader = BytesReader::new(test_data::Chunked::new(nar, chunk_size));
+            let reader = BytesReader::new(test_data::Chunked::new(nar.clone(), chunk_size));
             let err = crate::parse_nar_listing(reader).await.unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
+            let err = read_nar_stream(nar, &[chunk_size]).await.unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{case}");
         }
     }
@@ -437,5 +584,43 @@ mod unittests {
         };
         let read = reader.read_to_end(&mut Vec::new()).now_or_never();
         assert_eq!(read.expect("the reader waited").unwrap(), 0);
+    }
+
+    #[test]
+    fn proptest_parse_stream() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        proptest!(|(
+            events in arb_nar_events(8, 256, 10),
+            sizes in prop::collection::vec(1..256usize, 1..16),
+        )| {
+            let nar = write_nar(events.iter());
+            let actual = rt.block_on(read_nar_stream(nar, &sizes))?;
+            prop_assert_eq!(actual, events);
+        });
+    }
+
+    /// `restore` can run the stream's parser in a spawned task.
+    #[tokio::test]
+    async fn restore_stream() {
+        let events = test_data::dir_example();
+        let nar = write_nar(events.iter());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("output");
+
+        let parsed = parse_nar_stream(chunked(nar, &[5]))
+            .map_err(|err| crate::NarWriteError::create_file_error(PathBuf::new(), err));
+        tokio::spawn(crate::restore(parsed, path.clone()))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let restored = crate::archive::dump(path)
+            .and_then(NarEvent::read_file)
+            .try_collect::<test_data::TestNarEvents>()
+            .await
+            .unwrap();
+        assert_eq!(restored, events);
     }
 }
