@@ -186,7 +186,11 @@ impl NarRestorer {
                     // The parser's reads are small, so this collects bigger
                     // chunks for the writer. Reading to the end of the file
                     // also drains its padding.
-                    let mut chunk = Vec::with_capacity(left.min(FILE_CHUNK_SIZE as u64) as usize);
+                    let want = left.min(FILE_CHUNK_SIZE as u64) as usize;
+                    let mut chunk = (want == FILE_CHUNK_SIZE)
+                        .then(|| writer.spare.lock().unwrap().pop())
+                        .flatten()
+                        .unwrap_or_else(|| Vec::with_capacity(want));
                     (&mut reader)
                         .take(FILE_CHUNK_SIZE as u64)
                         .read_to_end(&mut chunk)
@@ -289,15 +293,18 @@ impl NarRestorer {
     {
         use futures_util::StreamExt as _;
         use futures_util::future::{Either, select};
+        let spare = Spare::default();
         let (ops, queued) = mpsc::channel(OPS_IN_FLIGHT);
         let dropped = CancellationToken::new();
         let written = spawn_blocking({
             let dropped = dropped.clone();
-            move || write(queued, &dropped, self.canonical)
+            let spare = spare.clone();
+            move || write(queued, &dropped, self.canonical, spare)
         });
         let writer = Writer {
             ops,
             data: Arc::new(Semaphore::new(DATA_IN_FLIGHT)),
+            spare,
         };
         let sent = async {
             // This future owns `writer`, so the queue closes when it finishes.
@@ -368,7 +375,13 @@ enum Op {
 struct Writer {
     ops: mpsc::Sender<Op>,
     data: Arc<Semaphore>,
+    spare: Spare,
 }
+
+/// Full-size chunks the writer thread has written, for `restore` to fill
+/// again. A reused chunk is still in the cache when the writer copies it,
+/// and avoids a fresh allocation's page faults.
+type Spare = Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
 
 impl Writer {
     /// Queues `op` for the writer thread, waiting while the queue is full.
@@ -388,11 +401,13 @@ fn write(
     mut ops: mpsc::Receiver<Op>,
     dropped: &CancellationToken,
     canonical: bool,
+    spare: Spare,
 ) -> Result<(), NarWriteError> {
     let mut disk = Disk {
         canonical,
         file: None,
         dirs: Vec::new(),
+        spare,
     };
     let mut batch = Vec::with_capacity(OPS_PER_BATCH);
     while ops.blocking_recv_many(&mut batch, OPS_PER_BATCH) > 0 {
@@ -445,6 +460,7 @@ struct Disk {
     /// the innermost one, so swapping a directory for a symlink can't
     /// redirect them.
     dirs: Vec<(PathBuf, OwnedFd)>,
+    spare: Spare,
 }
 
 impl Disk {
@@ -464,6 +480,7 @@ impl Disk {
                     self.file.as_mut().expect("file data follows its file"),
                     &data,
                 )?;
+                self.recycle(data);
             }
             Op::CreateFile(path, executable, data, _permit) => {
                 self.close_file()?;
@@ -484,6 +501,7 @@ impl Disk {
                     fchmod(&created, mode).map_err(err)?;
                 }
                 append(self.file.insert((path, created.into())), &data)?;
+                self.recycle(data);
             }
             Op::CreateDirectory(path) => {
                 self.close_file()?;
@@ -521,6 +539,16 @@ impl Disk {
             }
         }
         Ok(())
+    }
+
+    fn recycle(&self, mut data: Vec<u8>) {
+        if data.capacity() == FILE_CHUNK_SIZE {
+            data.clear();
+            let mut spare = self.spare.lock().unwrap();
+            if spare.len() < DATA_IN_FLIGHT / FILE_CHUNK_SIZE {
+                spare.push(data);
+            }
+        }
     }
 
     fn close_file(&mut self) -> Result<(), NarWriteError> {
