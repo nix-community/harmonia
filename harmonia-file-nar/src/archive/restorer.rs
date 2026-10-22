@@ -1,21 +1,23 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt;
-use std::fs::{File, OpenOptions, Permissions};
+use std::fs::File;
 use std::io::{self, Write as _};
+use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt as _;
-use std::os::unix::fs::OpenOptionsExt as _;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bstr::ByteSlice as _;
 use bytes::Bytes;
 use derive_more::Display;
 use futures_core::Stream;
-use nix::fcntl::AT_FDCWD;
-use nix::sys::stat::{UtimensatFlags, futimens, utimensat};
+use nix::errno::Errno;
+use nix::fcntl::{AT_FDCWD, OFlag, openat};
+use nix::sys::stat::{
+    FchmodatFlags, Mode, UtimensatFlags, fchmod, fchmodat, futimens, mkdirat, utimensat,
+};
 use nix::sys::time::TimeSpec;
+use nix::unistd::symlinkat;
 use thiserror::Error;
 use tokio::io::{AsyncBufRead, AsyncReadExt as _};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
@@ -24,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
 
 use super::dumper::FILE_CHUNK_SIZE;
-use super::{CASE_HACK_SUFFIX, NarEvent};
+use super::{CASE_HACK_SUFFIX, NarEvent, is_valid_entry_name};
 
 #[derive(Display, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum NarWriteOperation {
@@ -117,8 +119,7 @@ impl NarRestorer {
     /// a single path component, and nothing follows the root or closes it twice.
     fn check_event<R>(&mut self, event: &NarEvent<R>) -> Result<(), NarWriteError> {
         let invalid = |name: &[u8], reason| {
-            let name = name.to_os_str_lossy();
-            NarWriteError::invalid_entry_error(self.path.join(name), reason)
+            NarWriteError::invalid_entry_error(join_name(&self.path, name), reason)
         };
         let name = match event {
             NarEvent::File { name, .. }
@@ -140,12 +141,7 @@ impl NarRestorer {
                 return Err(invalid(name, "the root has a name"));
             }
             self.root_seen = true;
-        } else if name.is_empty()
-            || name.as_ref() == b"."
-            || name.as_ref() == b".."
-            || name.contains(&b'/')
-            || name.contains(&0)
-        {
+        } else if !is_valid_entry_name(name) {
             return Err(invalid(name, "invalid file name"));
         }
         if matches!(event, NarEvent::StartDirectory { .. }) {
@@ -196,15 +192,23 @@ impl NarRestorer {
                         .read_to_end(&mut chunk)
                         .await
                         .map_err(|err| NarWriteError::create_file_error(self.path.clone(), err))?;
-                    left = left.saturating_sub(chunk.len() as u64);
+                    let last = chunk.len() < FILE_CHUNK_SIZE;
+                    // Events don't have to come from the parser, which checks this.
+                    left = left
+                        .checked_sub(chunk.len() as u64)
+                        .filter(|&left| !last || left == 0)
+                        .ok_or_else(|| {
+                            NarWriteError::invalid_entry_error(
+                                self.path.clone(),
+                                "file size doesn't match",
+                            )
+                        })?;
                     // A file that fills its last chunk ends with an empty read.
                     if created && chunk.is_empty() {
                         break;
                     }
-                    let last = chunk.len() < FILE_CHUNK_SIZE;
-                    // The permit counts the bytes read, not `size`, so a
-                    // reader that returns more than `size` still stays inside
-                    // the budget.
+                    // A file can be bigger than the whole budget, so each
+                    // chunk takes its own permit.
                     let permit = writer
                         .data
                         .clone()
@@ -259,10 +263,11 @@ impl NarRestorer {
                 if self.use_case_hack {
                     self.entries = self.dir_stack.pop().unwrap_or_default();
                 }
-                self.path.pop();
-                if self.canonical {
-                    writer.send(Op::EndDirectory).await?;
+                // Keep the destination itself for error messages.
+                if self.depth > 0 {
+                    self.path.pop();
                 }
+                writer.send(Op::EndDirectory).await?;
             }
         }
         Ok(())
@@ -299,8 +304,7 @@ impl NarRestorer {
             let writer = writer;
             futures_util::pin_mut!(stream);
             while let Some(item) = stream.next().await {
-                let event = item.into()?;
-                self.process_event(event, &writer).await?;
+                self.process_event(item.into()?, &writer).await?;
             }
             Ok(())
         };
@@ -324,11 +328,13 @@ impl NarRestorer {
 }
 
 /// Returns the path of entry `name` in `dir` with a single allocation.
+/// Unlike [`PathBuf::push`], a leading slash in `name` doesn't replace `dir`.
 fn join_name(dir: &Path, name: &[u8]) -> PathBuf {
     let mut path = PathBuf::with_capacity(dir.as_os_str().len() + 1 + name.len());
     path.push(dir);
     if !name.is_empty() {
-        path.push(OsStr::from_bytes(name));
+        path.push("");
+        path.as_mut_os_string().push(OsStr::from_bytes(name));
     }
     path
 }
@@ -355,7 +361,6 @@ enum Op {
     /// More data for the last created file. The permit is its share of
     /// [`DATA_IN_FLIGHT`].
     Write(Vec<u8>, OwnedSemaphorePermit),
-    /// Only sent with [`RestoreOptions::canonical`].
     EndDirectory,
 }
 
@@ -377,8 +382,8 @@ impl Writer {
     }
 }
 
-/// Does the filesystem work in `ops`, in order, with `std::fs`. If `dropped`
-/// is cancelled, it returns before the next entry and skips the rest.
+/// Does the filesystem work in `ops`, in order. If `dropped` is cancelled,
+/// it returns before the next entry and skips the rest.
 fn write(
     mut ops: mpsc::Receiver<Op>,
     dropped: &CancellationToken,
@@ -405,14 +410,26 @@ fn write(
 
 const CANONICAL_MTIME: TimeSpec = TimeSpec::new(1, 0);
 
-fn set_canonical_mtime(path: &Path) -> io::Result<()> {
-    Ok(utimensat(
-        AT_FDCWD,
-        path,
+/// `O_NOFOLLOW` ensures we hold the directory we created, not a symlink that
+/// replaced it. `O_PATH` needs no read permission, which Landlock rules that
+/// only allow creating entries (like nix-store-csi's) don't grant.
+const DIR_FLAGS: OFlag = {
+    let flags = OFlag::O_DIRECTORY
+        .union(OFlag::O_NOFOLLOW)
+        .union(OFlag::O_CLOEXEC);
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let flags = flags.union(OFlag::O_PATH);
+    flags
+};
+
+fn set_canonical_mtime(dir: BorrowedFd<'_>, name: &OsStr) -> Result<(), Errno> {
+    utimensat(
+        dir,
+        name,
         &TimeSpec::UTIME_OMIT,
         &CANONICAL_MTIME,
         UtimensatFlags::NoFollowSymlink,
-    )?)
+    )
 }
 
 fn append((path, file): &mut (PathBuf, File), data: &[u8]) -> Result<(), NarWriteError> {
@@ -424,11 +441,22 @@ struct Disk {
     canonical: bool,
     /// The last created file, which [`Op::Write`] appends to.
     file: Option<(PathBuf, File)>,
-    /// Open directories, only tracked with `canonical`.
-    dirs: Vec<PathBuf>,
+    /// Open directories, innermost last. Entries are created relative to
+    /// the innermost one, so swapping a directory for a symlink can't
+    /// redirect them.
+    dirs: Vec<(PathBuf, OwnedFd)>,
 }
 
 impl Disk {
+    /// The directory to create `path` in, and its name there.
+    fn locate<'a>(&'a self, path: &'a Path) -> (BorrowedFd<'a>, &'a OsStr) {
+        match (self.dirs.last(), path.file_name()) {
+            (Some((_, dir)), Some(name)) => (dir.as_fd(), name),
+            // The root.
+            _ => (AT_FDCWD, path.as_os_str()),
+        }
+    }
+
     fn apply(&mut self, op: Op) -> Result<(), NarWriteError> {
         match op {
             Op::Write(data, _permit) => {
@@ -445,36 +473,51 @@ impl Disk {
                     // The mode only applies to later opens.
                     mode &= !0o222;
                 }
-                let mut options = OpenOptions::new();
-                options.write(true).create_new(true);
-                options.mode(mode);
-                let created = options
-                    .open(&path)
-                    .map_err(|err| NarWriteError::create_file_error(path.clone(), err))?;
-                append(self.file.insert((path, created)), &data)?;
+                let mode = Mode::from_bits_truncate(mode);
+                // `O_EXCL` also refuses to follow a symlink.
+                let flags = OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC;
+                let err = |err: Errno| NarWriteError::create_file_error(path.clone(), err.into());
+                let (dir, name) = self.locate(&path);
+                let created = openat(dir, name, flags, mode).map_err(err)?;
+                if self.canonical {
+                    // Undo the umask.
+                    fchmod(&created, mode).map_err(err)?;
+                }
+                append(self.file.insert((path, created.into())), &data)?;
             }
             Op::CreateDirectory(path) => {
                 self.close_file()?;
-                std::fs::create_dir(&path)
-                    .map_err(|err| NarWriteError::create_dir_error(path.clone(), err))?;
-                if self.canonical {
-                    self.dirs.push(path);
-                }
+                let err = |err: Errno| NarWriteError::create_dir_error(path.clone(), err.into());
+                let (dir, name) = self.locate(&path);
+                mkdirat(dir, name, Mode::from_bits_truncate(0o777)).map_err(err)?;
+                let opened = openat(dir, name, DIR_FLAGS, Mode::empty()).map_err(err)?;
+                self.dirs.push((path, opened));
             }
             Op::CreateSymlink(path, target) => {
                 self.close_file()?;
-                let err = |err| NarWriteError::create_symlink_error(path.clone(), err);
-                std::os::unix::fs::symlink(OsStr::from_bytes(&target), &path).map_err(err)?;
+                let err =
+                    |err: Errno| NarWriteError::create_symlink_error(path.clone(), err.into());
+                let (dir, name) = self.locate(&path);
+                symlinkat(OsStr::from_bytes(&target), dir, name).map_err(err)?;
                 if self.canonical {
-                    set_canonical_mtime(&path).map_err(err)?;
+                    set_canonical_mtime(dir, name).map_err(err)?;
                 }
             }
             Op::EndDirectory => {
                 self.close_file()?;
-                let path = self.dirs.pop().expect("a directory ends after it starts");
-                std::fs::set_permissions(&path, Permissions::from_mode(0o555))
-                    .and_then(|()| set_canonical_mtime(&path))
-                    .map_err(|err| NarWriteError::create_dir_error(path, err))?;
+                let (path, dir) = self.dirs.pop().expect("a directory ends after it starts");
+                if self.canonical {
+                    // `fchmod` fails on an `O_PATH` descriptor, but "." works.
+                    let here = OsStr::new(".");
+                    fchmodat(
+                        dir.as_fd(),
+                        here,
+                        Mode::from_bits_truncate(0o555),
+                        FchmodatFlags::FollowSymlink,
+                    )
+                    .and_then(|()| set_canonical_mtime(dir.as_fd(), here))
+                    .map_err(|err| NarWriteError::create_dir_error(path, err.into()))?;
+                }
             }
         }
         Ok(())
@@ -564,7 +607,7 @@ impl RestoreOptions {
     }
 
     /// Give entries the metadata of store paths while restoring: mode
-    /// 0o444/0o555 (subject to the umask for files) and mtime 1.
+    /// 0o444/0o555, regardless of the umask, and mtime 1.
     pub fn canonical(mut self, canonical: bool) -> Self {
         self.canonical = canonical;
         self
@@ -601,12 +644,18 @@ where
 
 #[cfg(test)]
 mod unittests {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt as _;
+
     use super::*;
     use crate::archive::{NarEvent, dump, test_data};
     use futures_util::FutureExt as _;
     use futures_util::stream::{StreamExt as _, TryStreamExt as _, iter};
     use rstest::rstest;
     use tempfile::Builder;
+
+    /// The umask is per process, and tests run in parallel threads.
+    static UMASK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[tokio::test]
     #[rstest]
@@ -624,6 +673,7 @@ mod unittests {
         #[case] events: test_data::TestNarEvents,
         #[values(false, true)] canonical: bool,
     ) {
+        let _umask = UMASK.lock().await;
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
         let path = dir.path().join("output");
 
@@ -660,7 +710,7 @@ mod unittests {
                 assert_eq!(mode, 0o555, "{at:?}");
                 std::fs::set_permissions(at, Permissions::from_mode(0o755)).unwrap();
             } else if meta.is_file() {
-                assert_eq!(mode & 0o222, 0, "{at:?}");
+                assert!(matches!(mode, 0o444 | 0o555), "{at:?}: {mode:o}");
             }
         }
     }
@@ -710,22 +760,26 @@ mod unittests {
     /// may be created outside the destination.
     #[tokio::test]
     #[rstest]
-    #[case::dotdot(vec![start_dir(b""), file(b"..")])]
-    #[case::dot(vec![start_dir(b""), file(b".")])]
-    #[case::slash(vec![start_dir(b""), file(b"a/b")])]
-    #[case::traversal(vec![start_dir(b""), file(b"../escape")])]
-    #[case::absolute(vec![start_dir(b""), file(b"/tmp/escape")])]
-    #[case::nul(vec![start_dir(b""), file(b"a\0b")])]
-    #[case::empty_name(vec![start_dir(b""), file(b"")])]
-    #[case::dotdot_dir(vec![start_dir(b""), start_dir(b".."), file(b"escape"), NarEvent::EndDirectory, NarEvent::EndDirectory])]
-    #[case::dotdot_symlink(vec![start_dir(b""), symlink(b"../escape")])]
-    #[case::named_root(vec![file(b"escape")])]
-    #[case::end_without_start(vec![NarEvent::EndDirectory, file(b"escape")])]
-    #[case::end_past_root(vec![start_dir(b""), NarEvent::EndDirectory, NarEvent::EndDirectory, file(b"escape")])]
-    #[case::after_root_dir(vec![start_dir(b""), NarEvent::EndDirectory, file(b"escape")])]
-    #[case::after_root_file(vec![file(b""), file(b"escape")])]
-    #[case::second_root(vec![start_dir(b""), NarEvent::EndDirectory, start_dir(b"")])]
-    async fn test_restore_rejects_escape(#[case] events: test_data::TestNarEvents) {
+    #[case::dotdot(vec![start_dir(b""), file(b"..")], "output/..")]
+    #[case::dot(vec![start_dir(b""), file(b".")], "output/.")]
+    #[case::slash(vec![start_dir(b""), file(b"a/b")], "output/a/b")]
+    #[case::traversal(vec![start_dir(b""), file(b"../escape")], "output/../escape")]
+    #[case::absolute(vec![start_dir(b""), file(b"/tmp/escape")], "output//tmp/escape")]
+    #[case::nul(vec![start_dir(b""), file(b"a\0b")], "output/a\0b")]
+    #[case::empty_name(vec![start_dir(b""), file(b"")], "output")]
+    #[case::dotdot_dir(vec![start_dir(b""), start_dir(b".."), file(b"escape"), NarEvent::EndDirectory, NarEvent::EndDirectory], "output/..")]
+    #[case::dotdot_symlink(vec![start_dir(b""), symlink(b"../escape")], "output/../escape")]
+    #[case::named_root(vec![file(b"escape")], "output/escape")]
+    #[case::end_without_start(vec![NarEvent::EndDirectory, file(b"escape")], "output")]
+    #[case::end_past_root(vec![start_dir(b""), NarEvent::EndDirectory, NarEvent::EndDirectory, file(b"escape")], "output")]
+    #[case::after_root_dir(vec![start_dir(b""), NarEvent::EndDirectory, file(b"escape")], "output/escape")]
+    #[case::after_root_file(vec![file(b""), file(b"escape")], "output/escape")]
+    #[case::second_root(vec![start_dir(b""), NarEvent::EndDirectory, start_dir(b"")], "output")]
+    #[case::after_nested_dir(vec![start_dir(b""), start_dir(b"a"), NarEvent::EndDirectory, file(b"..")], "output/..")]
+    async fn test_restore_rejects_escape(
+        #[case] events: test_data::TestNarEvents,
+        #[case] reported: &str,
+    ) {
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
         let path = dir.path().join("output");
 
@@ -733,6 +787,7 @@ mod unittests {
             .await
             .unwrap_err();
         assert_eq!(err.operation, NarWriteOperation::InvalidEntry);
+        assert_eq!(err.path.as_os_str(), dir.path().join(reported).as_os_str());
 
         // Only the destination itself may exist next to it.
         let siblings: Vec<_> = std::fs::read_dir(dir.path())
@@ -780,6 +835,51 @@ mod unittests {
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
     }
 
+    /// Swapping a restored directory for a symlink mustn't redirect writes.
+    #[tokio::test]
+    #[rstest]
+    async fn test_restore_keeps_its_directories(#[values(false, true)] canonical: bool) {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let mode = std::fs::metadata(&outside).unwrap().permissions().mode();
+        let path = dir.path().join("output");
+        let swap = {
+            let (sub, outside) = (path.join("sub"), outside.clone());
+            async move {
+                while !sub.exists() {
+                    tokio::task::yield_now().await;
+                }
+                std::fs::rename(&sub, sub.with_file_name("moved")).unwrap();
+                std::os::unix::fs::symlink(outside, &sub).unwrap();
+                None
+            }
+        };
+        let events = iter([start_dir(b""), start_dir(b"sub")])
+            .chain(futures_util::stream::once(swap).filter_map(std::future::ready))
+            .chain(iter([
+                file(b"f"),
+                NarEvent::EndDirectory,
+                NarEvent::EndDirectory,
+            ]));
+
+        // Restore may fail, depending on when the swap happens.
+        let _ = RestoreOptions::new()
+            .canonical(canonical)
+            .restore(events.map(Ok::<_, NarWriteError>), &path)
+            .await;
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+        let after = std::fs::metadata(&outside).unwrap().permissions().mode();
+        assert_eq!(after, mode);
+
+        for entry in walkdir::WalkDir::new(&path) {
+            let entry = entry.unwrap();
+            if entry.file_type().is_dir() {
+                std::fs::set_permissions(entry.path(), Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_restore_file_bigger_than_queue() {
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
@@ -795,6 +895,33 @@ mod unittests {
             .await
             .unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), data);
+    }
+
+    #[tokio::test]
+    #[rstest]
+    #[case::longer(1, 2)]
+    #[case::shorter(2, 1)]
+    #[case::not_empty(0, 1)]
+    #[case::longer_than_chunk(FILE_CHUNK_SIZE, FILE_CHUNK_SIZE + 1)]
+    #[case::shorter_by_chunk(FILE_CHUNK_SIZE + 1, FILE_CHUNK_SIZE)]
+    async fn test_restore_checks_file_size(#[case] size: usize, #[case] len: usize) {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let events = [
+            start_dir(b""),
+            NarEvent::File {
+                name: Bytes::from_static(b"f"),
+                executable: false,
+                size: size as u64,
+                reader: std::io::Cursor::new(Bytes::from(vec![0; len])),
+            },
+            NarEvent::EndDirectory,
+        ];
+        let err = restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+            .await
+            .unwrap_err();
+        assert_eq!(err.operation, NarWriteOperation::InvalidEntry);
+        assert_eq!(err.path, path.join("f"));
     }
 
     #[tokio::test]
@@ -825,6 +952,69 @@ mod unittests {
         let err = restore(events, &path).await.unwrap_err();
         assert_eq!(err.path, PathBuf::from("stream"));
         assert!(path.is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_restore_canonical_umask() {
+        use nix::sys::stat::umask;
+
+        struct Restore(Mode);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                umask(self.0);
+            }
+        }
+
+        let _umask = UMASK.lock().await;
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let events = test_data::dir_example();
+        let old = Restore(umask(Mode::from_bits_truncate(0o077)));
+        let restored = RestoreOptions::new()
+            .canonical(true)
+            .restore(iter(events.clone()).map(Ok::<_, NarWriteError>), &path)
+            .await;
+        drop(old);
+        restored.unwrap();
+
+        let dumped = dump(&path)
+            .and_then(NarEvent::read_file)
+            .try_collect::<test_data::TestNarEvents>()
+            .await
+            .unwrap();
+        assert_eq!(dumped, events);
+        check_canonical(&path);
+    }
+
+    /// With `canonical`, a directory that ended is read-only even if the
+    /// restore fails before the next entry.
+    #[tokio::test]
+    async fn test_restore_canonical_after_error() {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let failed = NarWriteError::create_file_error("stream".into(), io::ErrorKind::Other.into());
+        let events = [
+            start_dir(b""),
+            start_dir(b"done"),
+            file(b"f"),
+            NarEvent::EndDirectory,
+        ];
+        let events = iter(events.map(Ok)).chain(futures_util::stream::once(async { Err(failed) }));
+        let err = RestoreOptions::new()
+            .canonical(true)
+            .restore(events, &path)
+            .await
+            .unwrap_err();
+        assert_eq!(err.path, PathBuf::from("stream"));
+
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode();
+        assert_eq!(mode(&path.join("done")) & 0o777, 0o555);
+        assert_ne!(
+            mode(&path) & 0o200,
+            0,
+            "the root is read-only before it ended"
+        );
+        std::fs::set_permissions(path.join("done"), Permissions::from_mode(0o755)).unwrap();
     }
 
     /// A read error names the file being read. For the root, that is the
@@ -907,7 +1097,6 @@ mod unittests {
             let (release, wait) = std::sync::mpsc::channel::<()>();
             let busy = spawn_blocking(move || wait.recv().unwrap());
 
-            // The file says it is empty, but its reader returns 8 MiB.
             let data = std::io::Cursor::new(vec![0; 4 * DATA_IN_FLIGHT]);
             let counted = tokio_util::io::InspectReader::new(data, {
                 let read = read.clone();
@@ -918,7 +1107,7 @@ mod unittests {
             let events = iter([NarEvent::File {
                 name: Bytes::new(),
                 executable: false,
-                size: 0,
+                size: 4 * DATA_IN_FLIGHT as u64,
                 reader: tokio::io::BufReader::new(counted),
             }]);
             let restored = restore(events.map(Ok::<_, NarWriteError>), &path);
@@ -929,7 +1118,7 @@ mod unittests {
             spawn_blocking(|| ()).await.unwrap();
         });
         // `restore` reads one chunk past the budget and then waits for the
-        // writer thread. If it trusted `size`, it would read all 8 MiB.
+        // writer thread instead of reading all 8 MiB.
         assert!(read.load(Ordering::Relaxed) < 2 * DATA_IN_FLIGHT);
     }
 }

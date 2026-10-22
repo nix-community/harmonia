@@ -22,6 +22,12 @@ pub use writer::write_nar;
 
 pub const CASE_HACK_SUFFIX: &str = "~nix~case~hack~";
 
+/// Like Nix, refuse names that could leave their directory.
+#[inline]
+pub(crate) fn is_valid_entry_name(name: &[u8]) -> bool {
+    !matches!(name, b"" | b"." | b"..") && !name.iter().any(|&b| b == b'/' || b == 0)
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub enum NarEvent<R> {
     File {
