@@ -66,8 +66,9 @@ pub enum Verbosity {
     PartialOrd,
     Ord,
     Hash,
-    TryFromPrimitive,
+    FromPrimitive,
     IntoPrimitive,
+    Default,
     Serialize,
     Deserialize,
 )]
@@ -75,6 +76,11 @@ pub enum Verbosity {
 #[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
 #[repr(u16)]
 pub enum ActivityType {
+    // Also the catch-all for any discriminant Nix hasn't assigned here yet
+    // (e.g. a vendor-specific activity type from a patched Nix build) --
+    // same tolerance `Verbosity` already has for its own out-of-range case.
+    #[default]
+    #[catch_all]
     Unknown = 0,
     CopyPath = 100,
     FileTransfer = 101,
