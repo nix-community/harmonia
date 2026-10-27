@@ -14,7 +14,7 @@ use futures_core::Stream;
 use nix::errno::Errno;
 use nix::fcntl::{AT_FDCWD, OFlag, openat};
 use nix::sys::stat::{
-    FchmodatFlags, Mode, UtimensatFlags, fchmod, fchmodat, futimens, mkdirat, utimensat,
+    FchmodatFlags, Mode, UtimensatFlags, fchmod, fchmodat, fstat, futimens, mkdirat, utimensat,
 };
 use nix::sys::time::TimeSpec;
 use nix::unistd::symlinkat;
@@ -405,6 +405,7 @@ fn write(
 ) -> Result<(), NarWriteError> {
     let mut disk = Disk {
         canonical,
+        exact_mode: [None; 2],
         file: None,
         dirs: Vec::new(),
         spare,
@@ -424,6 +425,11 @@ fn write(
 }
 
 const CANONICAL_MTIME: TimeSpec = TimeSpec::new(1, 0);
+
+/// Whether files `openat` already gave the canonical mode may skip `fchmod`.
+/// Not on FreeBSD: ZFS's default `aclmode=discard` makes chmod also drop
+/// inherited ACL entries, which can grant write access the mode doesn't show.
+const SKIP_EXACT_FCHMOD: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
 /// `O_NOFOLLOW` ensures we hold the directory we created, not a symlink that
 /// replaced it. `O_PATH` needs no read permission, which Landlock rules that
@@ -454,6 +460,8 @@ fn append((path, file): &mut (PathBuf, File), data: &[u8]) -> Result<(), NarWrit
 
 struct Disk {
     canonical: bool,
+    /// Whether `openat` yields the canonical mode, indexed by `executable`.
+    exact_mode: [Option<bool>; 2],
     /// The last created file, which [`Op::Write`] appends to.
     file: Option<(PathBuf, File)>,
     /// Open directories, innermost last. Entries are created relative to
@@ -497,8 +505,17 @@ impl Disk {
                 let (dir, name) = self.locate(&path);
                 let created = openat(dir, name, flags, mode).map_err(err)?;
                 if self.canonical {
-                    // Undo the umask.
-                    fchmod(&created, mode).map_err(err)?;
+                    // The umask or a default ACL can take bits off `mode`.
+                    // We create every directory, so all share one default
+                    // ACL and the first file of each kind decides.
+                    let exact = self.exact_mode[usize::from(executable)].get_or_insert_with(|| {
+                        SKIP_EXACT_FCHMOD
+                            && fstat(&created)
+                                .is_ok_and(|st| Mode::from_bits_truncate(st.st_mode) == mode)
+                    });
+                    if !*exact {
+                        fchmod(&created, mode).map_err(err)?;
+                    }
                 }
                 append(self.file.insert((path, created.into())), &data)?;
                 self.recycle(data);
@@ -635,7 +652,8 @@ impl RestoreOptions {
     }
 
     /// Give entries the metadata of store paths while restoring: mode
-    /// 0o444/0o555, regardless of the umask, and mtime 1.
+    /// 0o444/0o555 and mtime 1. The mode doesn't depend on the umask, as
+    /// long as the umask doesn't change during the restore.
     pub fn canonical(mut self, canonical: bool) -> Self {
         self.canonical = canonical;
         self
@@ -982,8 +1000,13 @@ mod unittests {
         assert!(path.is_dir());
     }
 
+    /// Each case's name says which files the umask takes bits off.
     #[tokio::test]
-    async fn test_restore_canonical_umask() {
+    #[rstest]
+    #[case::none(0o022)]
+    #[case::executables(0o011)]
+    #[case::all(0o077)]
+    async fn test_restore_canonical_umask(#[case] mask: nix::libc::mode_t) {
         use nix::sys::stat::umask;
 
         struct Restore(Mode);
@@ -996,8 +1019,11 @@ mod unittests {
         let _umask = UMASK.lock().await;
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
         let path = dir.path().join("output");
-        let events = test_data::dir_example();
-        let old = Restore(umask(Mode::from_bits_truncate(0o077)));
+        // Put a plain file before the first executable, so the 011 case fails
+        // if both kinds share one check.
+        let mut events = test_data::dir_example();
+        events.insert(1, file(b"a"));
+        let old = Restore(umask(Mode::from_bits_truncate(mask)));
         let restored = RestoreOptions::new()
             .canonical(true)
             .restore(iter(events.clone()).map(Ok::<_, NarWriteError>), &path)
