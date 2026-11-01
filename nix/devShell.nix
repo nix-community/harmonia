@@ -1,6 +1,7 @@
 {
   pkgs,
   nix-src,
+  cargo-llvm-cov,
 }:
 (pkgs.mkShell.override {
   stdenv =

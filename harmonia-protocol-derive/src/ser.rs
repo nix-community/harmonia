@@ -272,6 +272,8 @@ fn nix_serialize_into(ty: &Type) -> TokenStream {
     quote_spanned! {
         ty.span() =>
         {
+            // Self may be Copy, but the macro can't tell.
+            #[allow(clippy::clone_on_copy)]
             let other : #ty = <Self as Clone>::clone(self).into();
             writer.write_value(&other).await
         }
@@ -283,6 +285,7 @@ fn nix_serialize_try_into(crate_path: &Path, ty: &Type) -> TokenStream {
         ty.span() =>
         {
             use #crate_path::daemon::ser::Error;
+            #[allow(clippy::clone_on_copy)]
             let other : #ty = <Self as Clone>::clone(self).try_into().map_err(Error::unsupported_data)?;
             writer.write_value(&other).await
         }
