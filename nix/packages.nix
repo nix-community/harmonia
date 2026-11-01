@@ -56,8 +56,13 @@ let
   # Build *just* the cargo dependencies
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
+  # nixpkgs' rustc 1.99 pairs LLVM 21 codegen with an LLVM 23 profiler
+  # runtime, so instrumented binaries segfault at exit:
+  # https://github.com/nix-community/harmonia/issues/1278
+  coverage = false;
+
   # Coverage RUSTFLAGS matching what `cargo llvm-cov show-env` produces
-  coverageRustflags = "-C instrument-coverage --cfg=coverage --cfg=trybuild_no_target";
+  coverageRustflags = lib.optionalString coverage "-C instrument-coverage --cfg=coverage --cfg=trybuild_no_target";
 
   # Build dependencies with coverage instrumentation for reuse in coverage tests
   cargoArtifactsCov = craneLib.buildDepsOnly (
@@ -134,10 +139,12 @@ let
           export _NIX_TEST_NO_SANDBOX="1"
         ''}
 
-        # Set up coverage profile output (but don't override RUSTFLAGS - already set via CARGO_BUILD_RUSTFLAGS)
-        export LLVM_PROFILE_FILE="$PWD/target/harmonia-%p-%8m.profraw"
-        export CARGO_LLVM_COV=1
-        export CARGO_LLVM_COV_TARGET_DIR="$PWD/target"
+        ${lib.optionalString coverage ''
+          # Set up coverage profile output (but don't override RUSTFLAGS - already set via CARGO_BUILD_RUSTFLAGS)
+          export LLVM_PROFILE_FILE="$PWD/target/harmonia-%p-%8m.profraw"
+          export CARGO_LLVM_COV=1
+          export CARGO_LLVM_COV_TARGET_DIR="$PWD/target"
+        ''}
 
         # Build workspace binaries with coverage instrumentation
         # Dependencies already built with same flags via cargoArtifactsCov
@@ -149,13 +156,15 @@ let
         # Run tests with nextest (they will use the instrumented binaries and write profraw data)
         cargo nextest run --workspace
 
+        mkdir -p $out
+      ''
+      + lib.optionalString coverage ''
         # Generate coverage report in codecov JSON format
         cargo llvm-cov report --codecov --output-path coverage-raw.json
 
         # Fix paths: strip build directory prefix to get repo-relative paths
         # e.g., /nix/var/nix/builds/.../source/harmonia-cache/src/foo.rs -> harmonia-cache/src/foo.rs
         # Also filter out stdlib paths (rustc-*/library/...) that leak into coverage
-        mkdir -p $out
         jq '
           .coverage |= (
             # First filter out stdlib and other non-project paths
