@@ -45,7 +45,7 @@ test_upstream_json!(
 
 test_upstream_json!(
     test_derived_path_built,
-    libstore_test_data_path("derived-path/mutli_built.json"),
+    libstore_test_data_path("derived-path/multi_built.json"),
     DerivedPath::Built {
         drv_path: Arc::new(SingleDerivedPath::Opaque(
             "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv".parse().unwrap(),
