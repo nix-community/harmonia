@@ -566,7 +566,7 @@ nix_serialize_remote!(
 
 // ActivityType
 nix_deserialize_remote!(
-    #[nix(try_from = "u16")]
+    #[nix(from = "u16")]
     crate::log::ActivityType
 );
 nix_serialize_remote!(
