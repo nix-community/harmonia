@@ -538,6 +538,32 @@ fn gc_max_store_size_frees_down_to_cap() {
     );
 }
 
+/// The cap is in NAR bytes, but deletion frees whole disk blocks: a
+/// 100-byte path frees a few KiB. Stopping on disk bytes would end after
+/// the first one-path chunk, still over the cap.
+#[test]
+fn gc_max_store_size_counts_nar_bytes_not_disk_bytes() {
+    let store = TestStore::new();
+    let dead: Vec<Pkg> = (0..4)
+        .map(|i| store.add_path(&format!("dead{i}"), 100))
+        .collect();
+    let args = ["--max-store-size", "250", "--chunk-size", "1"];
+
+    let dry = store.run_gc_ok(&[&["--dry-run"], &args[..]].concat());
+    let stdout = String::from_utf8_lossy(&dry.stdout);
+    assert!(
+        stdout.contains("2 store paths would be deleted (~200 bytes)"),
+        "stdout: {stdout}"
+    );
+
+    store.run_gc_ok(&args);
+
+    let left = dead.iter().filter(|p| store.in_db(p)).count();
+    assert_eq!(left, 2, "real run must delete what the dry run reported");
+    let gc_store = GcStore::open(&store.store_dir, &store.state_dir).unwrap();
+    assert_eq!(gc_store.registered_size().unwrap(), 200);
+}
+
 #[test]
 fn gc_max_store_size_noop_under_cap() {
     let store = TestStore::new();

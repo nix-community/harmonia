@@ -320,12 +320,10 @@ fn main() -> MainResult<()> {
         None
     };
 
-    // Both targets must hold, so free enough for the larger one.
-    let max_freed = match (ensure_free_need, max_store_size_need) {
-        (None, None) => None,
-        (a, b) => Some(a.unwrap_or(0).max(b.unwrap_or(0))),
-    };
-    if max_freed == Some(0) {
+    // --ensure-free is measured in disk bytes, --max-store-size in narSize.
+    // GC continues until both are met. Without either it collects all.
+    let limited = ensure_free_need.is_some() || max_store_size_need.is_some();
+    if limited && ensure_free_need.unwrap_or(0) == 0 && max_store_size_need.unwrap_or(0) == 0 {
         println!("{}, nothing to do", satisfied.join(", "));
         return Ok(());
     }
@@ -345,7 +343,8 @@ fn main() -> MainResult<()> {
     let mut opts = GcOptions {
         graph_options,
         dry_run: args.dry_run,
-        max_freed,
+        max_freed: ensure_free_need,
+        max_freed_nar: max_store_size_need,
         keep_recent_after,
         vacuum: !args.no_vacuum,
         extra_gc_roots_dirs: args.gc_roots_dirs,

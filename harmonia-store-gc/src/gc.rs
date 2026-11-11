@@ -154,8 +154,13 @@ pub struct GcOptions {
     pub graph_options: GraphOptions,
     /// Report what would be deleted without touching anything.
     pub dry_run: bool,
-    /// Stop after freeing this many bytes.
+    /// Stop after freeing this many bytes on disk.
     pub max_freed: Option<u64>,
+    /// Stop after deleting registered paths whose `narSize` totals this
+    /// much. Unlike `max_freed`, independent of how many disk blocks
+    /// each path occupies. When both are set, collection continues until
+    /// both are reached.
+    pub max_freed_nar: Option<u64>,
     /// Keep paths registered at or after this time.
     pub keep_recent_after: Option<SystemTime>,
     /// Run VACUUM after deletion. Disable on busy builders, where
@@ -176,6 +181,7 @@ impl Default for GcOptions {
             graph_options: GraphOptions::default(),
             dry_run: false,
             max_freed: None,
+            max_freed_nar: None,
             keep_recent_after: None,
             vacuum: true,
             chunk_size: 65_536,
@@ -384,7 +390,13 @@ pub fn collect_garbage(store: &GcStore, opts: &GcOptions) -> Result<GcReport> {
 
     let dead_nodes: Vec<NodeIdx> = graph.nodes().filter(|&n| !alive.contains(n)).collect();
 
-    let max = max_freed.unwrap_or(u64::MAX);
+    // With no limit, stop never. With limits, stop once each is reached.
+    let limited = max_freed.is_some() || opts.max_freed_nar.is_some();
+    let done = |disk: u64, nar: u64| {
+        limited
+            && max_freed.is_none_or(|m| disk >= m)
+            && opts.max_freed_nar.is_none_or(|m| nar >= m)
+    };
 
     if dry_run {
         let mut estimated = 0u64;
@@ -394,7 +406,8 @@ pub fn collect_garbage(store: &GcStore, opts: &GcOptions) -> Result<GcReport> {
         let protected = live.protected_snapshot();
         let protected_unknown = live.protected_unknown_snapshot();
         for &node in &dead_nodes {
-            if estimated >= max {
+            // narSize stands in for disk bytes here.
+            if done(estimated, estimated) {
                 break;
             }
             if protected[node.index()] {
@@ -403,7 +416,7 @@ pub fn collect_garbage(store: &GcStore, opts: &GcOptions) -> Result<GcReport> {
             would_delete.push(graph.path(node).to_owned());
             estimated += graph.nar_size(node);
         }
-        if estimated < max {
+        if !done(estimated, estimated) {
             for name in &unknown_on_disk {
                 if name.to_str().is_some_and(|n| protected_unknown.contains(n)) {
                     continue;
@@ -438,13 +451,25 @@ pub fn collect_garbage(store: &GcStore, opts: &GcOptions) -> Result<GcReport> {
     // use stays bounded and space is reclaimed incrementally.
     let max_chunk = opts.chunk_size.max(1);
     let mut cursor = 0usize;
+    // narSize of the registered paths deleted so far. Only this thread
+    // updates it.
+    let mut nar_freed = 0u64;
     while cursor < order.len() {
         let freed_so_far = bytes_freed.load(Ordering::Relaxed);
-        if freed_so_far >= max {
-            info!("deleted more than {max} bytes, stopping");
+        if done(freed_so_far, nar_freed) {
+            info!("deleted enough, stopping");
             break;
         }
-        let remaining = max - freed_so_far;
+        // Size the chunk by whichever set target is further away.
+        let remaining = if limited {
+            let disk = max_freed.map_or(0, |m| m.saturating_sub(freed_so_far));
+            let nar = opts
+                .max_freed_nar
+                .map_or(0, |m| m.saturating_sub(nar_freed));
+            disk.max(nar)
+        } else {
+            u64::MAX
+        };
         let mut chunk: Vec<NodeIdx> = Vec::new();
         // narSize over-reports hard-linked paths, so estimated only
         // bounds the chunk. Actual freed bytes are re-checked above.
@@ -487,6 +512,11 @@ pub fn collect_garbage(store: &GcStore, opts: &GcOptions) -> Result<GcReport> {
         store
             .db
             .invalidate_ids(claimed.iter().map(|&n| graph.db_id(n)))?;
+        // The registered size drops with the rows, whether or not the
+        // unlink below succeeds.
+        nar_freed = claimed
+            .iter()
+            .fold(nar_freed, |acc, &n| acc.saturating_add(graph.nar_size(n)));
         claimed.par_iter().for_each(|&node| {
             let path = graph.path(node);
             let basename = path.strip_prefix(&store_prefix).unwrap_or(path);
@@ -513,7 +543,7 @@ pub fn collect_garbage(store: &GcStore, opts: &GcOptions) -> Result<GcReport> {
 
     // Unknown-on-disk paths, also in parallel. tmp-* dirs hold flock
     // through deletion to avoid a TOCTOU race with a builder.
-    if bytes_freed.load(Ordering::Relaxed) < max {
+    if !done(bytes_freed.load(Ordering::Relaxed), nar_freed) {
         // A builder may have registered a scanned path after our graph
         // snapshot and then exited, leaving its temp root file stale.
         // Unlinking such a path would orphan its ValidPaths row, so
