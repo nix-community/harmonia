@@ -35,6 +35,12 @@ struct Args {
     #[arg(long, value_name = "SIZE", value_parser = parse_ensure_free)]
     ensure_free: Option<EnsureFree>,
 
+    /// Free until the registered paths' NAR sizes total at most SIZE
+    /// (e.g. 600G). Unlike --ensure-free, independent of the filesystem
+    /// the store shares. Pinned paths are never freed
+    #[arg(long, value_name = "SIZE", value_parser = parse_size)]
+    max_store_size: Option<u64>,
+
     /// Keep paths registered within SPEC (e.g. 7d)
     #[arg(long, value_name = "SPEC")]
     keep_recent: Option<String>,
@@ -252,24 +258,32 @@ fn main() -> MainResult<()> {
             })?;
     }
 
-    let max_freed = if let Some(ensure_free) = args.ensure_free {
+    // Reported together when no target needs freeing.
+    let mut satisfied = Vec::new();
+
+    let ensure_free_need = if let Some(ensure_free) = args.ensure_free {
         let (avail, total) = filesystem_bytes(&args.store_dir)?;
         let target = ensure_free.target_bytes(total);
         if avail >= target {
-            println!("{} already free, nothing to do", format_size(avail));
-            return Ok(());
+            satisfied.push(format!("{} already free", format_size(avail)));
+            Some(0)
+        } else {
+            let need = target - avail;
+            tracing::info!(
+                "freeing at least {} to reach {} free",
+                format_size(need),
+                format_size(target)
+            );
+            Some(need)
         }
-        let need = target - avail;
-        tracing::info!(
-            "freeing at least {} to reach {} free",
-            format_size(need),
-            format_size(target)
-        );
-        Some(need)
     } else {
         None
     };
-    let ensure_free_need = max_freed;
+    // Skip opening the database on the common periodic no-op.
+    if ensure_free_need == Some(0) && args.max_store_size.is_none() {
+        println!("{}, nothing to do", satisfied.join(", "));
+        return Ok(());
+    }
 
     let store = if args.dry_run {
         // No DB writes happen in a dry run, so don't take write locks or
@@ -282,6 +296,38 @@ fn main() -> MainResult<()> {
     } else {
         GcStore::open(&args.store_dir, &args.state_dir)?
     };
+
+    let max_store_size_need = if let Some(cap) = args.max_store_size {
+        let registered = store.registered_size()?;
+        if registered <= cap {
+            satisfied.push(format!(
+                "{} registered, within {}",
+                format_size(registered),
+                format_size(cap)
+            ));
+            Some(0)
+        } else {
+            let need = registered - cap;
+            tracing::info!(
+                "freeing at least {} to bring {} registered down to {}",
+                format_size(need),
+                format_size(registered),
+                format_size(cap)
+            );
+            Some(need)
+        }
+    } else {
+        None
+    };
+
+    // --ensure-free is measured in disk bytes, --max-store-size in narSize.
+    // GC continues until both are met. Without either it collects all.
+    let limited = ensure_free_need.is_some() || max_store_size_need.is_some();
+    if limited && ensure_free_need.unwrap_or(0) == 0 && max_store_size_need.unwrap_or(0) == 0 {
+        println!("{}, nothing to do", satisfied.join(", "));
+        return Ok(());
+    }
+
     let defaults = harmonia_store_gc::GraphOptions::default();
     let graph_options = harmonia_store_gc::GraphOptions {
         keep_outputs: args
@@ -297,7 +343,8 @@ fn main() -> MainResult<()> {
     let mut opts = GcOptions {
         graph_options,
         dry_run: args.dry_run,
-        max_freed,
+        max_freed: ensure_free_need,
+        max_freed_nar: max_store_size_need,
         keep_recent_after,
         vacuum: !args.no_vacuum,
         extra_gc_roots_dirs: args.gc_roots_dirs,
@@ -315,20 +362,35 @@ fn main() -> MainResult<()> {
     }
     let (bytes_freed, paths_deleted) = (report.bytes_freed, report.paths_deleted);
 
+    let hint = if keep_recent_after.is_some() {
+        " (reachable from GC roots or pinned by --keep-recent)"
+    } else {
+        " (reachable from GC roots)"
+    };
     if let Some(need) = ensure_free_need
         && bytes_freed < need
     {
-        let hint = if keep_recent_after.is_some() {
-            " (reachable from GC roots or pinned by --keep-recent)"
-        } else {
-            " (reachable from GC roots)"
-        };
         warn!(
             "only freed {}, {} short of --ensure-free target. \
              The remaining paths are alive{hint}",
             format_size(bytes_freed),
             format_size(need - bytes_freed)
         );
+    }
+    // Deletion stops on bytes freed on disk, which differs from narSize
+    // (block rounding, hard links), so check the cap itself.
+    if !args.dry_run
+        && let Some(cap) = args.max_store_size
+    {
+        let registered = store.registered_size()?;
+        if registered > cap {
+            warn!(
+                "{} registered, still {} over --max-store-size. \
+                 The remaining paths are alive{hint}, or the next run frees them",
+                format_size(registered),
+                format_size(registered - cap)
+            );
+        }
     }
 
     if args.dry_run {
@@ -376,6 +438,16 @@ mod tests {
         assert!(!parsed.delete_old);
         let parsed = try_parse(&["--delete-older-than", "30d"]).unwrap();
         assert_eq!(parsed.delete_older_than.as_deref(), Some("30d"));
+    }
+
+    #[test]
+    fn max_store_size_takes_a_size() {
+        let parsed = try_parse(&["--max-store-size", "600G"]).unwrap();
+        assert_eq!(parsed.max_store_size, Some(600 * 1024u64.pow(3)));
+        assert_eq!(try_parse(&[]).unwrap().max_store_size, None);
+        // A percentage of the store's own size is meaningless.
+        assert!(try_parse(&["--max-store-size", "80%"]).is_err());
+        assert!(try_parse(&["--max-store-size", "-1G"]).is_err());
     }
 
     #[test]

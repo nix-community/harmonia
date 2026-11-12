@@ -61,6 +61,25 @@ impl GcStore {
         };
         Ok(GcStore { db, layout })
     }
+
+    /// Sum of `narSize` over all registered paths.
+    ///
+    /// This approximates the store's disk usage without walking it. It
+    /// leaves out paths not yet registered (e.g. outputs of running
+    /// builds) and the database itself, and counts hard-linked files once
+    /// per path that contains them.
+    pub fn registered_size(&self) -> Result<u64> {
+        let size: i64 = self
+            .db
+            .connection()
+            .query_row(
+                "SELECT COALESCE(SUM(MAX(narSize, 0)), 0) FROM ValidPaths",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(harmonia_store_db::Error::from)?;
+        Ok(size.max(0) as u64)
+    }
 }
 
 /// Prepare the connection for GC writes.
