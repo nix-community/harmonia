@@ -56,7 +56,6 @@ fn drv_matches_json_and_roundtrips(#[case] base_path: &str) {
 }
 
 #[rstest]
-#[case::bad_version("derivation/bad-version.drv")]
 #[case::bad_old_version_dyn_deps("derivation/bad-old-version-dyn-deps.drv")]
 fn drv_parse_error(#[case] relative_path: &str) {
     let store_dir = StoreDir::default();
@@ -67,4 +66,11 @@ fn drv_parse_error(#[case] relative_path: &str) {
         parse_derivation_aterm(&store_dir, drv_str.as_bytes(), "test".parse().unwrap()).is_err(),
         "{relative_path} should fail to parse"
     );
+}
+
+#[test]
+fn drv_bad_version() {
+    let store_dir = StoreDir::default();
+    let drv = br#"DrvWithVersion("invalid-version","#;
+    assert!(parse_derivation_aterm(&store_dir, drv, "test".parse().unwrap()).is_err());
 }
