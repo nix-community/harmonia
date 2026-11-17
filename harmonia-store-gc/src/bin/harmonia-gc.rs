@@ -35,6 +35,11 @@ struct Args {
     #[arg(long, value_name = "SIZE", value_parser = parse_ensure_free)]
     ensure_free: Option<EnsureFree>,
 
+    /// Free until the NAR sizes of all registered paths total at most
+    /// SIZE (e.g. 600G)
+    #[arg(long, value_name = "SIZE", value_parser = parse_size)]
+    max_store_size: Option<u64>,
+
     /// Keep paths registered within SPEC (e.g. 7d)
     #[arg(long, value_name = "SPEC")]
     keep_recent: Option<String>,
@@ -252,24 +257,24 @@ fn main() -> MainResult<()> {
             })?;
     }
 
-    let max_freed = if let Some(ensure_free) = args.ensure_free {
+    let ensure_free_need = if let Some(ensure_free) = args.ensure_free {
         let (avail, total) = filesystem_bytes(&args.store_dir)?;
         let target = ensure_free.target_bytes(total);
-        if avail >= target {
+        let need = target.saturating_sub(avail);
+        if need > 0 {
+            tracing::info!(
+                "freeing at least {} to reach {} free",
+                format_size(need),
+                format_size(target)
+            );
+        } else if args.max_store_size.is_none() {
             println!("{} already free, nothing to do", format_size(avail));
             return Ok(());
         }
-        let need = target - avail;
-        tracing::info!(
-            "freeing at least {} to reach {} free",
-            format_size(need),
-            format_size(target)
-        );
         Some(need)
     } else {
         None
     };
-    let ensure_free_need = max_freed;
 
     let store = if args.dry_run {
         // No DB writes happen in a dry run, so don't take write locks or
@@ -282,6 +287,25 @@ fn main() -> MainResult<()> {
     } else {
         GcStore::open(&args.store_dir, &args.state_dir)?
     };
+
+    let max_store_size_need = if let Some(cap) = args.max_store_size {
+        let registered = store.registered_size()?;
+        let need = registered.saturating_sub(cap);
+        if need > 0 {
+            tracing::info!(
+                "freeing at least {} to reach {} registered",
+                format_size(need),
+                format_size(cap)
+            );
+        } else if ensure_free_need.unwrap_or(0) == 0 {
+            println!("{} registered, nothing to do", format_size(registered));
+            return Ok(());
+        }
+        Some(need)
+    } else {
+        None
+    };
+
     let defaults = harmonia_store_gc::GraphOptions::default();
     let graph_options = harmonia_store_gc::GraphOptions {
         keep_outputs: args
@@ -297,7 +321,8 @@ fn main() -> MainResult<()> {
     let mut opts = GcOptions {
         graph_options,
         dry_run: args.dry_run,
-        max_freed,
+        max_freed: ensure_free_need,
+        max_freed_nar: max_store_size_need,
         keep_recent_after,
         vacuum: !args.no_vacuum,
         extra_gc_roots_dirs: args.gc_roots_dirs,
@@ -315,20 +340,33 @@ fn main() -> MainResult<()> {
     }
     let (bytes_freed, paths_deleted) = (report.bytes_freed, report.paths_deleted);
 
+    let hint = if keep_recent_after.is_some() {
+        " (reachable from GC roots or pinned by --keep-recent)"
+    } else {
+        " (reachable from GC roots)"
+    };
     if let Some(need) = ensure_free_need
         && bytes_freed < need
     {
-        let hint = if keep_recent_after.is_some() {
-            " (reachable from GC roots or pinned by --keep-recent)"
-        } else {
-            " (reachable from GC roots)"
-        };
         warn!(
             "only freed {}, {} short of --ensure-free target. \
              The remaining paths are alive{hint}",
             format_size(bytes_freed),
             format_size(need - bytes_freed)
         );
+    }
+    if !args.dry_run
+        && let Some(cap) = args.max_store_size
+    {
+        let registered = store.registered_size()?;
+        if registered > cap {
+            warn!(
+                "{} registered, still {} over --max-store-size. \
+                 The remaining paths are alive{hint}",
+                format_size(registered),
+                format_size(registered - cap)
+            );
+        }
     }
 
     if args.dry_run {

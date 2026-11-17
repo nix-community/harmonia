@@ -61,6 +61,21 @@ impl GcStore {
         };
         Ok(GcStore { db, layout })
     }
+
+    /// Sum of `narSize` over all registered paths. Approximates disk
+    /// usage: unregistered paths are missing, hard links count per path.
+    pub fn registered_size(&self) -> Result<u64> {
+        let size: i64 = self
+            .db
+            .connection()
+            .query_row(
+                "SELECT COALESCE(SUM(MAX(narSize, 0)), 0) FROM ValidPaths",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(harmonia_store_db::Error::from)?;
+        Ok(size.max(0) as u64)
+    }
 }
 
 /// Prepare the connection for GC writes.

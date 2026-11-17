@@ -495,6 +495,79 @@ fn gc_max_freed_referrer_never_outlives_reference() {
 }
 
 #[test]
+fn registered_size_sums_nar_sizes() {
+    let store = TestStore::new();
+    store.add_path("a", 100);
+    store.add_path("b", 250);
+    // A missing narSize must not poison the sum.
+    let c = store.add_path("c", 0);
+    store
+        .db()
+        .execute(
+            "UPDATE ValidPaths SET narSize = NULL WHERE path = ?",
+            [&c.full],
+        )
+        .unwrap();
+
+    let gc_store = GcStore::open(&store.store_dir, &store.state_dir).unwrap();
+    assert_eq!(gc_store.registered_size().unwrap(), 350);
+}
+
+/// The cap is in NAR bytes, but deletion frees whole disk blocks: a
+/// 100-byte path frees a few KiB. Stopping on disk bytes would end after
+/// the first one-path chunk, still over the cap.
+#[test]
+fn gc_max_store_size_counts_nar_bytes_not_disk_bytes() {
+    let store = TestStore::new();
+    let dead: Vec<Pkg> = (0..4)
+        .map(|i| store.add_path(&format!("dead{i}"), 100))
+        .collect();
+    let args = ["--max-store-size", "250", "--chunk-size", "1"];
+
+    let dry = store.run_gc_ok(&[&["--dry-run"], &args[..]].concat());
+    let stdout = String::from_utf8_lossy(&dry.stdout);
+    assert!(
+        stdout.contains("2 store paths would be deleted (~200 bytes)"),
+        "stdout: {stdout}"
+    );
+
+    store.run_gc_ok(&args);
+
+    let left = dead.iter().filter(|p| store.in_db(p)).count();
+    assert_eq!(left, 2, "real run must delete what the dry run reported");
+    let gc_store = GcStore::open(&store.store_dir, &store.state_dir).unwrap();
+    assert_eq!(gc_store.registered_size().unwrap(), 200);
+}
+
+#[test]
+fn gc_max_store_size_warns_when_live_paths_exceed_cap() {
+    let store = TestStore::new();
+    let live = store.add_path("live", 500);
+    store.add_root("live-root", &live);
+    let dead = store.add_path("dead", 100);
+
+    let out = store.run_gc_ok(&["--max-store-size", "100"]);
+
+    assert!(live.path.exists() && store.in_db(&live));
+    assert!(!store.in_db(&dead));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("500 bytes registered, still 400 bytes over --max-store-size"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn gc_max_store_size_combines_with_ensure_free() {
+    let store = TestStore::new();
+    let dead = store.add_path("dead", 100);
+
+    // Free space is always above 0 bytes, so only the cap is binding.
+    store.run_gc_ok(&["--ensure-free", "0", "--max-store-size", "50"]);
+    assert!(!store.in_db(&dead), "the cap must still apply");
+}
+
+#[test]
 fn gc_chunk_size_one_deletes_whole_dead_chain() {
     let store = TestStore::new();
     // A reference chain a -> b -> c, all dead. With one path per
