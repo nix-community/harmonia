@@ -1,7 +1,6 @@
 {
   pkgs,
   nix-src,
-  cargo-llvm-cov,
 }:
 (pkgs.mkShell.override {
   stdenv =
@@ -17,8 +16,8 @@
       cargo-watch
       cargo-llvm-cov
       cargo-nextest
-      # LLVM tools needed for cargo-llvm-cov
-      llvmPackages.bintools-unwrapped
+      # llvm-profdata must read the profile format of rustc's LLVM.
+      rustc.llvmPackages.bintools-unwrapped
     ];
 
     buildInputs = with pkgs; [

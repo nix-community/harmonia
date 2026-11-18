@@ -38,16 +38,11 @@
           }
         );
 
-      # Its tests fail with cargo 1.99:
-      # https://github.com/nix-community/harmonia/issues/1278
-      cargo-llvm-cov = pkgs: pkgs.cargo-llvm-cov.overrideAttrs { doCheck = false; };
-
       packageSet = eachSystem (
         { pkgs, ... }:
         pkgs.callPackages ./nix/packages.nix {
           inherit crane;
           nix-src = nix;
-          cargo-llvm-cov = cargo-llvm-cov pkgs;
         }
       );
 
@@ -98,10 +93,7 @@
       devShells = eachSystem (
         { pkgs, ... }:
         {
-          default = pkgs.callPackage ./nix/devShell.nix {
-            nix-src = nix;
-            cargo-llvm-cov = cargo-llvm-cov pkgs;
-          };
+          default = pkgs.callPackage ./nix/devShell.nix { nix-src = nix; };
         }
       );
 
