@@ -18,11 +18,11 @@
     "nix": {
       "flake": false,
       "locked": {
-        "lastModified": 1794947081,
-        "narHash": "sha256-G96+ctkEILoLlWg4F8l5H+nGg/VBcaURvHfHR5rIySk=",
+        "lastModified": 1795084229,
+        "narHash": "sha256-T+rFU4VgM0s8YKryvDTOk/XGe/PsLaW2QaleLrbqHOs=",
         "owner": "nixos",
         "repo": "nix",
-        "rev": "bada5b254b3ad8266188c7b4d7eafec5fbb23659",
+        "rev": "49c6a0b89a1e326a38387d2ea7da081253f72d7e",
         "type": "github"
       },
       "original": {
