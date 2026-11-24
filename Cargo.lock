@@ -1354,6 +1354,7 @@ dependencies = [
  "harmonia-store-path",
  "harmonia-utils-io",
  "harmonia-utils-signature",
+ "parking_lot",
  "prometheus",
  "tempfile",
  "tokio",

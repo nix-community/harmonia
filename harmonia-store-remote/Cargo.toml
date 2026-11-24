@@ -32,7 +32,8 @@ futures-util = { workspace = true }
 tokio        = { workspace = true }
 
 # Utilities
-tracing = { workspace = true }
+parking_lot = "0.12"
+tracing     = { workspace = true }
 
 # Metrics (optional but commonly used)
 prometheus = { workspace = true }

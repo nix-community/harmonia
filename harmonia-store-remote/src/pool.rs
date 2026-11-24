@@ -27,10 +27,11 @@ use crate::metrics::PoolMetrics;
 use crate::{DaemonClient, DaemonClientBuilder};
 use harmonia_protocol::types::{DaemonError, DaemonErrorKind, DaemonResult, HandshakeDaemonStore};
 use harmonia_store_path::StoreDir;
+use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -80,8 +81,8 @@ struct PooledConnection {
 }
 
 impl PooledConnection {
-    fn is_expired(&self, max_idle_time: Duration) -> bool {
-        self.last_used.elapsed() > max_idle_time
+    fn is_expired_at(&self, now: Instant, max_idle_time: Duration) -> bool {
+        now.saturating_duration_since(self.last_used) > max_idle_time
     }
 }
 
@@ -90,9 +91,8 @@ impl PooledConnection {
 pub struct ConnectionPool {
     /// One permit per connection slot.
     slots: Arc<Semaphore>,
-    /// Idle connections available for reuse. A std mutex suffices: it is
-    /// only held to push or pop, never across an await, so Drop can
-    /// return a connection synchronously.
+    /// Idle connections available for reuse. Only held to push or pop,
+    /// never across an await, so Drop can return a connection synchronously.
     idle: Arc<Mutex<VecDeque<PooledConnection>>>,
     socket_path: PathBuf,
     store_dir: StoreDir,
@@ -150,21 +150,28 @@ impl ConnectionPool {
                 DaemonError::from(DaemonErrorKind::Custom("connection pool closed".into()))
             })?;
 
-        // Reuse a live idle connection, discarding any that idled out.
+        // Reuse a live idle connection, dropping any expired ones outside the lock.
+        let now = Instant::now();
+        let mut expired = Vec::new();
         let reused = {
             let max_idle = self.config.max_idle_time;
-            let mut idle = self.idle.lock().unwrap();
-            loop {
+            let mut idle = self.idle.lock();
+            let found = loop {
                 match idle.pop_front() {
-                    Some(conn) if conn.is_expired(max_idle) => continue,
+                    Some(conn) if conn.is_expired_at(now, max_idle) => expired.push(conn),
                     other => break other,
                 }
+            };
+            if let Some(metrics) = &self.config.metrics {
+                metrics.idle_connections.set(idle.len() as i64);
             }
+            found
         };
+        drop(expired);
 
         let (conn, kind) = match reused {
             Some(mut conn) => {
-                conn.last_used = Instant::now();
+                conn.last_used = now;
                 trace!("Reusing idle connection");
                 (conn, "reused")
             }
@@ -199,7 +206,7 @@ impl ConnectionPool {
                 .connection_acquire_duration
                 .with_label_values(&[kind])
                 .observe(start.elapsed().as_secs_f64());
-            self.update_metrics(metrics);
+            metrics.active_connections.inc();
         }
 
         Ok(PooledConnectionGuard {
@@ -249,19 +256,11 @@ impl ConnectionPool {
         })
     }
 
-    fn update_metrics(&self, metrics: &PoolMetrics) {
-        let idle = self.idle.lock().unwrap().len();
-        // Held permits are the guards in use; idle connections hold none.
-        let active = self.config.max_size - self.slots.available_permits();
-        metrics.idle_connections.set(idle as i64);
-        metrics.active_connections.set(active as i64);
-    }
-
     /// Get current pool statistics.
     ///
     /// Returns (idle_count, active_count, capacity).
     pub async fn stats(&self) -> (usize, usize, usize) {
-        let idle = self.idle.lock().unwrap().len();
+        let idle = self.idle.lock().len();
         let capacity = self.config.max_size;
         // Held permits are the guards in use; idle connections hold none.
         let active = capacity - self.slots.available_permits();
@@ -344,12 +343,15 @@ impl Drop for PooledConnectionGuard {
                 trace!("Discarding connection interrupted mid-operation");
             } else {
                 conn.last_used = Instant::now();
-                self.idle.lock().unwrap().push_back(conn);
+                let mut idle = self.idle.lock();
+                idle.push_back(conn);
+                if let Some(metrics) = &self.metrics {
+                    metrics.idle_connections.set(idle.len() as i64);
+                }
             }
         }
         if let Some(metrics) = &self.metrics {
-            let idle = self.idle.lock().unwrap().len() as i64;
-            metrics.idle_connections.set(idle);
+            metrics.active_connections.dec();
         }
         // _permit is released when this guard finishes dropping.
     }
