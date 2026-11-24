@@ -19,6 +19,12 @@ use crate::wire::calc_padding;
 /// tiny entries (symlinks, empty dirs) does not buffer unbounded amounts of
 /// metadata before yielding to the consumer.
 const FRAME_FLUSH_THRESHOLD: usize = 32 * 1024;
+/// Small eager files up to this size are coalesced directly into the framing
+/// buffer rather than splitting out separate tiny framing and payload chunks.
+const SMALL_FILE_COALESCE_LIMIT: usize = 8 * 1024;
+/// Headroom above `FRAME_FLUSH_THRESHOLD` so coalescing one more small file
+/// right below the threshold does not trigger a buffer reallocation.
+const FRAME_SLAB_CAPACITY: usize = FRAME_FLUSH_THRESHOLD + SMALL_FILE_COALESCE_LIMIT + 256;
 
 enum Phase {
     /// Pull the next [`NarEvent`] from the dumper and encode framing.
@@ -53,7 +59,7 @@ impl NarByteStream {
     pub fn new(path: PathBuf) -> Self {
         Self {
             dumper: DumpOptions::new().dump(path),
-            frame: BytesMut::with_capacity(FRAME_FLUSH_THRESHOLD),
+            frame: BytesMut::with_capacity(FRAME_SLAB_CAPACITY),
             level: 0,
             phase: Phase::Event,
         }
@@ -64,6 +70,15 @@ impl NarByteStream {
         frame.put_slice(TOK_ENTRY);
         put_nix_slice(frame, name);
         frame.put_slice(TOK_NODE);
+    }
+
+    /// Append the zero padding and closing `)` token(s) after a file's contents.
+    fn put_file_trailer(frame: &mut BytesMut, size: u64, level: u32) {
+        frame.put_bytes(0, calc_padding(size));
+        frame.put_slice(TOK_PAR);
+        if level > 0 {
+            frame.put_slice(TOK_PAR);
+        }
     }
 }
 
@@ -83,6 +98,9 @@ impl Stream for NarByteStream {
                 Phase::Event => {
                     if this.frame.len() >= FRAME_FLUSH_THRESHOLD {
                         return Poll::Ready(Some(Ok(this.frame.split().freeze())));
+                    }
+                    if this.frame.is_empty() && this.frame.capacity() < FRAME_SLAB_CAPACITY {
+                        this.frame.reserve(FRAME_SLAB_CAPACITY);
                     }
                     match ready!(Pin::new(&mut this.dumper).poll_next(cx)) {
                         Some(Ok(event)) => {
@@ -130,12 +148,25 @@ impl Stream for NarByteStream {
                                         TOK_FILE
                                     });
                                     this.frame.put_u64_le(size);
-                                    this.phase = Phase::Emit { file: reader, size };
-                                    // Flush framing now so file bytes follow
-                                    // immediately without being copied into
-                                    // the frame buffer.
-                                    if !this.frame.is_empty() {
-                                        return Poll::Ready(Some(Ok(this.frame.split().freeze())));
+                                    match reader.into_small_eager(SMALL_FILE_COALESCE_LIMIT) {
+                                        Ok(bytes) => {
+                                            this.frame.put_slice(&bytes);
+                                            Self::put_file_trailer(
+                                                &mut this.frame,
+                                                size,
+                                                this.level,
+                                            );
+                                        }
+                                        Err(file) => {
+                                            this.phase = Phase::Emit { file, size };
+                                            // Flush framing now so large file bytes follow
+                                            // immediately without being copied into
+                                            // the frame buffer.
+                                            return Poll::Ready(Some(Ok(this
+                                                .frame
+                                                .split()
+                                                .freeze())));
+                                        }
                                     }
                                 }
                             }
@@ -159,11 +190,7 @@ impl Stream for NarByteStream {
                         None => {}
                     }
                     // File fully emitted; append trailer and resume framing.
-                    this.frame.put_bytes(0, calc_padding(*size));
-                    this.frame.put_slice(TOK_PAR);
-                    if this.level > 0 {
-                        this.frame.put_slice(TOK_PAR);
-                    }
+                    Self::put_file_trailer(&mut this.frame, *size, this.level);
                     this.phase = Phase::Event;
                 }
                 Phase::Done => return Poll::Ready(None),

@@ -156,20 +156,32 @@ enum FileData {
     },
 }
 
-fn load_file_data(path: &Path, size: u64) -> io::Result<FileData> {
-    let mut f = std::fs::File::open(path)?;
+fn open_regular_file(path: &Path) -> io::Result<std::fs::File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits());
+    }
+    opts.open(path)
+}
+
+fn load_file_data(mut f: std::fs::File, path: &Path, size: u64) -> io::Result<FileData> {
     if size <= SMALL_FILE_THRESHOLD {
         use std::io::Read as _;
-        let mut buf = Vec::with_capacity(size as usize);
-        f.read_to_end(&mut buf)?;
-        // The NAR length prefix has already been derived from `size`; if the
-        // file changed under us the archive would silently desync, so surface
-        // it as an explicit error instead.
-        if buf.len() as u64 != size {
-            return Err(io::Error::other(format!(
-                "file {path:?} changed size during dump: stat {size}, read {}",
-                buf.len()
-            )));
+        let mut buf = vec![0u8; size as usize];
+        // Read the exact `size` bytes advertised in the NAR header in a single
+        // syscall (matching the Lazy path) instead of calling `read_to_end`,
+        // which issues a second EOF read and grows the buffer.
+        if let Err(e) = f.read_exact(&mut buf) {
+            return Err(if e.kind() == io::ErrorKind::UnexpectedEof {
+                io::Error::other(format!(
+                    "file {path:?} truncated during dump: expected {size} bytes"
+                ))
+            } else {
+                e
+            });
         }
         Ok(FileData::Eager(Bytes::from(buf)))
     } else {
@@ -190,6 +202,17 @@ pub struct DumpedFile {
 }
 
 impl DumpedFile {
+    /// If the entire file is already in memory and at most `max_len` bytes,
+    /// return its bytes so the caller can coalesce it into a framing buffer.
+    pub(crate) fn into_small_eager(self, max_len: usize) -> Result<Bytes, Self> {
+        match self.data {
+            FileData::Eager(bytes) if bytes.len() <= max_len => Ok(bytes),
+            data => Err(Self {
+                data,
+                pending: self.pending,
+            }),
+        }
+    }
     /// Produce the next content chunk, or `None` when the file is fully
     /// emitted. The bounded synchronous `read()` for lazy data is comparable
     /// to the page-fault stalls the previous mmap implementation incurred.
@@ -291,7 +314,11 @@ enum State {
     Pending(JoinHandle<Box<BatchState>>),
 }
 
-const CHUNK_SIZE: usize = 25;
+const CHUNK_SIZE: usize = 256;
+const MAX_BATCH_EAGER_BYTES: usize = 4 * 1024 * 1024;
+/// Each lazy entry keeps its file descriptor open until it is emitted, so cap
+/// them per batch (at the previous `CHUNK_SIZE`) to bound descriptors per dump.
+const MAX_BATCH_LAZY_FILES: usize = 25;
 
 impl State {
     fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<io::Result<Entry>>> {
@@ -322,14 +349,15 @@ impl State {
         iter: &mut IntoIter,
         use_case_hack: bool,
     ) -> bool {
+        let mut eager_bytes = 0usize;
+        let mut lazy_files = 0usize;
         for _ in 0..CHUNK_SIZE {
             match iter.next() {
                 Some(res) => {
                     let res = res.map_err(io::Error::from).and_then(|entry| {
                         let depth = entry.depth();
                         // `file_type()` is cached from `readdir`'s `d_type`
-                        // and needs no syscall; only regular files require an
-                        // additional `lstat` for size and the exec bit.
+                        // and needs no syscall.
                         let ft = entry.file_type();
                         let entry = if ft.is_dir() {
                             Entry::Directory {
@@ -337,7 +365,10 @@ impl State {
                                 name: entry_name(entry, use_case_hack),
                             }
                         } else if ft.is_file() {
-                            let m = entry.metadata()?;
+                            // Open once and `fstat` the descriptor instead of
+                            // doing a separate path-walking `lstat` before `open`.
+                            let file = open_regular_file(entry.path())?;
+                            let m = file.metadata()?;
                             let executable;
                             #[cfg(unix)]
                             {
@@ -352,7 +383,13 @@ impl State {
                             // task that is already iterating the directory,
                             // so the async side receives ready-to-stream
                             // bytes without a second pool round-trip.
-                            let data = load_file_data(entry.path(), size)?;
+                            let data = load_file_data(file, entry.path(), size)?;
+                            match data {
+                                FileData::Eager(ref b) => {
+                                    eager_bytes = eager_bytes.saturating_add(b.len());
+                                }
+                                FileData::Lazy { .. } => lazy_files += 1,
+                            }
                             Entry::File {
                                 depth,
                                 name: entry_name(entry, use_case_hack),
@@ -374,6 +411,9 @@ impl State {
                         Ok(entry)
                     });
                     buf.push_back(res);
+                    if eager_bytes >= MAX_BATCH_EAGER_BYTES || lazy_files >= MAX_BATCH_LAZY_FILES {
+                        break;
+                    }
                 }
                 None => return false,
             }
@@ -550,5 +590,40 @@ mod unittests {
             .await
             .unwrap();
         assert_eq!(s, test_data::symlink());
+    }
+
+    #[test]
+    fn batch_caps_open_lazy_files() {
+        const FILES: usize = 2 * MAX_BATCH_LAZY_FILES + 3;
+        let dir = Builder::new().prefix("test_lazy_cap").tempdir().unwrap();
+        for i in 0..FILES {
+            // Sparse files just over the eager threshold become lazy entries.
+            let f = std::fs::File::create(dir.path().join(format!("f{i:03}"))).unwrap();
+            f.set_len(SMALL_FILE_THRESHOLD + 1).unwrap();
+        }
+        let mut walker = walkdir::WalkDir::new(dir.path()).into_iter();
+        let mut total = 0;
+        loop {
+            let mut buf = VecDeque::new();
+            let remain = State::next_chunk(&mut buf, &mut walker, false);
+            let lazy = buf
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e,
+                        Ok(Entry::File {
+                            data: FileData::Lazy { .. },
+                            ..
+                        })
+                    )
+                })
+                .count();
+            assert!(lazy <= MAX_BATCH_LAZY_FILES, "batch held {lazy} open files");
+            total += lazy;
+            if !remain {
+                break;
+            }
+        }
+        assert_eq!(total, FILES);
     }
 }
