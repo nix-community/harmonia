@@ -28,4 +28,6 @@ pub enum ParseError {
     Output(#[from] FromRawOutputError),
     #[error("invalid UTF-8 in string at position {pos}")]
     InvalidUtf8 { pos: usize },
+    #[error("duplicate {key} in inputDrvs at position {pos}")]
+    DuplicateInputDrv { key: String, pos: usize },
 }
