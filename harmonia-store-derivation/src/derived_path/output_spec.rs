@@ -8,12 +8,13 @@ use proptest::collection::btree_set;
 #[cfg(any(test, feature = "test"))]
 use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
+use smol_str::SmolStr;
 
 use harmonia_store_path::{StorePathNameError, into_name};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct OutputName(String);
+pub struct OutputName(SmolStr);
 
 impl OutputName {
     pub fn is_default(&self) -> bool {
@@ -29,7 +30,7 @@ impl AsRef<str> for OutputName {
 
 impl Default for OutputName {
     fn default() -> Self {
-        OutputName("out".into())
+        OutputName(const { SmolStr::new_inline("out") })
     }
 }
 
@@ -40,7 +41,9 @@ impl Arbitrary for OutputName {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use harmonia_store_path::proptest::arb_output_name;
-        arb_output_name().prop_map(OutputName).boxed()
+        arb_output_name()
+            .prop_map(|s| OutputName(SmolStr::from(s)))
+            .boxed()
     }
 }
 
@@ -48,8 +51,8 @@ impl FromStr for OutputName {
     type Err = StorePathNameError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let name = into_name(&s)?.to_string();
-        Ok(OutputName(name))
+        let name = into_name(&s)?;
+        Ok(OutputName(SmolStr::new(name)))
     }
 }
 
@@ -87,13 +90,37 @@ impl<'de> Deserialize<'de> for OutputSpec {
     where
         D: serde::Deserializer<'de>,
     {
-        let names: Vec<String> = Vec::deserialize(deserializer)?;
-        match names.as_slice() {
-            [s] if s == "*" => Ok(OutputSpec::All),
-            _ => Ok(OutputSpec::Named(
-                names.into_iter().map(OutputName).collect(),
-            )),
+        struct OutputSpecVisitor;
+        impl<'de> serde::de::Visitor<'de> for OutputSpecVisitor {
+            type Value = OutputSpec;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a sequence of output names or [\"*\"]")
+            }
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let Some(first) = seq.next_element::<SmolStr>()? else {
+                    return Ok(OutputSpec::Named(BTreeSet::new()));
+                };
+                let Some(second) = seq.next_element::<SmolStr>()? else {
+                    if first == "*" {
+                        return Ok(OutputSpec::All);
+                    }
+                    let mut set = BTreeSet::new();
+                    set.insert(OutputName(first));
+                    return Ok(OutputSpec::Named(set));
+                };
+                let mut set = BTreeSet::new();
+                set.insert(OutputName(first));
+                set.insert(OutputName(second));
+                while let Some(name) = seq.next_element::<SmolStr>()? {
+                    set.insert(OutputName(name));
+                }
+                Ok(OutputSpec::Named(set))
+            }
         }
+        deserializer.deserialize_seq(OutputSpecVisitor)
     }
 }
 

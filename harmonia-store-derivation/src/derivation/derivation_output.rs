@@ -18,9 +18,24 @@ pub struct OutputPathName<'b> {
     pub output_name: &'b OutputName,
 }
 
+const MAX_STORE_PATH_NAME_LEN: usize = 211;
+
 impl OutputPathName<'_> {
     pub fn to_store_path_name(&self) -> Result<StorePathName, StorePathNameError> {
-        self.to_string().parse()
+        if self.output_name.is_default() {
+            return Ok(self.drv_name.clone());
+        }
+        let drv = self.drv_name.as_bytes();
+        let out = self.output_name.as_ref().as_bytes();
+        let total = drv.len() + 1 + out.len();
+        if total > MAX_STORE_PATH_NAME_LEN {
+            return Err(StorePathNameError::NameLength);
+        }
+        let mut buf = [0u8; MAX_STORE_PATH_NAME_LEN];
+        buf[..drv.len()].copy_from_slice(drv);
+        buf[drv.len()] = b'-';
+        buf[drv.len() + 1..total].copy_from_slice(out);
+        StorePathName::try_from(&buf[..total])
     }
 }
 
@@ -300,7 +315,7 @@ pub mod arbitrary {
 
         // "out" output uses just drv_name (no suffix), so always fits.
         // Non-default: "{drv_name}-{output_name}" must fit in 211 chars.
-        let budget = 211_usize.saturating_sub(drv_name.to_string().len() + 1);
+        let budget = MAX_STORE_PATH_NAME_LEN.saturating_sub(drv_name.len() + 1);
         // Clamp to the output name generator's max (14)
         let max_output_len = budget.min(14);
 
