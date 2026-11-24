@@ -15,11 +15,12 @@ use std::num::NonZero;
 use serde::{Deserialize, Serialize, Serializer};
 
 use harmonia_store_content_address::ContentAddress;
-use harmonia_store_path::{StoreDir, StorePath};
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
 use harmonia_store_path_info::{
     NarHash, StorePathKeyed, UnkeyedValidPathInfo, ValidPathInfo, fingerprint_path,
 };
-use harmonia_utils_hash::{Hash, fmt::Any};
+use harmonia_utils_base_encoding::base32;
+use harmonia_utils_hash::{Algorithm, Hash, fmt::Any};
 use harmonia_utils_signature::{SecretKey, Signature};
 
 /// A keyed NarInfo: store path plus narinfo metadata.
@@ -43,6 +44,9 @@ pub struct UnkeyedNarInfo {
     pub download_size: Option<u64>,
 }
 
+const STORE_HASH_LEN: usize = StorePathHash::encoded_len();
+const SHA256_BASE32_LEN: usize = base32::encode_len(Algorithm::SHA256.size());
+
 /// Build a `NarInfo` from a `ValidPathInfo`, signing with the cache keys.
 pub fn build_narinfo(
     store_dir: &StoreDir,
@@ -50,23 +54,28 @@ pub fn build_narinfo(
     hash: &str,
     sign_keys: &[SecretKey],
 ) -> NarInfo {
-    use harmonia_utils_hash::HashFormat as _;
+    let mut nar_hash_buf = [0u8; SHA256_BASE32_LEN];
+    base32::encode_mut(info.info.nar_hash.digest_bytes(), &mut nar_hash_buf);
+    let nar_hash_bare = std::str::from_utf8(&nar_hash_buf).expect("nix-base32 is ASCII");
 
-    let nar_hash_obj: Hash = info.info.nar_hash.into();
-    let nar_hash_bare = format!("{}", nar_hash_obj.as_base32().as_bare());
-
-    let url = format!("nar/{nar_hash_bare}.nar?hash={hash}");
+    let mut url = String::with_capacity(4 + SHA256_BASE32_LEN + 10 + hash.len());
+    url.push_str("nar/");
+    url.push_str(nar_hash_bare);
+    url.push_str(".nar?hash=");
+    url.push_str(hash);
 
     // Sign with the cache's secret keys and add to the signatures set.
-    let fingerprint = fingerprint_path(
-        store_dir,
-        &info.path,
-        &info.info.nar_hash,
-        info.info.nar_size,
-        &info.info.references,
-    );
-    for sk in sign_keys {
-        info.info.signatures.insert(sk.sign(&fingerprint));
+    if !sign_keys.is_empty() {
+        let fingerprint = fingerprint_path(
+            store_dir,
+            &info.path,
+            &info.info.nar_hash,
+            info.info.nar_size,
+            &info.info.references,
+        );
+        for sk in sign_keys {
+            info.info.signatures.insert(sk.sign(&fingerprint));
+        }
     }
 
     NarInfo {
@@ -83,46 +92,102 @@ pub fn build_narinfo(
 
 /// Format a `NarInfo` as the textual narinfo format used by the binary cache protocol.
 pub fn format_narinfo_txt(store_dir: &StoreDir, narinfo: &NarInfo) -> Vec<u8> {
-    let mut out = String::with_capacity(1024);
-    write_narinfo_txt(&mut out, store_dir, narinfo).expect("writing to a String cannot fail");
-    out.into_bytes()
+    let pi = &narinfo.info.info;
+    let capacity = 512 + pi.references.len() * 64 + pi.signatures.len() * 128;
+    let mut out = Vec::with_capacity(capacity);
+    write_narinfo_txt(&mut out, store_dir, narinfo).expect("writing to a Vec cannot fail");
+    out
+}
+
+#[inline]
+fn push_base_path(out: &mut Vec<u8>, prefix: &[u8], path: &StorePath) {
+    let mut hash_dash = [0u8; STORE_HASH_LEN + 1];
+    base32::encode_mut(path.hash().as_ref(), &mut hash_dash[..STORE_HASH_LEN]);
+    hash_dash[STORE_HASH_LEN] = b'-';
+    out.extend_from_slice(prefix);
+    out.extend_from_slice(&hash_dash);
+    out.extend_from_slice(path.name().as_bytes());
+}
+
+#[inline]
+fn push_sha256_field(out: &mut Vec<u8>, header: &[u8], b32: &[u8; SHA256_BASE32_LEN]) {
+    out.extend_from_slice(header);
+    out.extend_from_slice(b32);
+    out.push(b'\n');
+}
+
+#[inline]
+fn push_u64_field(out: &mut Vec<u8>, header: &[u8], buf: &mut itoa::Buffer, value: u64) {
+    out.extend_from_slice(header);
+    out.extend_from_slice(buf.format(value).as_bytes());
+    out.push(b'\n');
 }
 
 fn write_narinfo_txt(
-    out: &mut String,
+    out: &mut Vec<u8>,
     store_dir: &StoreDir,
     narinfo: &NarInfo,
-) -> std::fmt::Result {
+) -> std::io::Result<()> {
     use harmonia_utils_hash::HashFormat as _;
-    use std::fmt::Write as _;
+    use std::io::Write as _;
 
     let ni = &narinfo.info;
     let pi = &ni.info;
-    let nar_hash = Hash::from(pi.nar_hash);
+    let mut nar_hash_b32 = [0u8; SHA256_BASE32_LEN];
+    base32::encode_mut(pi.nar_hash.digest_bytes(), &mut nar_hash_b32);
 
     // Required fields
-    writeln!(out, "StorePath: {}", store_dir.display(&narinfo.path))?;
-    writeln!(out, "URL: {}", ni.url.as_deref().unwrap_or(""))?;
-    let compression = ni.compression.as_deref().unwrap_or("none");
-    writeln!(out, "Compression: {compression}")?;
-    let file_hash = ni.download_hash.unwrap_or(nar_hash);
-    writeln!(out, "FileHash: {}", file_hash.as_base32())?;
-    writeln!(out, "FileSize: {}", ni.download_size.unwrap_or(pi.nar_size))?;
-    writeln!(out, "NarHash: {}", nar_hash.as_base32())?;
-    writeln!(out, "NarSize: {}", pi.nar_size)?;
+    out.extend_from_slice(b"StorePath: ");
+    out.extend_from_slice(store_dir.to_str().as_bytes());
+    push_base_path(out, b"/", &narinfo.path);
+    out.push(b'\n');
+
+    out.extend_from_slice(b"URL: ");
+    out.extend_from_slice(ni.url.as_deref().unwrap_or("").as_bytes());
+    out.push(b'\n');
+
+    out.extend_from_slice(b"Compression: ");
+    out.extend_from_slice(ni.compression.as_deref().unwrap_or("none").as_bytes());
+    out.push(b'\n');
+
+    match ni.download_hash {
+        None => push_sha256_field(out, b"FileHash: sha256:", &nar_hash_b32),
+        Some(Hash::SHA256(sha)) if sha.digest_bytes() == pi.nar_hash.digest_bytes() => {
+            push_sha256_field(out, b"FileHash: sha256:", &nar_hash_b32);
+        }
+        Some(Hash::SHA256(sha)) => {
+            let mut file_hash_b32 = [0u8; SHA256_BASE32_LEN];
+            base32::encode_mut(sha.digest_bytes(), &mut file_hash_b32);
+            push_sha256_field(out, b"FileHash: sha256:", &file_hash_b32);
+        }
+        Some(other) => {
+            writeln!(out, "FileHash: {}", other.as_base32())?;
+        }
+    }
+
+    let mut size_buf = itoa::Buffer::new();
+    push_u64_field(
+        out,
+        b"FileSize: ",
+        &mut size_buf,
+        ni.download_size.unwrap_or(pi.nar_size),
+    );
+    push_sha256_field(out, b"NarHash: sha256:", &nar_hash_b32);
+    push_u64_field(out, b"NarSize: ", &mut size_buf, pi.nar_size);
 
     // References
     if !pi.references.is_empty() {
-        out.push_str("References:");
+        out.extend_from_slice(b"References:");
         for r in &pi.references {
-            write!(out, " {r}")?;
+            push_base_path(out, b" ", r);
         }
-        out.push('\n');
+        out.push(b'\n');
     }
 
     // Optional fields
     if let Some(drv) = &pi.deriver {
-        writeln!(out, "Deriver: {drv}")?;
+        push_base_path(out, b"Deriver: ", drv);
+        out.push(b'\n');
     }
 
     // All signatures (DB sigs + cache signing key sigs).
@@ -228,11 +293,22 @@ pub fn parse_narinfo_txt(store_dir: &StoreDir, s: &str) -> Result<NarInfo, NarIn
                 }
                 have_references = true;
                 // Like Nix's `tokenizeString(value, " ")`.
-                for r in value.split(' ').filter(|t| !t.is_empty()) {
-                    references.insert(
-                        StorePath::from_bytes(r.as_bytes())
-                            .map_err(|e| invalid("References", &e))?,
-                    );
+                let mut paths = value.split(' ').filter(|t| !t.is_empty()).map(|r| {
+                    StorePath::from_bytes(r.as_bytes()).map_err(|e| invalid("References", &e))
+                });
+                // For large reference lists, collect into a pre-sized Vec so
+                // BTreeSet::from_iter can bulk-build from the typically
+                // pre-sorted input without repeated tree descents.
+                if value.len() >= 1024 {
+                    let mut parsed = Vec::with_capacity(value.len() / 48);
+                    for path in paths {
+                        parsed.push(path?);
+                    }
+                    references = parsed.into_iter().collect();
+                } else {
+                    for path in &mut paths {
+                        references.insert(path?);
+                    }
                 }
             }
             "Deriver" if value != "unknown-deriver" => {
