@@ -102,7 +102,7 @@ impl Serialize for Hash {
         S: Serializer,
     {
         // Serialize as SRI string: "sha256-base64hash="
-        serializer.serialize_str(&self.as_sri().to_string())
+        self.as_sri().serialize(serializer)
     }
 }
 
@@ -111,13 +111,7 @@ impl<'de> Deserialize<'de> for Hash {
     where
         D: Deserializer<'de>,
     {
-        use serde::de;
-
-        let s = String::deserialize(deserializer)?;
-        // Try SRI format first, then fall back to Any format for flexibility
-        s.parse::<fmt::SRI<Hash>>()
-            .map(|sri| sri.into_hash())
-            .or_else(|_| s.parse::<fmt::Any<Hash>>().map(|any| any.into_hash()))
-            .map_err(de::Error::custom)
+        fmt::deserialize_from_str::<_, fmt::Any<Hash>>(deserializer, "a hash string")
+            .map(fmt::Any::into_hash)
     }
 }

@@ -2,7 +2,7 @@
 
 use std::{fmt as sfmt, str::FromStr};
 
-use data_encoding::{BASE64, DecodeError, DecodeKind};
+use data_encoding::{BASE64, DecodeError, DecodeKind, HEXLOWER, HEXUPPER};
 
 use thiserror::Error;
 
@@ -198,27 +198,106 @@ impl sfmt::Debug for crate::Hash {
     }
 }
 
+const MAX_ALGO_PREFIX_LEN: usize = 6 + 1;
+const MAX_HEX_LEN: usize = MAX_ALGO_PREFIX_LEN + Base::Hex.input_len(Algorithm::LARGEST.size());
+const MAX_BASE32_LEN: usize =
+    MAX_ALGO_PREFIX_LEN + Base::NixBase32.input_len(Algorithm::LARGEST.size());
+const MAX_BASE64_LEN: usize =
+    MAX_ALGO_PREFIX_LEN + Base::Base64.input_len(Algorithm::LARGEST.size());
+const SHA256_HEX_LEN: usize = Base::Hex.input_len(Algorithm::SHA256.size());
+
+#[inline]
+fn format_hash_into<'a, const N: usize>(
+    buf: &'a mut [u8; N],
+    algo: Option<(Algorithm, u8)>,
+    digest: &[u8],
+    encoded_len: usize,
+    encode: impl FnOnce(&[u8], &mut [u8]),
+) -> &'a str {
+    let mut pos = 0;
+    if let Some((algorithm, sep)) = algo {
+        let name = algorithm.as_str().as_bytes();
+        buf[..name.len()].copy_from_slice(name);
+        pos = name.len();
+        buf[pos] = sep;
+        pos += 1;
+    }
+    encode(digest, &mut buf[pos..pos + encoded_len]);
+    pos += encoded_len;
+    // SAFETY: algorithm names, separator, and base16/base32/base64 outputs are ASCII.
+    unsafe { std::str::from_utf8_unchecked(&buf[..pos]) }
+}
+
+#[inline]
+fn write_formatted_hash<const N: usize>(
+    f: &mut sfmt::Formatter<'_>,
+    algo: Option<(Algorithm, u8)>,
+    digest: &[u8],
+    encoded_len: usize,
+    encode: impl FnOnce(&[u8], &mut [u8]),
+) -> sfmt::Result {
+    let mut buf = [0u8; N];
+    f.write_str(format_hash_into(
+        &mut buf,
+        algo,
+        digest,
+        encoded_len,
+        encode,
+    ))
+}
+
+pub(crate) fn deserialize_from_str<'de, D, T>(
+    deserializer: D,
+    expecting: &'static str,
+) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: FromStr,
+    T::Err: sfmt::Display,
+{
+    struct Visitor<T> {
+        expecting: &'static str,
+        _marker: std::marker::PhantomData<T>,
+    }
+
+    impl<T> serde::de::Visitor<'_> for Visitor<T>
+    where
+        T: FromStr,
+        T::Err: sfmt::Display,
+    {
+        type Value = T;
+
+        fn expecting(&self, formatter: &mut sfmt::Formatter<'_>) -> sfmt::Result {
+            formatter.write_str(self.expecting)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            v.parse().map_err(serde::de::Error::custom)
+        }
+    }
+
+    deserializer.deserialize_str(Visitor {
+        expecting,
+        _marker: std::marker::PhantomData,
+    })
+}
+
 impl sfmt::LowerHex for crate::Hash {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        if !f.alternate() {
-            write!(f, "{}:", self.algorithm())?;
-        }
-        for val in self.digest_bytes() {
-            write!(f, "{val:02x}")?;
-        }
-        Ok(())
+        sfmt::Display::fmt(self.as_base16(), f)
     }
 }
 
 impl sfmt::UpperHex for crate::Hash {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        if !f.alternate() {
-            write!(f, "{}:", self.algorithm())?;
-        }
-        for val in self.digest_bytes() {
-            write!(f, "{val:02X}")?;
-        }
-        Ok(())
+        let algo = (!f.alternate()).then_some((self.algorithm(), b':'));
+        let bytes = self.digest_bytes();
+        write_formatted_hash::<MAX_HEX_LEN>(f, algo, bytes, bytes.len() * 2, |src, dst| {
+            HEXUPPER.encode_mut(src, dst)
+        })
     }
 }
 
@@ -266,19 +345,25 @@ impl sfmt::Debug for crate::Sha256 {
 
 impl sfmt::LowerHex for crate::Sha256 {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        for val in self.digest_bytes() {
-            write!(f, "{val:02x}")?;
-        }
-        Ok(())
+        write_formatted_hash::<SHA256_HEX_LEN>(
+            f,
+            None,
+            self.digest_bytes(),
+            SHA256_HEX_LEN,
+            |src, dst| HEXLOWER.encode_mut(src, dst),
+        )
     }
 }
 
 impl sfmt::UpperHex for crate::Sha256 {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        for val in self.digest_bytes() {
-            write!(f, "{val:02X}")?;
-        }
-        Ok(())
+        write_formatted_hash::<SHA256_HEX_LEN>(
+            f,
+            None,
+            self.digest_bytes(),
+            SHA256_HEX_LEN,
+            |src, dst| HEXUPPER.encode_mut(src, dst),
+        )
     }
 }
 
@@ -408,13 +493,11 @@ impl<H: CommonHash> Format for Base16<H> {
 
 impl<H: HashView> sfmt::Display for Base16<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        if !f.alternate() {
-            write!(f, "{}:", self.0.algorithm())?;
-        }
-        for val in self.0.digest_bytes() {
-            write!(f, "{val:02x}")?;
-        }
-        Ok(())
+        let algo = (!f.alternate()).then_some((self.0.algorithm(), b':'));
+        let bytes = self.0.digest_bytes();
+        write_formatted_hash::<MAX_HEX_LEN>(f, algo, bytes, bytes.len() * 2, |src, dst| {
+            HEXLOWER.encode_mut(src, dst)
+        })
     }
 }
 
@@ -516,17 +599,15 @@ impl<H: CommonHash> Format for Base32<H> {
 
 impl<H: HashView> sfmt::Display for Base32<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        let mut buf = [0u8; Base::NixBase32.input_len(Algorithm::LARGEST.size())];
-        let output = &mut buf[..Base::NixBase32.input_len(self.0.algorithm().size())];
-        base32::encode_mut(self.0.digest_bytes(), output);
-
-        // SAFETY: Nix Base32 is a subset of ASCII, which guarantees valid UTF-8.
-        let s = unsafe { std::str::from_utf8_unchecked(output) };
-        if f.alternate() {
-            f.write_str(s)
-        } else {
-            write!(f, "{}:{}", self.0.algorithm(), s)
-        }
+        let algorithm = self.0.algorithm();
+        let algo = (!f.alternate()).then_some((algorithm, b':'));
+        write_formatted_hash::<MAX_BASE32_LEN>(
+            f,
+            algo,
+            self.0.digest_bytes(),
+            Base::NixBase32.input_len(algorithm.size()),
+            base32::encode_mut,
+        )
     }
 }
 
@@ -627,18 +708,15 @@ impl<H: CommonHash> Format for Base64<H> {
 
 impl<H: HashView> sfmt::Display for Base64<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        let mut buf = [0u8; Base::Base64.input_len(Algorithm::LARGEST.size())];
-        let output = &mut buf[..Base::Base64.input_len(self.0.algorithm().size())];
-        BASE64.encode_mut(self.0.digest_bytes(), output);
-
-        // SAFETY: Bas64 is a subset of ASCII, which guarantees valid UTF-8.
-        let s = unsafe { std::str::from_utf8_unchecked(output) };
-
-        if f.alternate() {
-            f.write_str(s)
-        } else {
-            write!(f, "{}:{s}", self.0.algorithm())
-        }
+        let algorithm = self.0.algorithm();
+        let algo = (!f.alternate()).then_some((algorithm, b':'));
+        write_formatted_hash::<MAX_BASE64_LEN>(
+            f,
+            algo,
+            self.0.digest_bytes(),
+            Base::Base64.input_len(algorithm.size()),
+            |src, dst| BASE64.encode_mut(src, dst),
+        )
     }
 }
 
@@ -798,9 +876,24 @@ impl<H: HashView + Sized> SRI<H> {
     }
 }
 
+impl<H: HashView> SRI<H> {
+    #[inline]
+    fn encode_into<'a>(&self, buf: &'a mut [u8; MAX_BASE64_LEN]) -> &'a str {
+        let algorithm = self.0.algorithm();
+        format_hash_into(
+            buf,
+            Some((algorithm, b'-')),
+            self.0.digest_bytes(),
+            Base::Base64.input_len(algorithm.size()),
+            |src, dst| BASE64.encode_mut(src, dst),
+        )
+    }
+}
+
 impl<H: HashView> sfmt::Display for SRI<H> {
     fn fmt(&self, f: &mut sfmt::Formatter<'_>) -> sfmt::Result {
-        write!(f, "{}-{}", self.0.algorithm(), self.0.as_base64().as_bare())
+        let mut buf = [0u8; MAX_BASE64_LEN];
+        f.write_str(self.encode_into(&mut buf))
     }
 }
 
@@ -832,7 +925,8 @@ impl<H: HashView> serde::Serialize for SRI<H> {
     where
         S: serde::Serializer,
     {
-        serializer.collect_str(self)
+        let mut buf = [0u8; MAX_BASE64_LEN];
+        serializer.serialize_str(self.encode_into(&mut buf))
     }
 }
 
@@ -841,8 +935,7 @@ impl<'de, H: CommonHash> serde::Deserialize<'de> for SRI<H> {
     where
         D: serde::Deserializer<'de>,
     {
-        let s = <&str>::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
+        deserialize_from_str(deserializer, "an SRI hash string")
     }
 }
 
