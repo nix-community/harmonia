@@ -11,8 +11,7 @@
 //! but protocol can impl traits for external store-core types.
 
 use std::collections::BTreeMap;
-use std::future::Future;
-use std::pin::Pin;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -49,18 +48,34 @@ impl NixSerialize for (StorePath, BasicDerivation) {
         writer.write_value(&drv.builder).await?;
         writer.write_value(&drv.args).await?;
         // The wire format (like ATerm) carries structured attrs as the
-        // `__json` env var, not as a separate field. Re-inject it so the
-        // remote daemon reconstructs the same derivation.
+        // `__json` env var, not as a separate field. Re-inject it in sorted
+        // key order without cloning `drv.env`.
         match &drv.structured_attrs {
             None => writer.write_value(&drv.env).await?,
             Some(sa) => {
                 use crate::ser::Error as _;
-                let mut env = drv.env.clone();
-                let json = serde_json::to_string(&sa.attrs).map_err(|e| {
+                const JSON_KEY: &[u8] = b"__json";
+                let json = serde_json::to_vec(&sa.attrs).map_err(|e| {
                     W::Error::custom(std::format_args!("failed to encode structured attrs: {e}"))
                 })?;
-                env.insert(Bytes::from_static(b"__json"), Bytes::from(json));
-                writer.write_value(&env).await?;
+                let total_len = drv.env.len() + usize::from(!drv.env.contains_key(JSON_KEY));
+                writer.write_value(&total_len).await?;
+                for (key, value) in drv
+                    .env
+                    .range::<[u8], _>((Bound::Unbounded, Bound::Excluded(JSON_KEY)))
+                {
+                    writer.write_value(key).await?;
+                    writer.write_value(value).await?;
+                }
+                writer.write_slice(JSON_KEY).await?;
+                writer.write_slice(&json).await?;
+                for (key, value) in drv
+                    .env
+                    .range::<[u8], _>((Bound::Excluded(JSON_KEY), Bound::Unbounded))
+                {
+                    writer.write_value(key).await?;
+                    writer.write_value(value).await?;
+                }
             }
         }
         Ok(())
@@ -164,9 +179,8 @@ where
     use crate::ser::Error;
     use harmonia_utils_base_encoding::Base;
 
-    let store_dir = writer.store_dir().clone();
     let raw = output
-        .to_raw(&store_dir, drv_name, output_name, Base::Hex)
+        .to_raw(writer.store_dir(), drv_name, output_name, Base::Hex)
         .map_err(W::Error::unsupported_data)?;
     writer.write_value(&raw.path.as_slice()).await?;
     writer.write_value(&raw.hash_algo.as_slice()).await?;
@@ -181,9 +195,8 @@ impl NixSerialize for DerivedPath {
     where
         W: NixWrite,
     {
-        let store_dir = writer.store_dir().clone();
         writer
-            .write_display(store_dir.display(&self.to_legacy_format()))
+            .write_store_dir_display(&self.to_legacy_format())
             .await
     }
 }
@@ -194,10 +207,11 @@ impl NixDeserialize for DerivedPath {
         R: ?Sized + NixRead + Send,
     {
         use crate::de::Error;
-        if let Some(s) = reader.try_read_value::<String>().await? {
+        if let Some(buf) = reader.try_read_bytes().await? {
+            let s = std::str::from_utf8(&buf).map_err(R::Error::invalid_data)?;
             let legacy = reader
                 .store_dir()
-                .parse::<LegacyDerivedPath>(&s)
+                .parse::<LegacyDerivedPath>(s)
                 .map_err(R::Error::invalid_data)?;
             Ok(Some(legacy.0))
         } else {
@@ -211,58 +225,41 @@ impl NixDeserialize for DerivedPath {
 // string form. A tag word of 0 means an opaque store path and 1 means a built
 // path followed by its output name.
 
-fn write_single_derived_path<'a, W>(
-    value: &'a SingleDerivedPath,
-    writer: &'a mut W,
-) -> Pin<Box<dyn Future<Output = Result<(), W::Error>> + Send + 'a>>
-where
-    W: NixWrite,
-{
-    Box::pin(async move {
-        match value {
-            SingleDerivedPath::Opaque(path) => {
-                writer.write_number(0).await?;
-                writer.write_value(path).await
-            }
-            SingleDerivedPath::Built { drv_path, output } => {
-                writer.write_number(1).await?;
-                write_single_derived_path(drv_path, writer).await?;
-                writer.write_value(output).await
-            }
-        }
-    })
-}
-
-fn read_single_derived_path_tail<'a, R>(
-    reader: &'a mut R,
-    tag: u64,
-) -> Pin<Box<dyn Future<Output = Result<SingleDerivedPath, R::Error>> + Send + 'a>>
-where
-    R: ?Sized + NixRead + Send,
-{
-    Box::pin(async move {
-        use crate::de::Error;
-        match tag {
-            0 => Ok(SingleDerivedPath::Opaque(reader.read_value().await?)),
-            1 => {
-                let inner_tag = reader.read_value::<u64>().await?;
-                let drv_path = Arc::new(read_single_derived_path_tail(reader, inner_tag).await?);
-                let output = reader.read_value().await?;
-                Ok(SingleDerivedPath::Built { drv_path, output })
-            }
-            _ => Err(R::Error::invalid_data(std::format_args!(
-                "invalid tag {tag} for single derived path"
-            ))),
-        }
-    })
-}
-
 impl NixSerialize for SingleDerivedPath {
     async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
     where
         W: NixWrite,
     {
-        write_single_derived_path(self, writer).await
+        // Wire format is a linear chain: `1*`, `0`, `<StorePath>`, `<OutputName>*`
+        // from innermost to outermost. Walk iteratively so no future is ever boxed.
+        let mut first_output: Option<&OutputName> = None;
+        let mut deeper_outputs: Vec<&OutputName> = Vec::new();
+        let mut cur = self;
+        let base_path = loop {
+            match cur {
+                SingleDerivedPath::Opaque(path) => {
+                    writer.write_number(0).await?;
+                    break path;
+                }
+                SingleDerivedPath::Built { drv_path, output } => {
+                    writer.write_number(1).await?;
+                    if first_output.is_none() {
+                        first_output = Some(output);
+                    } else {
+                        deeper_outputs.push(output);
+                    }
+                    cur = drv_path;
+                }
+            }
+        };
+        writer.write_value(base_path).await?;
+        for output in deeper_outputs.into_iter().rev() {
+            writer.write_value(output).await?;
+        }
+        if let Some(output) = first_output {
+            writer.write_value(output).await?;
+        }
+        Ok(())
     }
 }
 
@@ -271,11 +268,29 @@ impl NixDeserialize for SingleDerivedPath {
     where
         R: ?Sized + NixRead + Send,
     {
-        if let Some(tag) = reader.try_read_value::<u64>().await? {
-            read_single_derived_path_tail(reader, tag).await.map(Some)
-        } else {
-            Ok(None)
+        use crate::de::Error;
+        let Some(mut tag) = reader.try_read_value::<u64>().await? else {
+            return Ok(None);
+        };
+        let mut depth = 0usize;
+        while tag == 1 {
+            depth += 1;
+            tag = reader.read_value::<u64>().await?;
         }
+        if tag != 0 {
+            return Err(R::Error::invalid_data(std::format_args!(
+                "invalid tag {tag} for single derived path"
+            )));
+        }
+        let mut path = SingleDerivedPath::Opaque(reader.read_value().await?);
+        for _ in 0..depth {
+            let output = reader.read_value().await?;
+            path = SingleDerivedPath::Built {
+                drv_path: Arc::new(path),
+                output,
+            };
+        }
+        Ok(Some(path))
     }
 }
 

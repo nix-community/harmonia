@@ -13,7 +13,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::ProtocolVersion;
 use crate::version::FeatureSet;
-use harmonia_store_path::StoreDir;
+use harmonia_store_path::{StoreDir, StoreDirDisplay};
 use harmonia_utils_io::wire::{ZEROS, calc_padding};
 use harmonia_utils_io::{DEFAULT_BUF_SIZE, RESERVED_BUF_SIZE};
 
@@ -196,6 +196,36 @@ where
         let mut s = Pin::new(self);
         poll_fn(move |cx| s.as_mut().poll_flush_buf(cx)).await
     }
+
+    async fn write_padding(&mut self, padding: usize) -> Result<(), io::Error> {
+        if padding > 0 {
+            if self.remaining_mut() >= padding {
+                self.buf.put_bytes(0, padding);
+            } else {
+                self.write_all(&ZEROS[..padding]).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn write_display_with<F>(&mut self, format: F) -> Result<(), io::Error>
+    where
+        F: FnOnce(&StoreDir, &mut LimitBuffer) -> fmt::Result + Send,
+    {
+        // Ensure that buffer has space for at least display_buf_size bytes
+        if self.remaining_mut() < self.display_buf_size {
+            self.flush_buf().await?;
+        }
+        let offset = self.buf.len();
+        self.buf.put_u64_le(0);
+        if let Err(err) = format(&self.store_dir, &mut self.buf) {
+            self.buf.truncate(offset);
+            return Err(io::Error::unsupported_data(err));
+        }
+        let len = self.buf.len() - offset - 8;
+        BufMut::put_u64_le(&mut &mut self.buf[offset..(offset + 8)], len as u64);
+        self.write_padding(calc_padding(len as u64)).await
+    }
 }
 
 impl<W> AsyncWrite for NixWriter<W>
@@ -337,19 +367,33 @@ where
     }
 
     async fn write_number(&mut self, value: u64) -> Result<(), Self::Error> {
-        self.write_all(&value.to_le_bytes()).await?;
+        if self.remaining_mut() < 8 {
+            self.flush_buf().await?;
+            // Flushing only tops capacity up to `reserved_buf_size`, which can
+            // still leave fewer than 8 free bytes for small buffer settings.
+            if self.remaining_mut() < 8 {
+                return self.write_all(&value.to_le_bytes()).await;
+            }
+        }
+        self.buf.put_u64_le(value);
         Ok(())
     }
 
     async fn write_slice(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         let padding = calc_padding(buf.len() as u64);
-        self.write_value(&buf.len()).await?;
-        self.write_all(buf).await?;
-        if padding > 0 {
-            self.write_all(&ZEROS[..padding]).await
-        } else {
-            Ok(())
+        if let Some(total) = buf.len().checked_add(8 + padding)
+            && total <= self.remaining_mut()
+        {
+            self.buf.put_u64_le(buf.len() as u64);
+            self.buf.put_slice(buf);
+            if padding > 0 {
+                self.buf.put_bytes(0, padding);
+            }
+            return Ok(());
         }
+        self.write_number(buf.len() as u64).await?;
+        self.write_all(buf).await?;
+        self.write_padding(padding).await
     }
 
     async fn write_display<D>(&mut self, msg: D) -> Result<(), Self::Error>
@@ -357,21 +401,17 @@ where
         D: fmt::Display + Send,
         Self: Sized,
     {
-        // Ensure that buffer has space for at least display_buf_size bytes
-        if self.remaining_mut() < self.display_buf_size {
-            self.flush_buf().await?;
-        }
-        let offset = self.buf.len();
-        self.buf.put_u64_le(0);
-        if let Err(err) = write!(self.buf, "{msg}") {
-            self.buf.truncate(offset);
-            return Err(Self::Error::unsupported_data(err));
-        }
-        let len = self.buf.len() - offset - 8;
-        BufMut::put_u64_le(&mut &mut self.buf[offset..(offset + 8)], len as u64);
-        let padding = calc_padding(len as u64);
-        self.write_all(&ZEROS[..padding]).await?;
-        Ok(())
+        self.write_display_with(move |_, buf| write!(buf, "{msg}"))
+            .await
+    }
+
+    async fn write_store_dir_display<D>(&mut self, msg: &D) -> Result<(), Self::Error>
+    where
+        D: StoreDirDisplay + Sync,
+        Self: Sized,
+    {
+        self.write_display_with(|store_dir, buf| write!(buf, "{}", store_dir.display(msg)))
+            .await
     }
 }
 
@@ -420,6 +460,24 @@ mod unittests {
             .build(under);
         writer.write_slice("1234567".as_bytes()).await.unwrap();
         assert_eq!(1, writer.remaining_mut());
+    }
+
+    #[tokio::test]
+    async fn test_write_number_after_short_flush() {
+        // After the first flush only 4 bytes of capacity remain, which is
+        // already >= reserved - capacity, so the reserve is a no-op.
+        let mut out = Vec::new();
+        let mut writer = NixWriterBuilder::default()
+            .set_initial_buf_size(12)
+            .set_reserved_buf_size(8)
+            .build(&mut out);
+        for n in 1..=3u64 {
+            writer.write_number(n).await.unwrap();
+        }
+        writer.flush().await.unwrap();
+        drop(writer);
+        let expected: Vec<u8> = (1..=3u64).flat_map(u64::to_le_bytes).collect();
+        assert_eq!(out, expected);
     }
 
     #[tokio::test]
