@@ -29,6 +29,17 @@ static NIX_BASE32: LazyLock<Encoding> = LazyLock::new(|| {
     spec.encoding().unwrap()
 });
 
+/// Two-character lookup table for 10-bit chunks (high 5 bits first, low 5 bits second).
+const ENCODE_PAIR: [[u8; 2]; 1024] = {
+    let mut table = [[0u8; 2]; 1024];
+    let mut i = 0usize;
+    while i < 1024 {
+        table[i] = [ALPHABET_BYTES[i >> 5], ALPHABET_BYTES[i & 0x1f]];
+        i += 1;
+    }
+    table
+};
+
 pub const fn encode_len(len: usize) -> usize {
     (8 * len).div_ceil(5)
 }
@@ -54,15 +65,18 @@ pub fn encode_string(input: &[u8]) -> String {
     unsafe { String::from_utf8_unchecked(output) }
 }
 
+#[inline(always)]
 fn encode_block(block: &[u8; 5], out: &mut [u8; 8]) {
-    let mut word = [0; 8];
-    word[..5].copy_from_slice(block);
-    let bits = u64::from_le_bytes(word);
-    for (k, c) in out.iter_mut().rev().enumerate() {
-        *c = ALPHABET_BYTES[(bits >> (5 * k)) as usize & 0x1f];
-    }
+    let bits = u64::from(u32::from_le_bytes([block[0], block[1], block[2], block[3]]))
+        | (u64::from(block[4]) << 32);
+    let p0 = ENCODE_PAIR[(bits >> 30) as usize];
+    let p1 = ENCODE_PAIR[((bits >> 20) & 0x3ff) as usize];
+    let p2 = ENCODE_PAIR[((bits >> 10) & 0x3ff) as usize];
+    let p3 = ENCODE_PAIR[(bits & 0x3ff) as usize];
+    *out = [p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]];
 }
 
+#[inline]
 pub fn encode_mut(input: &[u8], output: &mut [u8]) {
     assert_eq!(output.len(), encode_len(input.len()));
     let (blocks, tail) = input.as_chunks::<5>();
@@ -72,11 +86,13 @@ pub fn encode_mut(input: &[u8], output: &mut [u8]) {
         encode_block(block, out);
     }
     if !tail.is_empty() {
-        let mut block = [0; 5];
-        block[..tail.len()].copy_from_slice(tail);
-        let mut out = [0; 8];
-        encode_block(&block, &mut out);
-        head.copy_from_slice(&out[8 - head.len()..]);
+        let mut bits = 0u64;
+        for (i, &b) in tail.iter().enumerate() {
+            bits |= u64::from(b) << (8 * i);
+        }
+        for (k, c) in head.iter_mut().rev().enumerate() {
+            *c = ALPHABET_BYTES[((bits >> (5 * k)) & 0x1f) as usize];
+        }
     }
 }
 
@@ -92,18 +108,30 @@ const DECODE: [u8; 256] = {
     table
 };
 
-fn decode_block(block: &[u8; 8]) -> Option<[u8; 8]> {
-    let mut bits = 0u64;
-    let mut invalid = 0;
-    for (k, &c) in block.iter().rev().enumerate() {
-        let digit = DECODE[usize::from(c)];
-        invalid |= digit;
-        bits |= u64::from(digit) << (5 * k);
-    }
-    (invalid != INVALID).then(|| bits.to_le_bytes())
+/// Decode one 8-char block into its 40-bit value and OR all digit lookup results
+/// into `invalid` (bit 7 becomes set if any byte is outside the alphabet).
+#[inline(always)]
+fn decode_block(block: &[u8; 8], invalid: &mut u8) -> u64 {
+    let d0 = DECODE[usize::from(block[7])];
+    let d1 = DECODE[usize::from(block[6])];
+    let d2 = DECODE[usize::from(block[5])];
+    let d3 = DECODE[usize::from(block[4])];
+    let d4 = DECODE[usize::from(block[3])];
+    let d5 = DECODE[usize::from(block[2])];
+    let d6 = DECODE[usize::from(block[1])];
+    let d7 = DECODE[usize::from(block[0])];
+
+    *invalid |= (d0 | d1) | (d2 | d3) | (d4 | d5) | (d6 | d7);
+
+    let lo =
+        (u64::from(d0) | (u64::from(d1) << 5)) | ((u64::from(d2) << 10) | (u64::from(d3) << 15));
+    let hi = ((u64::from(d4) << 20) | (u64::from(d5) << 25))
+        | ((u64::from(d6) << 30) | (u64::from(d7) << 35));
+    lo | hi
 }
 
-/// Decodes valid input; `None` leaves the error to `data-encoding`.
+/// Decodes valid input; `None` leaves error reporting to `data-encoding`.
+#[inline]
 fn decode_fast(input: &[u8], output: &mut [u8]) -> Option<usize> {
     if decode_len_internal(input.len()) != (input.len(), output.len()) {
         return None;
@@ -111,25 +139,35 @@ fn decode_fast(input: &[u8], output: &mut [u8]) -> Option<usize> {
     let (out_blocks, tail) = output.as_chunks_mut::<5>();
     let (head, blocks) = input.split_at(input.len() - out_blocks.len() * 8);
     let blocks = blocks.as_chunks::<8>().0.iter().rev();
+
+    let mut invalid = 0u8;
     for (block, out) in blocks.zip(out_blocks) {
-        out.copy_from_slice(&decode_block(block)?[..5]);
+        let bits = decode_block(block, &mut invalid);
+        let bytes = bits.to_le_bytes();
+        out.copy_from_slice(&bytes[..5]);
     }
     if !head.is_empty() {
-        let mut block = [ALPHABET_BYTES[0]; 8];
-        block[8 - head.len()..].copy_from_slice(head);
-        let bytes = decode_block(&block)?;
-        if bytes[tail.len()..].iter().any(|&b| b != 0) {
+        let mut bits = 0u64;
+        for &c in head {
+            let digit = DECODE[usize::from(c)];
+            invalid |= digit;
+            bits = (bits << 5) | u64::from(digit);
+        }
+        if (bits >> (tail.len() * 8)) != 0 {
             return None;
         }
+        let bytes = bits.to_le_bytes();
         tail.copy_from_slice(&bytes[..tail.len()]);
+    }
+    if (invalid & 0x80) != 0 {
+        return None;
     }
     Some(output.len())
 }
 
-pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartial> {
-    if let Some(len) = decode_fast(input, output) {
-        return Ok(len);
-    }
+#[cold]
+#[inline(never)]
+fn decode_slow(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartial> {
     let reversed: Vec<u8> = input.iter().rev().copied().collect();
     NIX_BASE32.decode_mut(&reversed, output).map_err(|err| {
         // Adjust error position to account for reversal
@@ -143,6 +181,13 @@ pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartia
             },
         }
     })
+}
+
+pub fn decode_mut(input: &[u8], output: &mut [u8]) -> Result<usize, DecodePartial> {
+    if let Some(len) = decode_fast(input, output) {
+        return Ok(len);
+    }
+    decode_slow(input, output)
 }
 
 #[cfg(test)]

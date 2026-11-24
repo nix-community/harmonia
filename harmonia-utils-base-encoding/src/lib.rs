@@ -14,22 +14,27 @@
 
 pub mod base32;
 
+use std::fmt;
+
 use data_encoding::{BASE64, DecodePartial, HEXLOWER_PERMISSIVE};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 /// Calculate the length of a base64 encoded string for a given decoded byte size
 pub const fn base64_len(len: usize) -> usize {
     ((4 * len / 3) + 3) & !3
 }
 
-#[derive(derive_more::Display, Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Base {
-    #[display("base16")]
     Hex,
-    #[display("nixbase32")]
     NixBase32,
-    #[display("base64")]
     Base64,
+}
+
+impl fmt::Display for Base {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl Serialize for Base {
@@ -37,7 +42,7 @@ impl Serialize for Base {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -46,20 +51,46 @@ impl<'de> Deserialize<'de> for Base {
     where
         D: Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "base16" => Ok(Base::Hex),
-            "base64" => Ok(Base::Base64),
-            "nix32" | "nixbase32" => Ok(Base::NixBase32),
-            _ => Err(serde::de::Error::unknown_variant(
-                &s,
-                &["base16", "base64", "nix32", "nixbase32"],
-            )),
+        struct BaseVisitor;
+
+        impl de::Visitor<'_> for BaseVisitor {
+            type Value = Base;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a base encoding name")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match v {
+                    "base16" => Ok(Base::Hex),
+                    "base64" => Ok(Base::Base64),
+                    "nix32" | "nixbase32" => Ok(Base::NixBase32),
+                    _ => Err(de::Error::unknown_variant(
+                        v,
+                        &["base16", "base64", "nix32", "nixbase32"],
+                    )),
+                }
+            }
         }
+
+        deserializer.deserialize_str(BaseVisitor)
     }
 }
 
 impl Base {
+    /// Return the canonical string name of this base encoding.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Base::Hex => "base16",
+            Base::NixBase32 => "nixbase32",
+            Base::Base64 => "base64",
+        }
+    }
+
     /// Calculate the encoded string length for a given decoded byte size
     #[inline]
     pub const fn input_len(&self, decoded_size: usize) -> usize {
