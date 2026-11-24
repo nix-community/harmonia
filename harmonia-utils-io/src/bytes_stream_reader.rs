@@ -134,10 +134,15 @@ where
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        let rem = ready!(self.as_mut().poll_fill_buf(cx))?;
-        let amt = rem.len().min(buf.remaining());
-        buf.put_slice(&rem[..amt]);
-        self.consume(amt);
+        if self.buf.is_empty() {
+            let chunk = ready!(self.as_mut().poll_next_chunk(cx))?;
+            *self.as_mut().project().buf = chunk;
+        }
+        let amt = self.buf.len().min(buf.remaining());
+        if amt > 0 {
+            buf.put_slice(&self.buf[..amt]);
+            self.consume(amt);
+        }
         Poll::Ready(Ok(()))
     }
 }
