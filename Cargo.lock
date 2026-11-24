@@ -1332,6 +1332,7 @@ dependencies = [
 name = "harmonia-store-ref-scan"
 version = "0.0.0-alpha.0"
 dependencies = [
+ "foldhash",
  "futures-util",
  "harmonia-file-nar",
  "harmonia-store-path",

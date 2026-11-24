@@ -14,13 +14,12 @@
 //! we use the same approach as Nix's `search()` in `references.cc`:
 //!
 //! 1. Slide a window of [`HASH_LEN`] bytes across the input.
-//! 2. For each window position, validate characters right-to-left against
-//!    the nix-base32 alphabet. If an invalid character is found at offset j,
-//!    skip ahead by j+1 positions (Boyer-Moore style).
-//! 3. When a valid 32-byte window is found, look it up in a `HashSet`.
-//!
-//! This gives O(n/32) amortized performance on binary data (most bytes are
-//! not in the nix-base32 alphabet), independent of the number of candidates.
+//! 2. Validate trailing bytes of each window against the nix-base32 alphabet
+//!    to skip invalid regions (Boyer-Moore style). Large chunks run four
+//!    independent lanes in parallel to hide lookup latency.
+//! 3. When a valid 32-byte window is found, check a compact blocked bloom
+//!    filter before probing the hash map, then extend through consecutive
+//!    valid bytes in O(1) per byte.
 //!
 //! # Integration with NAR streaming
 //!
@@ -29,26 +28,70 @@
 //! NAR serialization (for hash computation) without a separate disk walk,
 //! matching Nix's `TeeSink{refsSink, hashSink}` pattern.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
+use foldhash::{HashMap, HashMapExt as _};
 use harmonia_store_path::{StorePath, StorePathHash};
+use harmonia_utils_base_encoding::base32;
 
 /// Encoded length of a store path hash in nix-base32 (32 bytes).
 const HASH_LEN: usize = StorePathHash::encoded_len();
 
-/// 256-byte lookup table: `true` for bytes that are valid nix-base32 characters.
-///
-/// Built from the canonical alphabet in [`harmonia_utils_base_encoding::base32`].
-const NIX_BASE32_VALID: [bool; 256] = {
-    let mut table = [false; 256];
-    let chars = harmonia_utils_base_encoding::base32::ALPHABET_BYTES;
+/// Maximum number of bytes from a previous chunk that can participate in a
+/// cross-boundary match (31 bytes).
+const OVERLAP_LEN: usize = HASH_LEN - 1;
+
+/// Minimum chunk length to split across four interleaved scan lanes.
+const PARALLEL_LANES_MIN_LEN: usize = 512;
+
+/// 256-byte lookup table: `1` for bytes that are valid nix-base32 characters,
+/// `0` otherwise.
+const NIX_BASE32_VALID: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let chars = base32::ALPHABET_BYTES;
     let mut i = 0;
     while i < chars.len() {
-        table[chars[i] as usize] = true;
+        table[chars[i] as usize] = 1;
         i += 1;
     }
     table
 };
+
+/// Single-word blocked Bloom filter (1 KiB, 128 x 64-bit blocks, 2 bits per key)
+/// keyed on the last 8 bytes of each candidate hash.
+///
+/// A lookup loads one 64-bit word from L1 cache and rejects false-positive
+/// valid base32 windows before touching the hash map.
+struct HashFilter {
+    words: [u64; 128],
+}
+
+impl HashFilter {
+    fn new() -> Self {
+        Self { words: [0u64; 128] }
+    }
+
+    #[inline]
+    fn slot(hash: &[u8; HASH_LEN]) -> (usize, u64) {
+        let tail = u64::from_le_bytes(*hash.last_chunk::<8>().expect("HASH_LEN >= 8"));
+        let h = tail.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        let word = (h >> 57) as usize;
+        let mask = (1u64 << ((h >> 51) & 63)) | (1u64 << ((h >> 45) & 63));
+        (word, mask)
+    }
+
+    #[inline]
+    fn insert(&mut self, hash: &[u8; HASH_LEN]) {
+        let (word, mask) = Self::slot(hash);
+        self.words[word] |= mask;
+    }
+
+    #[inline]
+    fn may_contain(&self, hash: &[u8; HASH_LEN]) -> bool {
+        let (word, mask) = Self::slot(hash);
+        (self.words[word] & mask) == mask
+    }
+}
 
 /// A streaming reference scanner that finds store path hashes in byte data.
 ///
@@ -65,14 +108,16 @@ const NIX_BASE32_VALID: [bool; 256] = {
 /// let references = sink.found_paths();
 /// ```
 pub struct RefScanSink {
-    /// Hash strings we're still looking for (removed on match, like Nix).
-    pending: HashSet<[u8; HASH_LEN]>,
-    /// Hash strings we've found so far.
-    seen: HashSet<[u8; HASH_LEN]>,
-    /// Map from hash bytes back to StorePath for result construction.
-    back_map: Vec<([u8; HASH_LEN], StorePath)>,
-    /// Tail bytes from the previous chunk for boundary matching.
-    tail: Vec<u8>,
+    /// Candidate hashes we are still looking for (removed on match, like Nix).
+    pending: HashMap<[u8; HASH_LEN], StorePath>,
+    /// Store paths found so far.
+    found: BTreeSet<StorePath>,
+    /// Compact prefilter over all initial candidates.
+    filter: HashFilter,
+    /// Trailing bytes from previous chunks for boundary matching.
+    tail: [u8; OVERLAP_LEN],
+    /// Number of valid bytes currently stored in `tail`.
+    tail_len: u8,
 }
 
 impl RefScanSink {
@@ -80,130 +125,207 @@ impl RefScanSink {
     ///
     /// `candidates` is the set of store paths to search for (typically all
     /// build inputs). `self_path` is the output path itself, for detecting
-    /// self-references.
+    /// self-references; it may also appear in `candidates`.
+    ///
+    /// Each candidate must have a distinct hash part, as Nix's
+    /// `PathRefScanSink::fromPaths` asserts. Store paths are addressed by
+    /// their hash, so a real store never yields two paths that share one; if
+    /// such candidates are passed anyway, only the first is reported.
     pub fn new(candidates: &BTreeSet<StorePath>, self_path: Option<&StorePath>) -> Self {
-        let mut pending = HashSet::with_capacity(candidates.len() + 1);
-        let mut back_map = Vec::with_capacity(candidates.len() + 1);
+        let cap = candidates.len() + usize::from(self_path.is_some());
+        let mut pending = HashMap::with_capacity(cap);
+        let mut filter = HashFilter::new();
 
         for sp in candidates {
             let hash_bytes = hash_to_bytes(sp);
-            pending.insert(hash_bytes);
-            back_map.push((hash_bytes, sp.clone()));
+            debug_assert!(
+                !pending.contains_key(&hash_bytes),
+                "reference candidates share a hash part: {sp}"
+            );
+            filter.insert(&hash_bytes);
+            pending.entry(hash_bytes).or_insert_with(|| sp.clone());
         }
-
         if let Some(sp) = self_path {
             let hash_bytes = hash_to_bytes(sp);
-            if pending.insert(hash_bytes) {
-                back_map.push((hash_bytes, sp.clone()));
-            }
+            filter.insert(&hash_bytes);
+            pending.entry(hash_bytes).or_insert_with(|| sp.clone());
         }
 
         Self {
             pending,
-            seen: HashSet::new(),
-            back_map,
-            tail: Vec::with_capacity(HASH_LEN),
+            found: BTreeSet::new(),
+            filter,
+            tail: [0u8; OVERLAP_LEN],
+            tail_len: 0,
         }
     }
 
     /// Feed a chunk of bytes to the scanner.
     ///
-    /// Handles boundary matches by keeping a tail buffer from the previous
-    /// chunk. This mirrors Nix's `RefScanSink::operator()`.
+    /// Handles boundary matches by keeping a fixed stack tail buffer from
+    /// previous chunks without heap allocation.
     pub fn feed(&mut self, data: &[u8]) {
+        if self.pending.is_empty() || data.is_empty() {
+            return;
+        }
+
+        let prev_len = self.tail_len as usize;
+        if prev_len > 0 && prev_len + data.len() >= HASH_LEN {
+            let head_len = data.len().min(OVERLAP_LEN);
+            let mut overlap = [0u8; OVERLAP_LEN * 2];
+            overlap[..prev_len].copy_from_slice(&self.tail[..prev_len]);
+            overlap[prev_len..prev_len + head_len].copy_from_slice(&data[..head_len]);
+            self.search(&overlap[..prev_len + head_len]);
+            if self.pending.is_empty() {
+                return;
+            }
+        }
+
+        self.search(data);
         if self.pending.is_empty() {
             return;
         }
 
-        // Mirrors Nix's RefScanSink::operator() exactly.
-        let tail_len = data.len().min(HASH_LEN);
-
-        // Search the overlap region: copy of old tail + start of new data.
-        // Uses a separate buffer so self.tail can be rebuilt independently.
-        if !self.tail.is_empty() {
-            let mut overlap = self.tail.clone();
-            overlap.extend_from_slice(&data[..tail_len]);
-            search(&overlap, &mut self.pending, &mut self.seen);
+        let take = data.len().min(OVERLAP_LEN);
+        let keep = (OVERLAP_LEN - take).min(prev_len);
+        if keep > 0 && keep < prev_len {
+            self.tail.copy_within(prev_len - keep..prev_len, 0);
         }
-
-        // Search the current chunk itself.
-        search(data, &mut self.pending, &mut self.seen);
-
-        // Rebuild tail: keep up to HASH_LEN bytes total
-        // (suffix of old tail + suffix of new data).
-        let rest = HASH_LEN - tail_len;
-        if rest < self.tail.len() {
-            self.tail.drain(..self.tail.len() - rest);
-        }
-        self.tail.extend_from_slice(&data[data.len() - tail_len..]);
+        self.tail[keep..keep + take].copy_from_slice(&data[data.len() - take..]);
+        self.tail_len = (keep + take) as u8;
     }
 
     /// Returns the set of store paths whose hashes were found.
     pub fn found_paths(&self) -> BTreeSet<StorePath> {
-        let mut result = BTreeSet::new();
-        for (hash_bytes, store_path) in &self.back_map {
-            if self.seen.contains(hash_bytes) {
-                result.insert(store_path.clone());
-            }
-        }
-        result
-    }
-}
-
-/// Convert a store path's hash to a fixed-size byte array for zero-alloc lookups.
-fn hash_to_bytes(sp: &StorePath) -> [u8; HASH_LEN] {
-    let s = sp.hash().to_string();
-    let mut buf = [0u8; HASH_LEN];
-    buf.copy_from_slice(s.as_bytes());
-    buf
-}
-
-/// Core search algorithm matching Nix's `search()` in `references.cc`.
-///
-/// Scans `data` for valid nix-base32 windows of length [`HASH_LEN`].
-/// Uses right-to-left character validation with Boyer-Moore-style skipping:
-/// when an invalid character is found at offset j within the window,
-/// advance by j+1 positions. On random binary data this skips ~32 bytes
-/// per invalid character, giving O(n/32) amortized performance.
-///
-/// Matched hashes are moved from `pending` to `seen`.
-#[inline]
-fn search(data: &[u8], pending: &mut HashSet<[u8; HASH_LEN]>, seen: &mut HashSet<[u8; HASH_LEN]>) {
-    if data.len() < HASH_LEN {
-        return;
+        self.found.clone()
     }
 
-    let mut i = 0;
-    while i + HASH_LEN <= data.len() {
-        // Fixed-size window: the single bounds check here lets the compiler
-        // elide the per-byte checks on `window[j]` (j < HASH_LEN) below.
-        let window: &[u8; HASH_LEN] = data[i..i + HASH_LEN]
+    /// Verify `data[i..i + HASH_LEN]` (given its last `checked_tail` bytes are
+    /// already known valid), handle any contiguous valid run, and return the
+    /// next start index to scan.
+    #[inline(never)]
+    fn check_candidate_window(
+        &mut self,
+        data: &[u8],
+        mut i: usize,
+        end_excl: usize,
+        checked_tail: usize,
+    ) -> usize {
+        let slice = &data[..end_excl + HASH_LEN - 1];
+        let mut candidate: &[u8; HASH_LEN] = slice[i..i + HASH_LEN]
             .try_into()
             .expect("slice length matches HASH_LEN");
 
-        // Scan the window right-to-left for valid nix-base32 characters.
-        let mut j = HASH_LEN;
-        let mut invalid = false;
+        let mut j = HASH_LEN - checked_tail;
         while j > 0 {
             j -= 1;
-            if !NIX_BASE32_VALID[window[j] as usize] {
-                i += j + 1;
-                invalid = true;
-                break;
+            if NIX_BASE32_VALID[candidate[j] as usize] == 0 {
+                return i + j + 1;
             }
         }
-        // `j` alone cannot signal this: an invalid char at j==0 leaves j==0,
-        // just like a fully-valid window.
-        if invalid {
-            continue;
-        }
 
-        if pending.remove(window) {
-            seen.insert(*window);
+        loop {
+            if self.filter.may_contain(candidate)
+                && let Some(sp) = self.pending.remove(candidate)
+            {
+                self.found.insert(sp);
+                if self.pending.is_empty() {
+                    return end_excl;
+                }
+            }
+            i += 1;
+            if i >= end_excl {
+                return end_excl;
+            }
+            candidate = slice[i..i + HASH_LEN]
+                .try_into()
+                .expect("slice length matches HASH_LEN");
+            if NIX_BASE32_VALID[candidate[HASH_LEN - 1] as usize] == 0 {
+                return i + HASH_LEN;
+            }
         }
-
-        i += 1;
     }
+
+    /// Scan start indices `start..end_excl` in `data`
+    /// (requires `end_excl + HASH_LEN - 1 <= data.len()`).
+    #[inline]
+    fn search_range(&mut self, data: &[u8], mut i: usize, end_excl: usize) {
+        if self.pending.is_empty() {
+            return;
+        }
+        while i < end_excl {
+            if NIX_BASE32_VALID[data[i + HASH_LEN - 1] as usize] == 0 {
+                i += HASH_LEN;
+                continue;
+            }
+            i = self.check_candidate_window(data, i, end_excl, 1);
+            if self.pending.is_empty() {
+                return;
+            }
+        }
+    }
+
+    #[inline]
+    fn search(&mut self, data: &[u8]) {
+        if data.len() < HASH_LEN || self.pending.is_empty() {
+            return;
+        }
+        let total_starts = data.len() - HASH_LEN + 1;
+        if data.len() < PARALLEL_LANES_MIN_LEN {
+            self.search_range(data, 0, total_starts);
+            return;
+        }
+
+        // Partition start indices into four disjoint quarters so four
+        // independent cursors advance in parallel without loop-carried stalls.
+        let q = total_starts / 4;
+        let mut pos = [0, q, q * 2, q * 3];
+        let end = [q, q * 2, q * 3, total_starts];
+
+        while pos[0] < end[0] && pos[1] < end[1] && pos[2] < end[2] && pos[3] < end[3] {
+            let mut last = [0u8; 4];
+            let mut hits = [0u8; 4];
+            for lane in 0..4 {
+                let tail: &[u8; 2] = data[pos[lane] + HASH_LEN - 2..pos[lane] + HASH_LEN]
+                    .try_into()
+                    .expect("slice length matches 2");
+                let a = NIX_BASE32_VALID[tail[1] as usize];
+                let b = NIX_BASE32_VALID[tail[0] as usize];
+                last[lane] = a;
+                hits[lane] = a & b;
+            }
+
+            if (hits[0] | hits[1] | hits[2] | hits[3]) == 0 {
+                for lane in 0..4 {
+                    pos[lane] += HASH_LEN - (last[lane] as usize);
+                }
+                continue;
+            }
+
+            for lane in 0..4 {
+                if hits[lane] != 0 {
+                    pos[lane] = self.check_candidate_window(data, pos[lane], end[lane], 2);
+                } else {
+                    pos[lane] += HASH_LEN - (last[lane] as usize);
+                }
+            }
+            if self.pending.is_empty() {
+                return;
+            }
+        }
+
+        for lane in 0..4 {
+            self.search_range(data, pos[lane], end[lane]);
+        }
+    }
+}
+
+/// Encode a store path hash directly into a fixed-size stack byte array.
+#[inline]
+fn hash_to_bytes(sp: &StorePath) -> [u8; HASH_LEN] {
+    let mut buf = [0u8; HASH_LEN];
+    base32::encode_mut(sp.hash().as_ref(), &mut buf);
+    buf
 }
 
 #[cfg(test)]
@@ -231,7 +353,7 @@ mod tests {
         sink.found_paths()
     }
 
-    /// Output file containing an input's hash part → input is discovered as a reference.
+    /// Output file containing an input's hash part -> input is discovered as a reference.
     #[test]
     fn test_scan_finds_input_reference() {
         let input = StorePath::from_base_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-input").unwrap();
@@ -248,7 +370,7 @@ mod tests {
         assert!(refs.contains(&input), "Should discover input as reference");
     }
 
-    /// Output containing its own hash part → self-reference detected.
+    /// Output containing its own hash part -> self-reference detected.
     #[test]
     fn test_scan_finds_self_reference() {
         let self_path = StorePath::from_base_path("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-self").unwrap();
@@ -289,6 +411,34 @@ mod tests {
                 "Should find reference with chunk_size={chunk_size}"
             );
         }
+    }
+
+    #[test]
+    fn test_scan_across_lane_boundaries() {
+        let sp = StorePath::from_base_path("0123456789abcdfghijklmnpqrsvwxyz-lane").unwrap();
+        let mut cands = BTreeSet::new();
+        cands.insert(sp.clone());
+        let hash = b"0123456789abcdfghijklmnpqrsvwxyz";
+        for off in 0..=(1024 - HASH_LEN) {
+            let mut buf = vec![b'e'; 1024];
+            buf[off..off + HASH_LEN].copy_from_slice(hash);
+            let mut sink = RefScanSink::new(&cands, None);
+            sink.feed(&buf);
+            assert!(sink.found_paths().contains(&sp), "missed offset {off}");
+        }
+    }
+
+    #[test]
+    fn test_scan_overlapping_valid_run() {
+        let a = StorePath::from_base_path("0123456789abcdfghijklmnpqrsvwxyz-first").unwrap();
+        let b = StorePath::from_base_path("123456789abcdfghijklmnpqrsvwxyz0-second").unwrap();
+        let mut candidates = BTreeSet::new();
+        candidates.insert(a.clone());
+        candidates.insert(b.clone());
+
+        let mut sink = RefScanSink::new(&candidates, None);
+        sink.feed(b"0123456789abcdfghijklmnpqrsvwxyz0");
+        assert_eq!(sink.found_paths(), candidates);
     }
 
     /// Input reference discovered when scanning over a NAR stream.
