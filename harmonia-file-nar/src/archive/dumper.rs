@@ -162,7 +162,7 @@ fn open_regular_file(path: &Path) -> io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
-        opts.custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits());
+        opts.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
     }
     opts.open(path)
 }

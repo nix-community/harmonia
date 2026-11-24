@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Write as _};
-use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,13 +11,12 @@ use std::sync::Arc;
 use bytes::Bytes;
 use derive_more::Display;
 use futures_core::Stream;
-use nix::errno::Errno;
-use nix::fcntl::{AT_FDCWD, OFlag, openat};
-use nix::sys::stat::{
-    FchmodatFlags, Mode, UtimensatFlags, fchmod, fchmodat, fstat, futimens, mkdirat, utimensat,
+use rustix::fs::{
+    AtFlags, CWD, Mode, OFlags, Timespec, Timestamps, UTIME_OMIT, chmodat, fchmod, fstat, futimens,
+    mkdirat, openat, symlinkat, utimensat,
 };
-use nix::sys::time::TimeSpec;
-use nix::unistd::symlinkat;
+use rustix::io::Errno;
+use rustix::path::Arg;
 use thiserror::Error;
 use tokio::io::{AsyncBufRead, AsyncReadExt as _};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
@@ -424,7 +423,16 @@ fn write(
     disk.close_file()
 }
 
-const CANONICAL_MTIME: TimeSpec = TimeSpec::new(1, 0);
+const CANONICAL_TIMESTAMPS: Timestamps = Timestamps {
+    last_access: Timespec {
+        tv_sec: 0,
+        tv_nsec: UTIME_OMIT,
+    },
+    last_modification: Timespec {
+        tv_sec: 1,
+        tv_nsec: 0,
+    },
+};
 
 /// Whether files `openat` already gave the canonical mode may skip `fchmod`.
 /// Not on FreeBSD: ZFS's default `aclmode=discard` makes chmod also drop
@@ -434,23 +442,17 @@ const SKIP_EXACT_FCHMOD: bool = cfg!(any(target_os = "linux", target_os = "macos
 /// `O_NOFOLLOW` ensures we hold the directory we created, not a symlink that
 /// replaced it. `O_PATH` needs no read permission, which Landlock rules that
 /// only allow creating entries (like nix-store-csi's) don't grant.
-const DIR_FLAGS: OFlag = {
-    let flags = OFlag::O_DIRECTORY
-        .union(OFlag::O_NOFOLLOW)
-        .union(OFlag::O_CLOEXEC);
+const DIR_FLAGS: OFlags = {
+    let flags = OFlags::DIRECTORY
+        .union(OFlags::NOFOLLOW)
+        .union(OFlags::CLOEXEC);
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    let flags = flags.union(OFlag::O_PATH);
+    let flags = flags.union(OFlags::PATH);
     flags
 };
 
-fn set_canonical_mtime(dir: BorrowedFd<'_>, name: &OsStr) -> Result<(), Errno> {
-    utimensat(
-        dir,
-        name,
-        &TimeSpec::UTIME_OMIT,
-        &CANONICAL_MTIME,
-        UtimensatFlags::NoFollowSymlink,
-    )
+fn set_canonical_mtime(dir: impl AsFd, name: impl Arg) -> Result<(), Errno> {
+    utimensat(dir, name, &CANONICAL_TIMESTAMPS, AtFlags::SYMLINK_NOFOLLOW)
 }
 
 fn append((path, file): &mut (PathBuf, File), data: &[u8]) -> Result<(), NarWriteError> {
@@ -477,7 +479,7 @@ impl Disk {
         match (self.dirs.last(), path.file_name()) {
             (Some((_, dir)), Some(name)) => (dir.as_fd(), name),
             // The root.
-            _ => (AT_FDCWD, path.as_os_str()),
+            _ => (CWD, path.as_os_str()),
         }
     }
 
@@ -498,9 +500,9 @@ impl Disk {
                     // The mode only applies to later opens.
                     mode &= !0o222;
                 }
-                let mode = Mode::from_bits_truncate(mode);
+                let mode = Mode::from_raw_mode(mode);
                 // `O_EXCL` also refuses to follow a symlink.
-                let flags = OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC;
+                let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC;
                 let err = |err: Errno| NarWriteError::create_file_error(path.clone(), err.into());
                 let (dir, name) = self.locate(&path);
                 let created = openat(dir, name, flags, mode).map_err(err)?;
@@ -511,7 +513,7 @@ impl Disk {
                     let exact = self.exact_mode[usize::from(executable)].get_or_insert_with(|| {
                         SKIP_EXACT_FCHMOD
                             && fstat(&created)
-                                .is_ok_and(|st| Mode::from_bits_truncate(st.st_mode) == mode)
+                                .is_ok_and(|st| Mode::from_raw_mode(st.st_mode) == mode)
                     });
                     if !*exact {
                         fchmod(&created, mode).map_err(err)?;
@@ -524,8 +526,12 @@ impl Disk {
                 self.close_file()?;
                 let err = |err: Errno| NarWriteError::create_dir_error(path.clone(), err.into());
                 let (dir, name) = self.locate(&path);
-                mkdirat(dir, name, Mode::from_bits_truncate(0o777)).map_err(err)?;
-                let opened = openat(dir, name, DIR_FLAGS, Mode::empty()).map_err(err)?;
+                let opened = name
+                    .into_with_c_str(|name| {
+                        mkdirat(dir, name, Mode::from_raw_mode(0o777))?;
+                        openat(dir, name, DIR_FLAGS, Mode::empty())
+                    })
+                    .map_err(err)?;
                 self.dirs.push((path, opened));
             }
             Op::CreateSymlink(path, target) => {
@@ -533,25 +539,23 @@ impl Disk {
                 let err =
                     |err: Errno| NarWriteError::create_symlink_error(path.clone(), err.into());
                 let (dir, name) = self.locate(&path);
-                symlinkat(OsStr::from_bytes(&target), dir, name).map_err(err)?;
-                if self.canonical {
-                    set_canonical_mtime(dir, name).map_err(err)?;
-                }
+                name.into_with_c_str(|name| {
+                    symlinkat(target.as_ref(), dir, name)?;
+                    if self.canonical {
+                        set_canonical_mtime(dir, name)?;
+                    }
+                    Ok(())
+                })
+                .map_err(err)?;
             }
             Op::EndDirectory => {
                 self.close_file()?;
                 let (path, dir) = self.dirs.pop().expect("a directory ends after it starts");
                 if self.canonical {
                     // `fchmod` fails on an `O_PATH` descriptor, but "." works.
-                    let here = OsStr::new(".");
-                    fchmodat(
-                        dir.as_fd(),
-                        here,
-                        Mode::from_bits_truncate(0o555),
-                        FchmodatFlags::FollowSymlink,
-                    )
-                    .and_then(|()| set_canonical_mtime(dir.as_fd(), here))
-                    .map_err(|err| NarWriteError::create_dir_error(path, err.into()))?;
+                    chmodat(&dir, c".", Mode::from_raw_mode(0o555), AtFlags::empty())
+                        .and_then(|()| set_canonical_mtime(&dir, c"."))
+                        .map_err(|err| NarWriteError::create_dir_error(path, err.into()))?;
                 }
             }
         }
@@ -572,7 +576,7 @@ impl Disk {
         if let Some((path, file)) = self.file.take()
             && self.canonical
         {
-            futimens(&file, &TimeSpec::UTIME_OMIT, &CANONICAL_MTIME)
+            futimens(&file, &CANONICAL_TIMESTAMPS)
                 .map_err(|err| NarWriteError::create_file_error(path, err.into()))?;
         }
         Ok(())
@@ -1006,8 +1010,8 @@ mod unittests {
     #[case::none(0o022)]
     #[case::executables(0o011)]
     #[case::all(0o077)]
-    async fn test_restore_canonical_umask(#[case] mask: nix::libc::mode_t) {
-        use nix::sys::stat::umask;
+    async fn test_restore_canonical_umask(#[case] mask: rustix::fs::RawMode) {
+        use rustix::process::umask;
 
         struct Restore(Mode);
         impl Drop for Restore {
@@ -1023,7 +1027,7 @@ mod unittests {
         // if both kinds share one check.
         let mut events = test_data::dir_example();
         events.insert(1, file(b"a"));
-        let old = Restore(umask(Mode::from_bits_truncate(mask)));
+        let old = Restore(umask(Mode::from_raw_mode(mask)));
         let restored = RestoreOptions::new()
             .canonical(true)
             .restore(iter(events.clone()).map(Ok::<_, NarWriteError>), &path)
