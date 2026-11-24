@@ -23,6 +23,45 @@ pub use store_dir::{FromStoreDirStr, StoreDir, StoreDirDisplay, StoreDirError};
 
 pub type StorePathSet = BTreeSet<StorePath>;
 
+pub(crate) fn deserialize_from_str<'de, D, T>(
+    deserializer: D,
+    expecting: &'static str,
+) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    struct Visitor<T> {
+        expecting: &'static str,
+        _marker: std::marker::PhantomData<T>,
+    }
+
+    impl<T> serde::de::Visitor<'_> for Visitor<T>
+    where
+        T: std::str::FromStr,
+        T::Err: std::fmt::Display,
+    {
+        type Value = T;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.expecting)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            v.parse().map_err(serde::de::Error::custom)
+        }
+    }
+
+    deserializer.deserialize_str(Visitor {
+        expecting,
+        _marker: std::marker::PhantomData,
+    })
+}
+
 #[cfg(any(test, feature = "test"))]
 pub mod proptest {
     pub use super::path::proptest::*;
