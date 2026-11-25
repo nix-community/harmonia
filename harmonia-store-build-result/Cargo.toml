@@ -17,7 +17,6 @@ num_enum                  = { workspace = true }
 proptest                  = { workspace = true, optional = true }
 proptest-derive           = { workspace = true, optional = true }
 serde                     = { workspace = true }
-serde_json                = { workspace = true }
 
 [dev-dependencies]
 harmonia-store-build-result = { path = ".", features = [ "test" ] }
