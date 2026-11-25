@@ -6,9 +6,10 @@ use harmonia_store_content_address::{
 use harmonia_store_derivation::derivation::DerivationOutput;
 use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{
-    ParseStorePathError, StoreDir, StorePath, StorePathName, StorePathNameError,
+    ParseStorePathError, StoreDir, StorePath, StorePathHash, StorePathName, StorePathNameError,
 };
-use harmonia_utils_base_encoding::Base;
+use harmonia_utils_base_encoding::{Base, base32};
+use harmonia_utils_hash::Algorithm;
 use harmonia_utils_hash::fmt::{NonSRI, ParseHashError, ParseHashErrorKind};
 
 /// Error from decoding raw output fields into a typed output.
@@ -106,6 +107,40 @@ pub trait AtermOutput: Sized {
     ) -> Result<Self, Self::Error>;
 }
 
+fn store_path_bytes(store_dir: &StoreDir, path: &StorePath) -> Vec<u8> {
+    let dir = store_dir.to_str().as_bytes();
+    let need_sep = !dir.is_empty() && !dir.ends_with(b"/");
+    let name = path.name().as_bytes();
+    let hash_len = StorePathHash::encoded_len();
+    let mut out = Vec::with_capacity(dir.len() + usize::from(need_sep) + hash_len + 1 + name.len());
+    out.extend_from_slice(dir);
+    if need_sep {
+        out.push(b'/');
+    }
+    let hash_start = out.len();
+    out.resize(hash_start + hash_len, 0);
+    base32::encode_mut(path.hash().as_ref(), &mut out[hash_start..]);
+    out.push(b'-');
+    out.extend_from_slice(name);
+    out
+}
+
+const fn cama_as_bytes(cama: ContentAddressMethodAlgorithm) -> &'static [u8] {
+    match cama {
+        ContentAddressMethodAlgorithm::Text => b"text:sha256",
+        ContentAddressMethodAlgorithm::Flat(Algorithm::MD5) => b"md5",
+        ContentAddressMethodAlgorithm::Flat(Algorithm::SHA1) => b"sha1",
+        ContentAddressMethodAlgorithm::Flat(Algorithm::SHA256) => b"sha256",
+        ContentAddressMethodAlgorithm::Flat(Algorithm::SHA512) => b"sha512",
+        ContentAddressMethodAlgorithm::Flat(Algorithm::BLAKE3) => b"blake3",
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::MD5) => b"r:md5",
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA1) => b"r:sha1",
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256) => b"r:sha256",
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA512) => b"r:sha512",
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::BLAKE3) => b"r:blake3",
+    }
+}
+
 impl AtermOutput for DerivationOutput {
     type Error = FromRawOutputError;
 
@@ -116,16 +151,9 @@ impl AtermOutput for DerivationOutput {
         output_name: &OutputName,
         base: Base,
     ) -> Result<RawOutput, StorePathNameError> {
-        let path_bytes = |p: &StorePath| -> Vec<u8> {
-            p.to_absolute_path(store_dir)
-                .to_string_lossy()
-                .into_owned()
-                .into_bytes()
-        };
-
         Ok(match self {
             DerivationOutput::InputAddressed(path) => RawOutput {
-                path: path_bytes(path),
+                path: store_path_bytes(store_dir, path),
                 hash_algo: Vec::new(),
                 hash: Vec::new(),
             },
@@ -134,26 +162,24 @@ impl AtermOutput for DerivationOutput {
                     .path(store_dir, drv_name, output_name)?
                     .expect("CAFixed always has a path");
                 RawOutput {
-                    path: path_bytes(&path),
-                    hash_algo: ca.method_algorithm().to_string().into_bytes(),
+                    path: store_path_bytes(store_dir, &path),
+                    hash_algo: cama_as_bytes(ca.method_algorithm()).to_vec(),
                     hash: {
-                        let mut hash = vec![0u8; base.input_len(ca.hash().digest_bytes().len())];
-                        harmonia_utils_base_encoding::encode_for_base(base)(
-                            ca.hash().digest_bytes(),
-                            &mut hash,
-                        );
+                        let digest = ca.hash().digest_bytes();
+                        let mut hash = vec![0u8; base.input_len(digest.len())];
+                        harmonia_utils_base_encoding::encode_for_base(base)(digest, &mut hash);
                         hash
                     },
                 }
             }
             DerivationOutput::CAFloating(cama) => RawOutput {
                 path: Vec::new(),
-                hash_algo: cama.to_string().into_bytes(),
+                hash_algo: cama_as_bytes(*cama).to_vec(),
                 hash: Vec::new(),
             },
             DerivationOutput::Impure(cama) => RawOutput {
                 path: Vec::new(),
-                hash_algo: cama.to_string().into_bytes(),
+                hash_algo: cama_as_bytes(*cama).to_vec(),
                 hash: b"impure".to_vec(),
             },
             DerivationOutput::Deferred => RawOutput {
@@ -253,6 +279,38 @@ mod tests {
             output_name_strategy
                 .prop_map(move |output_name| (output.clone(), drv_name.clone(), output_name))
         })
+    }
+
+    #[test]
+    fn cama_as_bytes_matches_display() {
+        let all = [
+            ContentAddressMethodAlgorithm::Text,
+            ContentAddressMethodAlgorithm::Flat(Algorithm::MD5),
+            ContentAddressMethodAlgorithm::Flat(Algorithm::SHA1),
+            ContentAddressMethodAlgorithm::Flat(Algorithm::SHA256),
+            ContentAddressMethodAlgorithm::Flat(Algorithm::SHA512),
+            ContentAddressMethodAlgorithm::Flat(Algorithm::BLAKE3),
+            ContentAddressMethodAlgorithm::NixArchive(Algorithm::MD5),
+            ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA1),
+            ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256),
+            ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA512),
+            ContentAddressMethodAlgorithm::NixArchive(Algorithm::BLAKE3),
+        ];
+        for cama in all {
+            assert_eq!(cama_as_bytes(cama), cama.to_string().as_bytes());
+        }
+    }
+
+    #[test]
+    fn store_path_bytes_matches_to_absolute_path() {
+        let sp: StorePath = "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo".parse().unwrap();
+        for dir in ["/nix/store", "/nix/store/", "/", "/nix/store//", ""] {
+            let sd = StoreDir::new(dir).unwrap();
+            assert_eq!(
+                store_path_bytes(&sd, &sp),
+                sp.to_absolute_path(&sd).to_string_lossy().as_bytes()
+            );
+        }
     }
 
     #[test]
