@@ -13,6 +13,7 @@ repository.workspace = true
 description          = "Content addressing for the Nix store"
 
 [dependencies]
+data-encoding       = { workspace = true }
 derive_more         = { workspace = true }
 harmonia-store-path = { workspace = true }
 harmonia-utils-hash = { workspace = true }

@@ -1192,6 +1192,7 @@ dependencies = [
 name = "harmonia-store-content-address"
 version = "3.3.0"
 dependencies = [
+ "data-encoding",
  "derive_more",
  "harmonia-store-content-address",
  "harmonia-store-path",
