@@ -1,8 +1,11 @@
+use std::fmt;
 use std::str::FromStr;
 
-use derive_more::Display;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
+
+use crate::fmt::deserialize_from_str;
+use crate::sha::digest_sha;
 
 use super::Hash;
 
@@ -13,24 +16,37 @@ const SHA512_SIZE: usize = 512 / 8;
 const BLAKE3_SIZE: usize = 256 / 8;
 
 /// A digest algorithm.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Display, Default)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Default)]
 pub enum Algorithm {
-    #[display("md5")]
     MD5,
-    #[display("sha1")]
     SHA1,
     #[default]
-    #[display("sha256")]
     SHA256,
-    #[display("sha512")]
     SHA512,
-    #[display("blake3")]
     BLAKE3,
+}
+
+impl fmt::Display for Algorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl Algorithm {
     /// The largest supported algorithm size in bytes
     pub(crate) const LARGEST: Algorithm = Algorithm::SHA512;
+
+    /// Returns the canonical lowercase name of this algorithm.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Algorithm::MD5 => "md5",
+            Algorithm::SHA1 => "sha1",
+            Algorithm::SHA256 => "sha256",
+            Algorithm::SHA512 => "sha512",
+            Algorithm::BLAKE3 => "blake3",
+        }
+    }
 
     /// Returns the size in bytes of this hash.
     #[inline]
@@ -53,9 +69,12 @@ impl Algorithm {
     /// assert_eq!("sha256:1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s", hash.as_base32().to_string());
     /// ```
     pub fn digest<B: AsRef<[u8]>>(&self, data: B) -> Hash {
-        let mut ctx = super::Context::new(*self);
-        ctx.update(data);
-        ctx.finish()
+        let data = data.as_ref();
+        match *self {
+            Algorithm::MD5 => Hash::MD5(md5::compute(data).0),
+            Algorithm::SHA1 | Algorithm::SHA256 | Algorithm::SHA512 => digest_sha(*self, data),
+            Algorithm::BLAKE3 => Hash::BLAKE3(*blake3::hash(data).as_bytes()),
+        }
     }
 }
 
@@ -87,7 +106,7 @@ impl Serialize for Algorithm {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -96,8 +115,7 @@ impl<'de> Deserialize<'de> for Algorithm {
     where
         D: Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
+        deserialize_from_str(deserializer, "a hash algorithm")
     }
 }
 
