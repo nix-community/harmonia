@@ -13,6 +13,7 @@ description          = "Streaming reference scanner for Nix store path outputs"
 readme               = "README.md"
 
 [dependencies]
+foldhash                     = { workspace = true }
 harmonia-store-path          = { workspace = true }
 harmonia-utils-base-encoding = { workspace = true }
 
