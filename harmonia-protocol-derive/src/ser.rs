@@ -306,10 +306,6 @@ fn nix_serialize_display_path(path: &syn::ExprPath) -> TokenStream {
 
 fn nix_serialize_store_dir_display(span: Span) -> TokenStream {
     quote_spanned! {
-        span =>
-        {
-            let store_dir = writer.store_dir().clone();
-            writer.write_display(store_dir.display(self)).await
-        }
+        span => writer.write_store_dir_display(self).await
     }
 }

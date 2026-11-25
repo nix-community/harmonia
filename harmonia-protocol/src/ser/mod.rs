@@ -4,7 +4,7 @@ use std::{fmt, io};
 
 use super::ProtocolVersion;
 use crate::version::FeatureSet;
-use harmonia_store_path::StoreDir;
+use harmonia_store_path::{StoreDir, StoreDirDisplay};
 
 mod bytes;
 mod collections;
@@ -78,6 +78,20 @@ pub trait NixWrite: Send {
         }
     }
 
+    fn write_store_dir_display<D>(
+        &mut self,
+        msg: &D,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send
+    where
+        D: StoreDirDisplay + Sync,
+        Self: Sized,
+    {
+        async move {
+            let store_dir = self.store_dir().clone();
+            self.write_display(store_dir.display(msg)).await
+        }
+    }
+
     /// Write a value to the protocol.
     /// Uses `NixSerialize::serialize` to write the value.
     fn write_value<V>(&mut self, value: &V) -> impl Future<Output = Result<(), Self::Error>> + Send
@@ -118,6 +132,17 @@ impl<T: NixWrite> NixWrite for &mut T {
         Self: Sized,
     {
         (**self).write_display(msg)
+    }
+
+    fn write_store_dir_display<D>(
+        &mut self,
+        msg: &D,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send
+    where
+        D: StoreDirDisplay + Sync,
+        Self: Sized,
+    {
+        (**self).write_store_dir_display(msg)
     }
 
     fn write_value<V>(&mut self, value: &V) -> impl Future<Output = Result<(), Self::Error>> + Send
