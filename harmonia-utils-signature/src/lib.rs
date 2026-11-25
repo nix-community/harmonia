@@ -24,17 +24,18 @@ use subtle::ConstantTimeEq;
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
-use harmonia_utils_base_encoding::base64_len;
+use harmonia_utils_base_encoding::{Base, base64_len};
 
 pub const SIGNATURE_BYTES: usize = 64;
 const SIGNATURE_BASE64_LEN: usize = base64_len(SIGNATURE_BYTES);
+const SIGNATURE_BASE64_DECODED_LEN: usize = Base::Base64.scratch_len(SIGNATURE_BYTES);
 pub const SEED_BYTES: usize = 32;
 pub const PUBLIC_KEY_BYTES: usize = 32;
 const PUBLIC_KEY_BASE64_LEN: usize = base64_len(PUBLIC_KEY_BYTES);
-const PUBLIC_KEY_BASE64_DECODED_LEN: usize = 33;
+const PUBLIC_KEY_BASE64_DECODED_LEN: usize = Base::Base64.scratch_len(PUBLIC_KEY_BYTES);
 pub const SECRET_KEY_BYTES: usize = SEED_BYTES + PUBLIC_KEY_BYTES;
 const SECRET_KEY_BASE64_LEN: usize = base64_len(SECRET_KEY_BYTES);
-const SECRET_KEY_BASE64_DECODED_LEN: usize = 66;
+const SECRET_KEY_BASE64_DECODED_LEN: usize = Base::Base64.scratch_len(SECRET_KEY_BYTES);
 
 #[derive(Error, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum ParseSignatureError {
@@ -50,13 +51,35 @@ pub type SignatureSet = BTreeSet<Signature>;
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RawSignature(pub [u8; SIGNATURE_BYTES]);
 
+#[inline]
+fn encode_base64_str<'a, const N: usize>(bytes: &[u8], buf: &'a mut [u8; N]) -> &'a str {
+    BASE64.encode_mut(bytes, buf);
+    // SAFETY: Base64 is a subset of ASCII, which guarantees valid UTF-8.
+    unsafe { std::str::from_utf8_unchecked(buf) }
+}
+
+#[inline]
+fn decode_base64_fixed<const N: usize, const SCRATCH: usize>(
+    s: &str,
+    expected_len: usize,
+    scratch: &mut [u8; SCRATCH],
+) -> Option<[u8; N]> {
+    if s.len() != expected_len {
+        return None;
+    }
+    let len = BASE64.decode_mut(s.as_bytes(), scratch).ok()?;
+    if len != N {
+        return None;
+    }
+    let mut out = [0u8; N];
+    out.copy_from_slice(&scratch[..N]);
+    Some(out)
+}
+
 impl fmt::Display for RawSignature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = [0u8; SIGNATURE_BASE64_LEN];
-        BASE64.encode_mut(&self.0, &mut buf);
-        // SAFETY: Base64 is a subset of ASCII, which guarantees valid UTF-8.
-        let s = unsafe { std::str::from_utf8_unchecked(&buf) };
-        f.write_str(s)
+        f.write_str(encode_base64_str(&self.0, &mut buf))
     }
 }
 
@@ -64,26 +87,37 @@ impl FromStr for RawSignature {
     type Err = ParseSignatureError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = BASE64
-            .decode(s.as_bytes())
-            .map_err(|_| ParseSignatureError::InvalidSignature)?;
-        let buf: [u8; SIGNATURE_BYTES] = bytes
-            .try_into()
-            .map_err(|_| ParseSignatureError::InvalidSignature)?;
+        let mut scratch = [0u8; SIGNATURE_BASE64_DECODED_LEN];
+        let buf = decode_base64_fixed::<SIGNATURE_BYTES, _>(s, SIGNATURE_BASE64_LEN, &mut scratch)
+            .ok_or(ParseSignatureError::InvalidSignature)?;
         Ok(RawSignature(buf))
     }
 }
 
 impl Serialize for RawSignature {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
+        let mut buf = [0u8; SIGNATURE_BASE64_LEN];
+        serializer.serialize_str(encode_base64_str(&self.0, &mut buf))
     }
 }
 
 impl<'de> Deserialize<'de> for RawSignature {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
+        struct RawSigVisitor;
+
+        impl Visitor<'_> for RawSigVisitor {
+            type Value = RawSignature;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a base64-encoded Ed25519 signature")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<RawSignature, E> {
+                v.parse().map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_str(RawSigVisitor)
     }
 }
 
@@ -133,7 +167,7 @@ impl Serialize for Signature {
     {
         let mut s = serializer.serialize_struct("Signature", 2)?;
         s.serialize_field("keyName", self.name())?;
-        s.serialize_field("sig", &self.signature().to_string())?;
+        s.serialize_field("sig", self.signature())?;
         s.end()
     }
 }
@@ -143,6 +177,15 @@ impl<'de> Deserialize<'de> for Signature {
     where
         D: Deserializer<'de>,
     {
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "camelCase")]
+        enum Field {
+            KeyName,
+            Sig,
+            #[serde(other)]
+            Ignore,
+        }
+
         struct SigVisitor;
         impl<'de> Visitor<'de> for SigVisitor {
             type Value = Signature;
@@ -157,20 +200,19 @@ impl<'de> Deserialize<'de> for Signature {
                 A: MapAccess<'de>,
             {
                 let mut key_name: Option<String> = None;
-                let mut sig: Option<String> = None;
-                while let Some(k) = map.next_key::<String>()? {
-                    match k.as_str() {
-                        "keyName" => key_name = Some(map.next_value()?),
-                        "sig" => sig = Some(map.next_value()?),
-                        _ => {
+                let mut sig: Option<RawSignature> = None;
+                while let Some(field) = map.next_key::<Field>()? {
+                    match field {
+                        Field::KeyName => key_name = Some(map.next_value()?),
+                        Field::Sig => sig = Some(map.next_value()?),
+                        Field::Ignore => {
                             let _ignored: de::IgnoredAny = map.next_value()?;
                         }
                     }
                 }
                 let key_name = key_name.ok_or_else(|| de::Error::missing_field("keyName"))?;
                 let sig = sig.ok_or_else(|| de::Error::missing_field("sig"))?;
-                let bytes = BASE64.decode(sig.as_bytes()).map_err(de::Error::custom)?;
-                Signature::from_parts(&key_name, &bytes).map_err(de::Error::custom)
+                Ok(Signature { key_name, sig })
             }
         }
         deserializer.deserialize_any(SigVisitor)
@@ -203,7 +245,7 @@ pub enum ParseKeyError {
 
 #[derive(Clone)]
 pub struct PublicKey {
-    name: Arc<String>,
+    name: Arc<str>,
     key_data: [u8; PUBLIC_KEY_BYTES],
     key: VerifyingKey,
 }
@@ -234,16 +276,24 @@ impl Eq for PublicKey {}
 
 impl fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut buf = [0u8; PUBLIC_KEY_BASE64_LEN];
+        let key_str = encode_base64_str(&self.key_data, &mut buf);
         f.debug_struct("PublicKey")
             .field("name", &self.name)
-            .field("key", &format_args!("{}", self.key()))
+            .field("key", &key_str)
             .finish()
     }
 }
 
 impl fmt::Display for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.name(), self.key())
+        let mut buf = [0u8; PUBLIC_KEY_BASE64_LEN];
+        write!(
+            f,
+            "{}:{}",
+            self.name(),
+            encode_base64_str(&self.key_data, &mut buf)
+        )
     }
 }
 
@@ -251,25 +301,15 @@ impl FromStr for PublicKey {
     type Err = ParseKeyError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut sp = s.splitn(2, ':');
-        let name = Arc::new(sp.next().ok_or(ParseKeyError::CorruptKey)?.to_string());
-        let key_s = sp.next().ok_or(ParseKeyError::CorruptKey)?;
-        if key_s.len() != PUBLIC_KEY_BASE64_LEN {
-            return Err(ParseKeyError::InvalidPublicKey);
-        }
-        let mut key_buf = [0u8; PUBLIC_KEY_BASE64_DECODED_LEN];
-        let len = BASE64
-            .decode_mut(key_s.as_bytes(), &mut key_buf)
-            .map_err(|_| ParseKeyError::InvalidPublicKey)?;
-        if len != PUBLIC_KEY_BYTES {
-            return Err(ParseKeyError::InvalidPublicKey);
-        }
-        let mut key_data = [0u8; PUBLIC_KEY_BYTES];
-        key_data.copy_from_slice(&key_buf[..PUBLIC_KEY_BYTES]);
+        let (name_s, key_s) = s.split_once(':').ok_or(ParseKeyError::CorruptKey)?;
+        let mut scratch = [0u8; PUBLIC_KEY_BASE64_DECODED_LEN];
+        let key_data =
+            decode_base64_fixed::<PUBLIC_KEY_BYTES, _>(key_s, PUBLIC_KEY_BASE64_LEN, &mut scratch)
+                .ok_or(ParseKeyError::InvalidPublicKey)?;
         let key =
             VerifyingKey::from_bytes(&key_data).map_err(|_| ParseKeyError::InvalidPublicKey)?;
         Ok(PublicKey {
-            name,
+            name: Arc::from(name_s),
             key,
             key_data,
         })
@@ -281,14 +321,14 @@ impl FromStr for PublicKey {
 pub struct GenerateKeyError;
 
 pub struct SecretKey {
-    name: Arc<String>,
+    name: Arc<str>,
     key_data: [u8; SECRET_KEY_BYTES],
     key: SigningKey,
 }
 
 impl SecretKey {
     pub fn generate(name: String) -> Result<SecretKey, GenerateKeyError> {
-        let name = Arc::new(name);
+        let name = Arc::from(name);
         let mut seed = Zeroizing::new([0u8; SEED_BYTES]);
         getrandom::fill(&mut *seed).map_err(|_| GenerateKeyError)?;
         let key = SigningKey::from_bytes(&seed);
@@ -350,7 +390,13 @@ impl fmt::Debug for SecretKey {
 }
 impl fmt::Display for SecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.name(), self.key())
+        let mut buf = Zeroizing::new([0u8; SECRET_KEY_BASE64_LEN]);
+        write!(
+            f,
+            "{}:{}",
+            self.name(),
+            encode_base64_str(&self.key_data, &mut buf)
+        )
     }
 }
 
@@ -373,21 +419,11 @@ impl FromStr for SecretKey {
     type Err = ParseKeyError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut sp = s.splitn(2, ':');
-        let name = Arc::new(sp.next().ok_or(ParseKeyError::CorruptKey)?.to_string());
-        let key_s = sp.next().ok_or(ParseKeyError::CorruptKey)?;
-        if key_s.len() != SECRET_KEY_BASE64_LEN {
-            return Err(ParseKeyError::InvalidSecretKey);
-        }
-        let mut key_b = Zeroizing::new([0u8; SECRET_KEY_BASE64_DECODED_LEN]);
-        let len = BASE64
-            .decode_mut(key_s.as_bytes(), &mut *key_b)
-            .map_err(|_| ParseKeyError::InvalidSecretKey)?;
-        if len != SECRET_KEY_BYTES {
-            return Err(ParseKeyError::InvalidSecretKey);
-        }
-        let mut key_data = [0u8; SECRET_KEY_BYTES];
-        key_data.copy_from_slice(&key_b[..SECRET_KEY_BYTES]);
+        let (name_s, key_s) = s.split_once(':').ok_or(ParseKeyError::CorruptKey)?;
+        let mut scratch = Zeroizing::new([0u8; SECRET_KEY_BASE64_DECODED_LEN]);
+        let key_data =
+            decode_base64_fixed::<SECRET_KEY_BYTES, _>(key_s, SECRET_KEY_BASE64_LEN, &mut scratch)
+                .ok_or(ParseKeyError::InvalidSecretKey)?;
         let mut seed = Zeroizing::new([0u8; SEED_BYTES]);
         seed.copy_from_slice(&key_data[0..SEED_BYTES]);
         let public_key = &key_data[SEED_BYTES..SECRET_KEY_BYTES];
@@ -396,7 +432,7 @@ impl FromStr for SecretKey {
             return Err(ParseKeyError::InvalidSecretKey);
         }
         Ok(SecretKey {
-            name,
+            name: Arc::from(name_s),
             key,
             key_data,
         })
