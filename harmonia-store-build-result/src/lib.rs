@@ -11,8 +11,9 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use serde::de;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Value};
 
 use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_derivation::realisation::UnkeyedRealisation;
@@ -117,12 +118,15 @@ pub struct BuildResultSuccess {
 }
 
 /// Failed build result data.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BuildResultFailure {
     pub status: FailureStatus,
     /// Information about the error if the build failed.
+    #[serde(default, with = "lossy_utf8")]
     pub error_msg: Vec<u8>,
     /// If timesBuilt > 1, whether some builds did not produce the same result.
+    #[serde(default)]
     pub is_non_deterministic: bool,
 }
 
@@ -136,10 +140,8 @@ pub enum BuildResultInner {
 }
 
 /// Result of a build operation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BuildResult {
-    #[serde(flatten)]
     pub inner: BuildResultInner,
     /// How many times this build was performed.
     pub times_built: u32,
@@ -148,10 +150,8 @@ pub struct BuildResult {
     /// The stop time of the build.
     pub stop_time: i64,
     /// User CPU time the build took.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu_user: Option<Microseconds>,
     /// System CPU time the build took.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu_system: Option<Microseconds>,
 }
 
@@ -175,42 +175,41 @@ impl BuildResult {
 
 // JSON serialization for upstream Nix compatibility
 
-/// JSON helper for BuildResultFailure (handles Vec<u8> <-> String conversion)
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BuildResultFailureJson {
-    status: FailureStatus,
-    #[serde(default)]
-    error_msg: String,
-    #[serde(default)]
-    is_non_deterministic: bool,
-}
+mod lossy_utf8 {
+    use serde::{Deserialize, Deserializer, Serializer};
 
-impl Serialize for BuildResultFailure {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        BuildResultFailureJson {
-            status: self.status,
-            error_msg: String::from_utf8_lossy(&self.error_msg).into_owned(),
-            is_non_deterministic: self.is_non_deterministic,
-        }
-        .serialize(serializer)
+    pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&String::from_utf8_lossy(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+        String::deserialize(deserializer).map(String::into_bytes)
     }
 }
 
-impl<'de> Deserialize<'de> for BuildResultFailure {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let json = BuildResultFailureJson::deserialize(deserializer)?;
-        Ok(BuildResultFailure {
-            status: json.status,
-            error_msg: json.error_msg.into_bytes(),
-            is_non_deterministic: json.is_non_deterministic,
-        })
+impl BuildResultInner {
+    const fn serialized_field_count(&self) -> usize {
+        match self {
+            BuildResultInner::Success(_) => 3,
+            BuildResultInner::Failure(_) => 4,
+        }
+    }
+
+    fn serialize_entries<S: SerializeMap>(&self, map: &mut S) -> Result<(), S::Error> {
+        match self {
+            BuildResultInner::Success(ok) => {
+                map.serialize_entry("success", &true)?;
+                map.serialize_entry("status", &ok.status)?;
+                map.serialize_entry("builtOutputs", &ok.built_outputs)?;
+            }
+            BuildResultInner::Failure(fail) => {
+                map.serialize_entry("success", &false)?;
+                map.serialize_entry("status", &fail.status)?;
+                map.serialize_entry("errorMsg", &String::from_utf8_lossy(&fail.error_msg))?;
+                map.serialize_entry("isNonDeterministic", &fail.is_non_deterministic)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -219,23 +218,145 @@ impl Serialize for BuildResultInner {
     where
         S: Serializer,
     {
-        use serde::ser::Error;
-
-        let (success, value) = match self {
-            BuildResultInner::Success(s) => {
-                (true, serde_json::to_value(s).map_err(S::Error::custom)?)
-            }
-            BuildResultInner::Failure(f) => {
-                (false, serde_json::to_value(f).map_err(S::Error::custom)?)
-            }
-        };
-
-        let Value::Object(mut map) = value else {
-            return Err(S::Error::custom("expected object"));
-        };
-        map.insert("success".into(), Value::Bool(success));
-        map.serialize(serializer)
+        let mut map = serializer.serialize_map(Some(self.serialized_field_count()))?;
+        self.serialize_entries(&mut map)?;
+        map.end()
     }
+}
+
+impl Serialize for BuildResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let len = self.inner.serialized_field_count()
+            + 3
+            + usize::from(self.cpu_user.is_some())
+            + usize::from(self.cpu_system.is_some());
+        let mut map = serializer.serialize_map(Some(len))?;
+        self.inner.serialize_entries(&mut map)?;
+        map.serialize_entry("timesBuilt", &self.times_built)?;
+        map.serialize_entry("startTime", &self.start_time)?;
+        map.serialize_entry("stopTime", &self.stop_time)?;
+        if let Some(cpu_user) = &self.cpu_user {
+            map.serialize_entry("cpuUser", cpu_user)?;
+        }
+        if let Some(cpu_system) = &self.cpu_system {
+            map.serialize_entry("cpuSystem", cpu_system)?;
+        }
+        map.end()
+    }
+}
+
+/// Disjoint union of `SuccessStatus` and `FailureStatus` so `status` can be
+/// deserialized in a single pass regardless of whether it precedes `success`.
+#[derive(Deserialize)]
+enum AnyStatus {
+    Built,
+    Substituted,
+    AlreadyValid,
+    ResolvesToAlreadyValid,
+    PermanentFailure,
+    InputRejected,
+    OutputRejected,
+    TransientFailure,
+    CachedFailure,
+    TimedOut,
+    MiscFailure,
+    DependencyFailed,
+    LogLimitExceeded,
+    NotDeterministic,
+    NoSubstituters,
+}
+
+impl AnyStatus {
+    const fn into_success(self) -> Option<SuccessStatus> {
+        match self {
+            Self::Built => Some(SuccessStatus::Built),
+            Self::Substituted => Some(SuccessStatus::Substituted),
+            Self::AlreadyValid => Some(SuccessStatus::AlreadyValid),
+            Self::ResolvesToAlreadyValid => Some(SuccessStatus::ResolvesToAlreadyValid),
+            _ => None,
+        }
+    }
+
+    const fn into_failure(self) -> Option<FailureStatus> {
+        match self {
+            Self::PermanentFailure => Some(FailureStatus::PermanentFailure),
+            Self::InputRejected => Some(FailureStatus::InputRejected),
+            Self::OutputRejected => Some(FailureStatus::OutputRejected),
+            Self::TransientFailure => Some(FailureStatus::TransientFailure),
+            Self::CachedFailure => Some(FailureStatus::CachedFailure),
+            Self::TimedOut => Some(FailureStatus::TimedOut),
+            Self::MiscFailure => Some(FailureStatus::MiscFailure),
+            Self::DependencyFailed => Some(FailureStatus::DependencyFailed),
+            Self::LogLimitExceeded => Some(FailureStatus::LogLimitExceeded),
+            Self::NotDeterministic => Some(FailureStatus::NotDeterministic),
+            Self::NoSubstituters => Some(FailureStatus::NoSubstituters),
+            _ => None,
+        }
+    }
+}
+
+// Compile-time guard: adding a variant to SuccessStatus or FailureStatus fails here.
+const _: fn(SuccessStatus) -> AnyStatus = |s| match s {
+    SuccessStatus::Built => AnyStatus::Built,
+    SuccessStatus::Substituted => AnyStatus::Substituted,
+    SuccessStatus::AlreadyValid => AnyStatus::AlreadyValid,
+    SuccessStatus::ResolvesToAlreadyValid => AnyStatus::ResolvesToAlreadyValid,
+};
+const _: fn(FailureStatus) -> AnyStatus = |f| match f {
+    FailureStatus::PermanentFailure => AnyStatus::PermanentFailure,
+    FailureStatus::InputRejected => AnyStatus::InputRejected,
+    FailureStatus::OutputRejected => AnyStatus::OutputRejected,
+    FailureStatus::TransientFailure => AnyStatus::TransientFailure,
+    FailureStatus::CachedFailure => AnyStatus::CachedFailure,
+    FailureStatus::TimedOut => AnyStatus::TimedOut,
+    FailureStatus::MiscFailure => AnyStatus::MiscFailure,
+    FailureStatus::DependencyFailed => AnyStatus::DependencyFailed,
+    FailureStatus::LogLimitExceeded => AnyStatus::LogLimitExceeded,
+    FailureStatus::NotDeterministic => AnyStatus::NotDeterministic,
+    FailureStatus::NoSubstituters => AnyStatus::NoSubstituters,
+};
+
+fn finish_inner<E: de::Error>(
+    success: bool,
+    status: AnyStatus,
+    built_outputs: Option<BTreeMap<OutputName, UnkeyedRealisation>>,
+    error_msg: Option<String>,
+    is_non_deterministic: Option<bool>,
+) -> Result<BuildResultInner, E> {
+    if success {
+        let status = status
+            .into_success()
+            .ok_or_else(|| E::custom("expected SuccessStatus when success is true"))?;
+        Ok(BuildResultInner::Success(BuildResultSuccess {
+            status,
+            built_outputs: built_outputs.unwrap_or_default(),
+        }))
+    } else {
+        let status = status
+            .into_failure()
+            .ok_or_else(|| E::custom("expected FailureStatus when success is false"))?;
+        Ok(BuildResultInner::Failure(BuildResultFailure {
+            status,
+            error_msg: error_msg.unwrap_or_default().into_bytes(),
+            is_non_deterministic: is_non_deterministic.unwrap_or(false),
+        }))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename = "BuildResultInner", rename_all = "camelCase")]
+struct BuildResultInnerDe {
+    success: bool,
+    status: AnyStatus,
+    #[serde(default)]
+    built_outputs: Option<BTreeMap<OutputName, UnkeyedRealisation>>,
+    #[serde(default)]
+    error_msg: Option<String>,
+    #[serde(default)]
+    is_non_deterministic: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for BuildResultInner {
@@ -243,26 +364,58 @@ impl<'de> Deserialize<'de> for BuildResultInner {
     where
         D: Deserializer<'de>,
     {
-        use serde::de::Error;
+        let raw = BuildResultInnerDe::deserialize(deserializer)?;
+        finish_inner(
+            raw.success,
+            raw.status,
+            raw.built_outputs,
+            raw.error_msg,
+            raw.is_non_deterministic,
+        )
+    }
+}
 
-        let mut map = Map::<String, Value>::deserialize(deserializer)?;
+#[derive(Deserialize)]
+#[serde(rename = "BuildResult", rename_all = "camelCase")]
+struct BuildResultDe {
+    success: bool,
+    status: AnyStatus,
+    #[serde(default)]
+    built_outputs: Option<BTreeMap<OutputName, UnkeyedRealisation>>,
+    #[serde(default)]
+    error_msg: Option<String>,
+    #[serde(default)]
+    is_non_deterministic: Option<bool>,
+    times_built: u32,
+    start_time: i64,
+    stop_time: i64,
+    #[serde(default)]
+    cpu_user: Option<Microseconds>,
+    #[serde(default)]
+    cpu_system: Option<Microseconds>,
+}
 
-        let success = map
-            .remove("success")
-            .and_then(|v| v.as_bool())
-            .ok_or_else(|| D::Error::missing_field("success"))?;
-
-        let value = Value::Object(map);
-
-        if success {
-            serde_json::from_value(value)
-                .map(BuildResultInner::Success)
-                .map_err(D::Error::custom)
-        } else {
-            serde_json::from_value(value)
-                .map(BuildResultInner::Failure)
-                .map_err(D::Error::custom)
-        }
+impl<'de> Deserialize<'de> for BuildResult {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = BuildResultDe::deserialize(deserializer)?;
+        let inner = finish_inner(
+            raw.success,
+            raw.status,
+            raw.built_outputs,
+            raw.error_msg,
+            raw.is_non_deterministic,
+        )?;
+        Ok(BuildResult {
+            inner,
+            times_built: raw.times_built,
+            start_time: raw.start_time,
+            stop_time: raw.stop_time,
+            cpu_user: raw.cpu_user,
+            cpu_system: raw.cpu_system,
+        })
     }
 }
 
@@ -365,6 +518,121 @@ mod arbitrary {
                     },
                 )
                 .boxed()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn roundtrip_all_status_variants() {
+        for status in [
+            SuccessStatus::Built,
+            SuccessStatus::Substituted,
+            SuccessStatus::AlreadyValid,
+            SuccessStatus::ResolvesToAlreadyValid,
+        ] {
+            let inner = BuildResultInner::Success(BuildResultSuccess {
+                status,
+                built_outputs: BTreeMap::new(),
+            });
+            let json = serde_json::to_string(&inner).unwrap();
+            let parsed: BuildResultInner = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, inner);
+        }
+
+        for status in [
+            FailureStatus::PermanentFailure,
+            FailureStatus::InputRejected,
+            FailureStatus::OutputRejected,
+            FailureStatus::TransientFailure,
+            FailureStatus::CachedFailure,
+            FailureStatus::TimedOut,
+            FailureStatus::MiscFailure,
+            FailureStatus::DependencyFailed,
+            FailureStatus::LogLimitExceeded,
+            FailureStatus::NotDeterministic,
+            FailureStatus::NoSubstituters,
+        ] {
+            let failure = BuildResultFailure {
+                status,
+                error_msg: b"failed".to_vec(),
+                is_non_deterministic: status == FailureStatus::NotDeterministic,
+            };
+            let fail_json = serde_json::to_string(&failure).unwrap();
+            assert_eq!(
+                serde_json::from_str::<BuildResultFailure>(&fail_json).unwrap(),
+                failure
+            );
+
+            let inner = BuildResultInner::Failure(failure);
+            let json = serde_json::to_string(&inner).unwrap();
+            assert_eq!(
+                serde_json::from_str::<BuildResultInner>(&json).unwrap(),
+                inner
+            );
+        }
+    }
+
+    #[test]
+    fn failure_non_utf8_lossy_and_field_ordering() {
+        let fail = BuildResultFailure {
+            status: FailureStatus::MiscFailure,
+            error_msg: vec![b'a', 0xff, b'b'],
+            is_non_deterministic: true,
+        };
+        let json = serde_json::to_string(&fail).unwrap();
+        let parsed: BuildResultFailure = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.error_msg, "a�b".as_bytes());
+        assert!(parsed.is_non_deterministic);
+
+        let raw = r#"{"status":"Built","success":true,"timesBuilt":1,"startTime":10,"stopTime":20,"cpuUser":null,"cpuSystem":null,"extra":123,"errorMsg":null}"#;
+        let res: BuildResult = serde_json::from_str(raw).unwrap();
+        assert_eq!(res.success().unwrap().status, SuccessStatus::Built);
+        assert!(res.cpu_user.is_none());
+        assert!(res.cpu_system.is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_payloads() {
+        assert!(
+            serde_json::from_str::<BuildResultInner>(
+                r#"{"success":true,"status":"PermanentFailure"}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<BuildResultInner>(r#"{"success":false,"status":"Built"}"#)
+                .is_err()
+        );
+        assert!(serde_json::from_str::<BuildResultInner>(r#"{"status":"Built"}"#).is_err());
+        assert!(
+            serde_json::from_str::<BuildResult>(
+                r#"{"success":true,"status":"Built","startTime":0,"stopTime":0}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<BuildResult>(
+                r#"{"success":true,"status":"Built","timesBuilt":1,"timesBuilt":2,"startTime":0,"stopTime":0}"#
+            )
+            .is_err()
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_build_result_json_roundtrip(res in any::<BuildResult>()) {
+            let mut expected = res;
+            if let BuildResultInner::Failure(ref mut f) = expected.inner {
+                f.error_msg = String::from_utf8_lossy(&f.error_msg).into_owned().into_bytes();
+            }
+            let json = serde_json::to_string(&expected).unwrap();
+            let parsed: BuildResult = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, expected);
         }
     }
 }
