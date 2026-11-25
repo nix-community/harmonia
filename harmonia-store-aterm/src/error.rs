@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+use harmonia_store_derivation::derivation::StructuredAttrsError;
 use harmonia_store_path::{ParseStorePathError, StorePathNameError};
 
 use crate::raw_output::FromRawOutputError;
@@ -30,4 +31,6 @@ pub enum ParseError {
     InvalidUtf8 { pos: usize },
     #[error("duplicate {key} in inputDrvs at position {pos}")]
     DuplicateInputDrv { key: String, pos: usize },
+    #[error("{0}")]
+    StructuredAttrs(#[from] StructuredAttrsError),
 }

@@ -20,7 +20,6 @@ harmonia-utils-base-encoding   = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 memchr.workspace               = true
 proptest                       = { workspace = true, optional = true }
-serde_json.workspace           = true
 thiserror.workspace            = true
 
 [dev-dependencies]
@@ -29,6 +28,7 @@ harmonia-store-content-address = { workspace = true }
 harmonia-store-derivation      = { path = "../harmonia-store-derivation", features = [ "test" ] }
 harmonia-utils-test            = { workspace = true }
 rstest.workspace               = true
+serde_json.workspace           = true
 
 [features]
 test = [ "proptest", "harmonia-store-derivation/test" ]

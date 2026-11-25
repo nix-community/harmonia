@@ -74,15 +74,10 @@ impl<'a> Parser<'a> {
 
         self.expect_char(')')?;
 
-        // Extract structured attrs from __json env var (matches cppnix behavior:
-        // the ATerm format stores structured attrs as a JSON string in __json,
-        // but the Derivation type represents them as a separate field).
-        let structured_attrs = env.remove(b"__json".as_slice()).and_then(|json_bytes| {
-            let json_str = std::str::from_utf8(&json_bytes).ok()?;
-            let attrs: serde_json::Map<String, serde_json::Value> =
-                serde_json::from_str(json_str).ok()?;
-            Some(StructuredAttrs { attrs })
-        });
+        // Extract structured attrs from __json env var (matches C++ Nix's
+        // StructuredAttrs::tryExtract: fails on invalid UTF-8 or non-object
+        // JSON and preserves the raw encoding verbatim).
+        let structured_attrs = StructuredAttrs::try_extract(&mut env)?;
 
         Ok(Derivation {
             name,
@@ -543,5 +538,57 @@ mod tests {
             .collect();
         let drv = parse(&drv_with_inputs("Derive(", &input_drvs.join(","))).unwrap();
         assert_eq!(drv.inputs.len(), N);
+    }
+
+    #[rstest]
+    #[case::float_exp_pos(r#"{"x":1e+15}"#)]
+    #[case::float_exp_neg(r#"{"x":1e-05}"#)]
+    #[case::whitespace(r#"{ "b": 2, "a": 1 }"#)]
+    #[case::uppercase_unicode(r#"{"s":"\u001B"}"#)]
+    fn structured_attrs_verbatim_roundtrip_and_hash_modulo(#[case] raw_json: &str) {
+        let store_dir = StoreDir::default();
+        let name: StorePathName = "test".parse().unwrap();
+        let escaped = raw_json.replace('\\', "\\\\").replace('"', "\\\"");
+        let drv_str = format!(
+            r#"Derive([("out","/nix/store/00000000000000000000000000000000-test","","")],[],[],"x86_64-linux","/bin/sh",[],[("__json","{escaped}"),("out","/nix/store/00000000000000000000000000000000-test")])"#
+        );
+        let parsed =
+            crate::parse_derivation_aterm(&store_dir, drv_str.as_bytes(), name.clone()).unwrap();
+        assert_eq!(
+            parsed.structured_attrs.as_ref().unwrap().verbatim(),
+            Some(raw_json)
+        );
+
+        let printed = crate::print_derivation_aterm(&store_dir, &parsed.clone().into_full());
+        assert_eq!(printed, drv_str.as_bytes());
+
+        let actual_hash = crate::hash_modulo::hash_modulo(
+            &store_dir,
+            &parsed,
+            |_| -> Result<_, std::convert::Infallible> { unreachable!() },
+        )
+        .unwrap()
+        .unwrap();
+        let expected_masked = format!(
+            r#"Derive([("out","","","")],[],[],"x86_64-linux","/bin/sh",[],[("__json","{escaped}"),("out","")])"#
+        );
+        assert_eq!(
+            actual_hash,
+            harmonia_utils_hash::Sha256::digest(expected_masked.as_bytes())
+        );
+    }
+
+    #[rstest]
+    #[case::invalid_json(
+        br#"Derive([],[],[],"x86_64-linux","/bin/sh",[],[("__json","not-valid-json")])"#
+    )]
+    #[case::json_array(br#"Derive([],[],[],"x86_64-linux","/bin/sh",[],[("__json","[1,2]")])"#)]
+    #[case::json_number(br#"Derive([],[],[],"x86_64-linux","/bin/sh",[],[("__json","42")])"#)]
+    #[case::invalid_utf8(
+        b"Derive([],[],[],\"x86_64-linux\",\"/bin/sh\",[],[(\"__json\",\"\xff\")])"
+    )]
+    fn rejects_malformed_structured_attrs(#[case] input: &[u8]) {
+        let store_dir = StoreDir::default();
+        assert!(crate::parse_derivation_aterm(&store_dir, input, "test".parse().unwrap()).is_err());
     }
 }

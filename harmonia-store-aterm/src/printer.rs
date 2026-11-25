@@ -356,9 +356,7 @@ fn write_env<S: AtermSink, O>(
 ) {
     // When structured attrs are present, the ATerm format stores them as the
     // `__json` env var. Merge it into the sorted env output.
-    let json_value = structured_attrs
-        .as_ref()
-        .map(|sa| serde_json::to_vec(&sa.attrs).unwrap());
+    let json_value = structured_attrs.as_ref().map(StructuredAttrs::unparse);
 
     out.push(b'[');
     let mut first = true;
@@ -375,7 +373,7 @@ fn write_env<S: AtermSink, O>(
             }
             first = false;
             out.extend_from_slice(b"(\"__json\",");
-            write_escaped(out, json_value.as_deref().unwrap());
+            write_escaped(out, json_value.as_deref().unwrap().as_bytes());
             out.push(b')');
             json_emitted = true;
         }
@@ -414,7 +412,7 @@ fn write_env<S: AtermSink, O>(
             out.push(b',');
         }
         out.extend_from_slice(b"(\"__json\",");
-        write_escaped(out, json_value.as_deref().unwrap());
+        write_escaped(out, json_value.as_deref().unwrap().as_bytes());
         out.push(b')');
     }
 
