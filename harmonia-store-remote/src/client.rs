@@ -562,10 +562,8 @@ where
     {
         async move {
             self.writer.write_value(&Operation::BuildDerivation).await?;
-            // Wire protocol expects (StorePath, BasicDerivation) tuple
-            self.writer
-                .write_value(&(drv_path.clone(), drv.clone()))
-                .await?;
+            self.writer.write_value(drv_path).await?;
+            self.writer.write_value(drv).await?;
             self.writer.write_value(&mode).await?;
             Ok(self.process_stderr())
         }
