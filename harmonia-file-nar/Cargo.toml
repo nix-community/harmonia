@@ -21,8 +21,8 @@ futures-sink       = { workspace = true }
 futures-util       = { workspace = true }
 harmonia-file-core = { workspace = true }
 harmonia-utils-io  = { workspace = true }
-nix.workspace      = true
 pin-project-lite   = { workspace = true }
+rustix             = { workspace = true, features = [ "fs" ] }
 serde              = { workspace = true }
 serde_json         = { workspace = true }
 thiserror          = { workspace = true }
@@ -36,6 +36,7 @@ harmonia-file-nar   = { path = ".", features = [ "test" ] }
 harmonia-utils-test = { workspace = true }
 proptest            = { workspace = true }
 rstest              = { workspace = true }
+rustix              = { workspace = true, features = [ "process" ] }
 tempfile            = { workspace = true }
 tokio-test          = { workspace = true }
 
