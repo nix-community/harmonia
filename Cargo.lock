@@ -987,7 +987,9 @@ dependencies = [
  "harmonia-file-nar",
  "harmonia-store-path",
  "harmonia-store-ref-scan",
+ "harmonia-utils-hash",
  "nix",
+ "serde_json",
  "tempfile",
  "tokio",
 ]

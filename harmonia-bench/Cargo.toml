@@ -15,6 +15,8 @@ futures-util                      = { workspace = true }
 harmonia-file-nar.workspace       = true
 harmonia-store-path.workspace     = true
 harmonia-store-ref-scan.workspace = true
+harmonia-utils-hash.workspace     = true
+serde_json.workspace              = true
 
 [[bench]]
 harness = false

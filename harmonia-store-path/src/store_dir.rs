@@ -1,4 +1,6 @@
+use std::cmp::Ordering;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -6,11 +8,20 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use super::StorePathError;
+use crate::deserialize_from_str;
+
+const DEFAULT_STORE_DIR: &str = "/nix/store";
 
 #[derive(Debug, Error, PartialEq, Eq, Hash)]
 #[error("path '{}' is not a store dir", .path.display())]
 pub struct StoreDirError {
     path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+enum StoreDirInner {
+    Default,
+    Custom(Arc<str>),
 }
 
 /// Store directory.
@@ -24,20 +35,28 @@ pub struct StoreDirError {
 /// assert_eq!("55xkmqns51sw7nrgykp5vnz36w4fr3cw-nix-2.1.3", path.to_string());
 /// ```
 ///
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StoreDir(Arc<PathBuf>, Arc<String>);
+#[derive(Debug, Clone)]
+pub struct StoreDir(StoreDirInner);
 
 impl StoreDir {
+    #[inline]
+    fn from_valid_str(s: &str) -> Self {
+        if s == DEFAULT_STORE_DIR {
+            Self(StoreDirInner::Default)
+        } else {
+            Self(StoreDirInner::Custom(Arc::from(s)))
+        }
+    }
+
     /// Create a new StoreDir from given path.
     /// This can fail if the path contains non-UTF-8 characters and therefore can't be
     /// converted to a [`String`].
     pub fn new<P: Into<PathBuf>>(path: P) -> Result<StoreDir, StoreDirError> {
         let path = path.into();
-        let path_s = path
-            .to_str()
-            .ok_or_else(|| StoreDirError { path: path.clone() })?
-            .to_string();
-        Ok(StoreDir(Arc::new(path), Arc::new(path_s)))
+        let Some(path_s) = path.to_str() else {
+            return Err(StoreDirError { path });
+        };
+        Ok(Self::from_valid_str(path_s))
     }
 
     /// Get [`str`] representation of this StoreDir.
@@ -47,8 +66,12 @@ impl StoreDir {
     /// let store = StoreDir::new("/nix/store").unwrap();
     /// assert_eq!("/nix/store", store.to_str());
     /// ```
+    #[inline]
     pub fn to_str(&self) -> &str {
-        self.1.as_ref()
+        match &self.0 {
+            StoreDirInner::Default => DEFAULT_STORE_DIR,
+            StoreDirInner::Custom(s) => s,
+        }
     }
 
     /// Get [`Path`] representation of this StoreDir.
@@ -59,8 +82,9 @@ impl StoreDir {
     /// let store = StoreDir::new("/nix/store").unwrap();
     /// assert_eq!(Path::new("/nix/store"), store.to_path());
     /// ```
+    #[inline]
     pub fn to_path(&self) -> &Path {
-        self.0.as_ref()
+        Path::new(self.to_str())
     }
 
     pub fn parse<F>(&self, s: &str) -> Result<F, F::Error>
@@ -83,37 +107,77 @@ impl StoreDir {
     /// Strip the store directory prefix from a path string, returning the base name.
     ///
     /// Given a full store path like `/nix/store/hash-name`, returns `hash-name`.
+    #[inline]
     pub fn strip_prefix<'s>(&self, s: &'s str) -> Result<&'s str, StorePathError> {
-        let path = Path::new(s);
         // Store paths are Unix-style regardless of host (e.g. wasm32).
         if !s.starts_with('/') {
-            return Err(StorePathError::NonAbsolute(path.to_owned()));
+            return Err(StorePathError::NonAbsolute(PathBuf::from(s)));
         }
-        let name = s
-            .strip_prefix(self.to_str())
-            .ok_or_else(|| StorePathError::NotInStore(path.into()))?;
-        if name.as_bytes().first() != Some(&b'/') {
-            return Err(StorePathError::NotInStore(path.into()));
+        s.strip_prefix(self.to_str())
+            .and_then(|rest| rest.strip_prefix('/'))
+            .ok_or_else(|| StorePathError::NotInStore(PathBuf::from(s)))
+    }
+}
+
+impl PartialEq for StoreDir {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (StoreDirInner::Default, StoreDirInner::Default) => true,
+            (StoreDirInner::Custom(a), StoreDirInner::Custom(b)) => {
+                Arc::ptr_eq(a, b) || a.as_ref() == b.as_ref()
+            }
+            _ => false,
         }
-        Ok(&name[1..])
+    }
+}
+
+impl Eq for StoreDir {}
+
+impl PartialOrd for StoreDir {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StoreDir {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self == other {
+            return Ordering::Equal;
+        }
+        self.to_path()
+            .cmp(other.to_path())
+            .then_with(|| self.to_str().cmp(other.to_str()))
+    }
+}
+
+impl Hash for StoreDir {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.to_str().hash(state);
     }
 }
 
 impl AsRef<Path> for StoreDir {
+    #[inline]
     fn as_ref(&self) -> &Path {
         self.to_path()
     }
 }
 
 impl AsRef<str> for StoreDir {
+    #[inline]
     fn as_ref(&self) -> &str {
         self.to_str()
     }
 }
 
 impl Default for StoreDir {
+    #[inline]
     fn default() -> Self {
-        StoreDir::new("/nix/store").unwrap()
+        StoreDir(StoreDirInner::Default)
     }
 }
 
@@ -127,7 +191,7 @@ impl std::str::FromStr for StoreDir {
     type Err = StoreDirError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        StoreDir::new(s)
+        Ok(Self::from_valid_str(s))
     }
 }
 
@@ -145,8 +209,7 @@ impl<'de> Deserialize<'de> for StoreDir {
     where
         D: Deserializer<'de>,
     {
-        let s = <&str>::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
+        deserialize_from_str(deserializer, "a store directory path")
     }
 }
 
@@ -221,5 +284,18 @@ mod unittests {
         let store_dir = StoreDir::new("/nix/store").unwrap();
         let s: &Path = store_dir.as_ref();
         assert_eq!(s, Path::new("/nix/store"));
+    }
+
+    #[test]
+    fn test_store_dir_default_eq_and_ord() {
+        let default = StoreDir::default();
+        let explicit = StoreDir::new("/nix/store").unwrap();
+        let parsed: StoreDir = "/nix/store".parse().unwrap();
+        let earlier = StoreDir::new("/a/store").unwrap();
+        let later = StoreDir::new("/z/store").unwrap();
+        assert_eq!(default, explicit);
+        assert_eq!(default, parsed);
+        assert!(earlier < default);
+        assert!(default < later);
     }
 }

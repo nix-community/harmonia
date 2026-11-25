@@ -4,7 +4,8 @@ use std::hash::{BuildHasher as _, RandomState};
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use harmonia_store_path::{StoreDir, StorePath};
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
+use harmonia_utils_hash::Sha256;
 
 fn xorshift(state: &mut u64) -> u64 {
     *state ^= *state << 13;
@@ -77,6 +78,31 @@ fn benchmark_store_path(c: &mut Criterion) {
 
     group.bench_function("to_base_path", |b| {
         b.iter(|| black_box(&paths[0]).to_base_path())
+    });
+
+    group.bench_function("to_absolute_path", |b| {
+        b.iter(|| black_box(&paths[0]).to_absolute_path(black_box(&store_dir)))
+    });
+
+    group.bench_function("store_dir_default", |b| {
+        b.iter(|| black_box(StoreDir::default()))
+    });
+
+    group.bench_function("store_dir_clone", |b| {
+        b.iter(|| black_box(&store_dir).clone())
+    });
+
+    let sha = Sha256::digest(b"benchmark input");
+    group.bench_function("hash_from_sha256", |b| {
+        b.iter(|| StorePathHash::new_from_hash(black_box(&sha)))
+    });
+
+    let json_paths = serde_json::to_string(&paths[..100]).unwrap();
+    group.bench_function("serde_serialize_100", |b| {
+        b.iter(|| serde_json::to_string(black_box(&paths[..100])).unwrap())
+    });
+    group.bench_function("serde_deserialize_100", |b| {
+        b.iter(|| serde_json::from_str::<Vec<StorePath>>(black_box(&json_paths)).unwrap())
     });
 
     group.finish();

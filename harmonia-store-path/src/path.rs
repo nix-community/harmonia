@@ -16,6 +16,7 @@ use harmonia_utils_hash::Sha256;
 use super::FromStoreDirStr;
 use super::StoreDir;
 use super::StoreDirDisplay;
+use crate::deserialize_from_str;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StorePath {
@@ -58,6 +59,19 @@ impl StorePath {
         &self.hash
     }
 
+    /// Format `<hash>-<name>` into a caller-supplied byte buffer and return it as `&str`.
+    #[inline]
+    fn write_base_path_str<'a>(&self, dst: &'a mut [u8]) -> &'a str {
+        let name_bytes = self.name.as_bytes();
+        let end = STORE_PATH_HASH_ENCODED_SIZE + 1 + name_bytes.len();
+        let dst = &mut dst[..end];
+        base32::encode_mut(&self.hash.0, &mut dst[..STORE_PATH_HASH_ENCODED_SIZE]);
+        dst[STORE_PATH_HASH_ENCODED_SIZE] = b'-';
+        dst[STORE_PATH_HASH_ENCODED_SIZE + 1..].copy_from_slice(name_bytes);
+        // SAFETY: Nix base32, '-', and StorePathName are all ASCII.
+        unsafe { std::str::from_utf8_unchecked(dst) }
+    }
+
     /// Convert to base path (just the hash-name part, without store directory)
     pub fn to_base_path(&self) -> String {
         let mut s = String::with_capacity(STORE_PATH_HASH_ENCODED_SIZE + 1 + self.name.len());
@@ -72,7 +86,13 @@ impl StorePath {
     /// Unlike the `StoreDirDisplay` instance for `Path`, this will use a native
     /// path separator to the current OS.
     pub fn to_absolute_path(&self, store_dir: &StoreDir) -> PathBuf {
-        store_dir.to_path().join(self.to_string())
+        let dir = store_dir.to_str();
+        let mut buf = [0u8; MAX_BASE_PATH_LEN];
+        let base = self.write_base_path_str(&mut buf);
+        let mut out = PathBuf::with_capacity(dir.len() + 1 + base.len());
+        out.push(dir);
+        out.push(base);
+        out
     }
 
     /// Parse from base path (just the hash-name part, without store directory)
@@ -85,7 +105,8 @@ impl StorePath {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.to_base_path())
+        let mut buf = [0u8; MAX_BASE_PATH_LEN];
+        serializer.serialize_str(self.write_base_path_str(&mut buf))
     }
 
     /// Deserialize from base path (just the hash-name part, without store directory)
@@ -93,8 +114,7 @@ impl StorePath {
     where
         D: Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
-        Self::from_base_path(&s).map_err(serde::de::Error::custom)
+        deserialize_from_str(deserializer, "a store base path")
     }
 
     /// Check if this store path points to a derivation (ends with .drv)
@@ -113,9 +133,8 @@ impl fmt::Debug for StorePath {
 
 impl fmt::Display for StorePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.hash, f)?;
-        f.write_str("-")?;
-        f.write_str(&self.name)
+        let mut buf = [0u8; MAX_BASE_PATH_LEN];
+        f.write_str(self.write_base_path_str(&mut buf))
     }
 }
 
@@ -204,7 +223,19 @@ impl FromStoreDirStr for StorePath {
 
 impl StoreDirDisplay for StorePath {
     fn fmt(&self, store_dir: &StoreDir, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(store_dir.to_str())?;
+        const STACK_FULL_LEN: usize = 256;
+        let dir = store_dir.to_str();
+        let total = dir.len() + 1 + STORE_PATH_HASH_ENCODED_SIZE + 1 + self.name.len();
+        if total <= STACK_FULL_LEN {
+            let mut buf = [0u8; STACK_FULL_LEN];
+            let pos = dir.len();
+            buf[..pos].copy_from_slice(dir.as_bytes());
+            buf[pos] = b'/';
+            self.write_base_path_str(&mut buf[pos + 1..]);
+            // SAFETY: `dir` is valid UTF-8 and the remaining bytes are ASCII.
+            return f.write_str(unsafe { std::str::from_utf8_unchecked(&buf[..total]) });
+        }
+        f.write_str(dir)?;
         f.write_str("/")?;
         fmt::Display::fmt(self, f)
     }
@@ -233,10 +264,13 @@ impl StorePathHash {
     }
 
     pub fn new_from_hash(hash: &Sha256) -> Self {
-        let mut digest = [0u8; STORE_PATH_HASH_SIZE];
-        for (i, item) in hash.as_ref().iter().enumerate() {
-            let idx = i % STORE_PATH_HASH_SIZE;
-            digest[idx] ^= item;
+        const _: () = assert!(STORE_PATH_HASH_SIZE == 20);
+        let bytes: &[u8; 32] = hash.as_ref();
+        let mut digest: [u8; STORE_PATH_HASH_SIZE] = bytes[..STORE_PATH_HASH_SIZE]
+            .try_into()
+            .expect("slice length matches STORE_PATH_HASH_SIZE");
+        for i in 0..12 {
+            digest[i] ^= bytes[STORE_PATH_HASH_SIZE + i];
         }
         StorePathHash(digest)
     }
@@ -400,17 +434,31 @@ partial_eq_self!(StorePathHash);
 partial_eq!(StorePathHash, &'_ [u8]);
 partial_eq!(StorePathHash, [u8; STORE_PATH_HASH_SIZE]);
 
-const NAME_LOOKUP: [bool; 256] = {
-    let mut ret = [false; 256];
+const NAME_INVALID: [u8; 256] = {
+    let mut ret = [1u8; 256];
     let mut idx = 0usize;
-    while idx < u8::MAX as usize {
+    while idx < 256 {
         let ch = idx as u8;
-        ret[idx] = matches!(ch, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'+' | b'-' | b'_' | b'?' | b'=' | b'.');
+        if matches!(ch, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'+' | b'-' | b'_' | b'?' | b'=' | b'.')
+        {
+            ret[idx] = 0;
+        }
         idx += 1;
     }
     ret
 };
 pub(crate) const MAX_NAME_LEN: usize = 211;
+const MAX_BASE_PATH_LEN: usize = STORE_PATH_HASH_ENCODED_SIZE + 1 + MAX_NAME_LEN;
+
+#[cold]
+#[inline(never)]
+fn find_invalid_name_byte(s: &[u8]) -> StorePathNameError {
+    let idx = s
+        .iter()
+        .position(|&ch| NAME_INVALID[ch as usize] != 0)
+        .expect("caller checked that an invalid byte exists");
+    StorePathNameError::Symbol(idx as u8, s[idx])
+}
 
 pub fn into_name<V: AsRef<[u8]>>(s: &V) -> Result<&str, StorePathNameError> {
     let s = s.as_ref();
@@ -418,10 +466,12 @@ pub fn into_name<V: AsRef<[u8]>>(s: &V) -> Result<&str, StorePathNameError> {
         return Err(StorePathNameError::NameLength);
     }
 
-    for (idx, ch) in s.iter().enumerate() {
-        if !NAME_LOOKUP[*ch as usize] {
-            return Err(StorePathNameError::Symbol(idx as u8, *ch));
-        }
+    let mut invalid = 0u8;
+    for &ch in s {
+        invalid |= NAME_INVALID[ch as usize];
+    }
+    if invalid != 0 {
+        return Err(find_invalid_name_byte(s));
     }
 
     // SAFETY: We checked above that it is a subset of ASCII, which guarantees valid UTF-8.
