@@ -1,12 +1,12 @@
 use std::collections::BTreeSet;
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::derived_path::OutputName;
-use harmonia_store_path::{ParseStorePathError, StorePath, StorePathNameError};
+use harmonia_store_path::{ParseStorePathError, StorePath, StorePathHash, StorePathNameError};
 use harmonia_utils_signature::Signature;
 
 /// Identifies a specific output of a derivation.
@@ -91,20 +91,52 @@ pub struct Realisation {
 impl UnkeyedRealisation {
     /// Compute the fingerprint used for signing.
     ///
-    /// Constructs a full `Realisation` JSON (with the given key), then strips
-    /// the `signatures` field from the `value` object — matching upstream Nix.
+    /// Serializes the `Realisation` JSON with the given key and without
+    /// `value.signatures`, matching upstream Nix's canonical JSON order.
     #[must_use]
     pub fn fingerprint(&self, key: &DrvOutput) -> String {
-        let r = Realisation {
-            key: key.clone(),
-            value: self.clone(),
-        };
-        let mut json = serde_json::to_value(&r).expect("Realisation serialization cannot fail");
-        json.get_mut("value")
-            .and_then(|v| v.as_object_mut())
-            .expect("Realisation must have value object")
-            .remove("signatures");
-        json.to_string()
+        // Guard all three types at compile time so adding a field forces
+        // updating the canonical fingerprint format.
+        const _: fn(Realisation) = |Realisation { key: _, value: _ }| {};
+        let Self {
+            out_path,
+            signatures: _,
+        } = self;
+        let DrvOutput {
+            drv_path,
+            output_name,
+        } = key;
+
+        // `StorePath` only allows `[0-9a-zA-Z+._?=-]` (never needs JSON
+        // escaping). Check `output_name` because `OutputName` derives
+        // transparent `Deserialize` without character validation.
+        let output_name_str = output_name.as_ref();
+        let needs_escape = output_name_str
+            .bytes()
+            .any(|b| b < 0x20 || b == b'"' || b == b'\\');
+        if needs_escape {
+            let escaped = serde_json::to_string(output_name_str)
+                .expect("string JSON serialization cannot fail");
+            return format!(
+                r#"{{"key":{{"drvPath":"{drv_path}","outputName":{escaped}}},"value":{{"outPath":"{out_path}"}}}}"#,
+            );
+        }
+
+        const TEMPLATE_LEN: usize =
+            r#"{"key":{"drvPath":"","outputName":""},"value":{"outPath":""}}"#.len();
+        let store_path_len =
+            |p: &StorePath| StorePathHash::encoded_len() + "-".len() + p.name().len();
+        let cap = TEMPLATE_LEN
+            + store_path_len(drv_path)
+            + output_name_str.len()
+            + store_path_len(out_path);
+        let mut out = String::with_capacity(cap);
+        let _ = write!(
+            out,
+            r#"{{"key":{{"drvPath":"{drv_path}","outputName":"{output_name_str}"}},"value":{{"outPath":"{out_path}"}}}}"#,
+        );
+        debug_assert_eq!(out.len(), cap);
+        out
     }
 
     /// Sign this realisation, returning the signature without modifying `self`.
@@ -116,8 +148,12 @@ impl UnkeyedRealisation {
     /// Sign this realisation with the given secret keys, adding the resulting
     /// signatures to the `signatures` set.
     pub fn sign_mut(&mut self, key: &DrvOutput, keys: &[harmonia_utils_signature::SecretKey]) {
+        if keys.is_empty() {
+            return;
+        }
+        let fp = self.fingerprint(key);
         for k in keys {
-            self.signatures.insert(self.sign(key, k));
+            self.signatures.insert(k.sign(&fp));
         }
     }
 }
@@ -336,5 +372,35 @@ mod unittests {
         let sig = r.value.signatures.iter().next().unwrap();
         assert_eq!(sig.name(), "test-key");
         assert!(pk.verify(r.value.fingerprint(&r.key), sig));
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_fingerprint_matches_serde_json(r in proptest::prelude::any::<Realisation>()) {
+            let mut expected = serde_json::to_value(&r).unwrap();
+            expected
+                .get_mut("value")
+                .and_then(|v| v.as_object_mut())
+                .unwrap()
+                .remove("signatures");
+            let fp = r.value.fingerprint(&r.key);
+            proptest::prop_assert_eq!(fp.len(), fp.capacity());
+            proptest::prop_assert_eq!(fp, expected.to_string());
+        }
+    }
+
+    #[test]
+    fn fingerprint_escapes_deserialized_output_name() {
+        let r: Realisation = serde_json::from_str(
+            r#"{"key":{"drvPath":"g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar.drv","outputName":"a\"b\\c\nd"},"value":{"outPath":"g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo","signatures":[]}}"#,
+        )
+        .unwrap();
+        let mut expected = serde_json::to_value(&r).unwrap();
+        expected
+            .get_mut("value")
+            .and_then(|v| v.as_object_mut())
+            .unwrap()
+            .remove("signatures");
+        assert_eq!(r.value.fingerprint(&r.key), expected.to_string());
     }
 }
