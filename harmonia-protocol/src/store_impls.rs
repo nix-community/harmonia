@@ -32,30 +32,28 @@ use harmonia_store_path::{StorePath, StorePathName};
 
 // ========== BasicDerivation ==========
 
-impl NixSerialize for (StorePath, BasicDerivation) {
+impl NixSerialize for BasicDerivation {
     async fn serialize<W>(&self, mut writer: &mut W) -> Result<(), W::Error>
     where
         W: NixWrite,
     {
-        let (drv_path, drv) = self;
-        writer.write_value(drv_path).await?;
-        writer.write_value(&drv.outputs.len()).await?;
-        for (output_name, output) in drv.outputs.iter() {
+        writer.write_value(&self.outputs.len()).await?;
+        for (output_name, output) in self.outputs.iter() {
             writer.write_value(output_name).await?;
-            write_derivation_output(output, &drv.name, output_name, &mut writer).await?;
+            write_derivation_output(output, &self.name, output_name, &mut writer).await?;
         }
-        writer.write_value(&drv.inputs).await?;
-        writer.write_value(&drv.platform).await?;
-        writer.write_value(&drv.builder).await?;
-        writer.write_value(&drv.args).await?;
+        writer.write_value(&self.inputs).await?;
+        writer.write_value(&self.platform).await?;
+        writer.write_value(&self.builder).await?;
+        writer.write_value(&self.args).await?;
         // The wire format (like ATerm) carries structured attrs as the
         // `__json` env var, not as a separate field. Re-inject it so the
         // remote daemon reconstructs the same derivation.
-        match &drv.structured_attrs {
-            None => writer.write_value(&drv.env).await?,
+        match &self.structured_attrs {
+            None => writer.write_value(&self.env).await?,
             Some(sa) => {
                 use crate::ser::Error as _;
-                let mut env = drv.env.clone();
+                let mut env = self.env.clone();
                 let json = serde_json::to_string(&sa.attrs).map_err(|e| {
                     W::Error::custom(std::format_args!("failed to encode structured attrs: {e}"))
                 })?;
@@ -884,9 +882,8 @@ mod tests {
             .write_number(0)
             .write_number(0)
             .build();
-        mock.write_value(&(path.clone(), drv.clone()))
-            .await
-            .unwrap();
+        mock.write_value(&path).await.unwrap();
+        mock.write_value(&drv).await.unwrap();
 
         let mut buf = Vec::new();
         let mut writer = crate::ser::NixWriter::new(&mut buf);
