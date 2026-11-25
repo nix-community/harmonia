@@ -26,6 +26,7 @@ proptest                       = { workspace = true, optional = true }
 proptest-derive                = { workspace = true, optional = true }
 serde                          = { workspace = true }
 serde_json                     = { workspace = true }
+smol_str                       = { version = "0.3", features = [ "serde" ] }
 thiserror                      = { workspace = true }
 zerocopy                       = { version = "0.8", features = [ "derive" ] }
 
