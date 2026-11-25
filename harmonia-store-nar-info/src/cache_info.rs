@@ -70,8 +70,11 @@ impl FromStr for CacheInfo {
                 };
             match key {
                 "StoreDir" => {
-                    info.store_dir =
-                        Some(StoreDir::new(value).map_err(|e| invalid("StoreDir", &e))?);
+                    info.store_dir = Some(
+                        value
+                            .parse::<StoreDir>()
+                            .map_err(|e| invalid("StoreDir", &e))?,
+                    );
                 }
                 "WantMassQuery" => info.want_mass_query = Some(value == "1"),
                 "Priority" => {
