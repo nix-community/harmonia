@@ -11,7 +11,6 @@ mod nar_hash;
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
-use std::fmt::Write as _;
 use std::num::NonZero;
 
 #[cfg(any(test, feature = "test"))]
@@ -22,7 +21,7 @@ pub use nar_hash::NarHash;
 
 use harmonia_store_content_address::ContentAddress;
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash};
-use harmonia_utils_hash::HashFormat as _;
+use harmonia_utils_base_encoding::base32;
 use harmonia_utils_signature::Signature;
 #[cfg(any(test, feature = "test"))]
 use harmonia_utils_signature::proptests::arb_signatures;
@@ -45,25 +44,58 @@ pub fn fingerprint_path(
     nar_size: u64,
     references: &BTreeSet<StorePath>,
 ) -> Vec<u8> {
-    let path_len = |p: &StorePath| {
-        store_dir.to_str().len() + 2 + StorePathHash::encoded_len() + p.name().len()
-    };
-    let capacity = 128 + path_len(store_path) + references.iter().map(path_len).sum::<usize>();
-    let mut out = String::with_capacity(capacity);
-    write!(
-        out,
-        "1;{};{};{nar_size};",
-        store_dir.display(store_path),
-        nar_hash.as_base32()
-    )
-    .expect("writing to a String cannot fail");
+    const HASH_LEN: usize = StorePathHash::encoded_len();
+    const NAR_HASH_BASE32_LEN: usize = base32::encode_len(32);
+
+    let dir = store_dir.to_str().as_bytes();
+    let prefix_per_path = dir.len() + 1 + HASH_LEN + 1;
+    let refs_len = references.len() * prefix_per_path
+        + references.iter().map(|p| p.name().len()).sum::<usize>()
+        + references.len().saturating_sub(1);
+    let mut size_buf = itoa::Buffer::new();
+    let size_bytes = size_buf.format(nar_size).as_bytes();
+    // "1;" + store_path + ";sha256:" + 52-char base32 + ";" + nar_size + ";" + refs
+    let capacity = 2
+        + prefix_per_path
+        + store_path.name().len()
+        + 8
+        + NAR_HASH_BASE32_LEN
+        + 1
+        + size_bytes.len()
+        + 1
+        + refs_len;
+
+    let mut out = Vec::with_capacity(capacity);
+    let mut nar_hash_buf = [0u8; NAR_HASH_BASE32_LEN];
+    base32::encode_mut(nar_hash.digest_bytes(), &mut nar_hash_buf);
+
+    out.extend_from_slice(b"1;");
+    push_store_path(&mut out, dir, store_path);
+    out.extend_from_slice(b";sha256:");
+    out.extend_from_slice(&nar_hash_buf);
+    out.push(b';');
+    out.extend_from_slice(size_bytes);
+    out.push(b';');
+
     for (i, reference) in references.iter().enumerate() {
         if i > 0 {
-            out.push(',');
+            out.push(b',');
         }
-        write!(out, "{}", store_dir.display(reference)).expect("writing to a String cannot fail");
+        push_store_path(&mut out, dir, reference);
     }
-    out.into_bytes()
+    out
+}
+
+#[inline]
+fn push_store_path(out: &mut Vec<u8>, dir: &[u8], path: &StorePath) {
+    const HASH_LEN: usize = StorePathHash::encoded_len();
+    let mut mid = [0u8; 1 + HASH_LEN + 1];
+    mid[0] = b'/';
+    base32::encode_mut(path.hash().as_ref(), &mut mid[1..1 + HASH_LEN]);
+    mid[1 + HASH_LEN] = b'-';
+    out.extend_from_slice(dir);
+    out.extend_from_slice(&mid);
+    out.extend_from_slice(path.name().as_bytes());
 }
 
 /// Serializes in "pure" format, omitting impure fields when they have default values.

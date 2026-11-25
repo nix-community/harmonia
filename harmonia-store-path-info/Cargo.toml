@@ -14,8 +14,10 @@ description          = "ValidPathInfo, NarHash, and JSON serialization for Nix s
 [dependencies]
 harmonia-store-content-address = { workspace = true }
 harmonia-store-path            = { workspace = true }
+harmonia-utils-base-encoding   = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
+itoa                           = "1"
 proptest                       = { workspace = true, optional = true }
 proptest-derive                = { workspace = true, optional = true }
 serde                          = { workspace = true }
