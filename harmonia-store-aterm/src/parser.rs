@@ -14,6 +14,10 @@ use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathSet};
 use crate::ParseError;
 use crate::raw_output::{AtermOutput as _, BorrowedRawOutput};
 
+/// Maximum nesting depth for dynamic derivation outputs (`DrvWithVersion`).
+/// Prevents stack overflow on deeply nested inputs.
+const MAX_DYNAMIC_OUTPUT_DEPTH: usize = 128;
+
 /// ATerm derivation format version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ATermVersion {
@@ -180,7 +184,7 @@ impl<'a> Parser<'a> {
             let path = self.parse_store_path()?;
             self.expect_char(',')?;
 
-            let output_inputs = self.parse_output_inputs(version)?;
+            let output_inputs = self.parse_output_inputs(version, 0)?;
             self.expect_char(')')?;
 
             drvs.insert(path, output_inputs);
@@ -194,7 +198,11 @@ impl<'a> Parser<'a> {
         Ok(drvs)
     }
 
-    fn parse_output_inputs(&mut self, version: ATermVersion) -> Result<OutputInputs, ParseError> {
+    fn parse_output_inputs(
+        &mut self,
+        version: ATermVersion,
+        depth: usize,
+    ) -> Result<OutputInputs, ParseError> {
         match version {
             ATermVersion::Traditional => {
                 let outputs = self.parse_output_names()?;
@@ -212,6 +220,12 @@ impl<'a> Parser<'a> {
                     })
                 }
                 Some(b'(') => {
+                    if depth >= MAX_DYNAMIC_OUTPUT_DEPTH {
+                        return Err(ParseError::MaxDepthExceeded {
+                            max_depth: MAX_DYNAMIC_OUTPUT_DEPTH,
+                            pos: self.pos,
+                        });
+                    }
                     self.expect_char('(')?;
                     let outputs = self.parse_output_names()?;
                     self.expect_char(',')?;
@@ -224,7 +238,7 @@ impl<'a> Parser<'a> {
                             .map_err(|_| ParseError::InvalidUtf8 { pos: self.pos })?;
                         let output_name: OutputName = name_str.parse()?;
                         self.expect_char(',')?;
-                        let child = self.parse_output_inputs(version)?;
+                        let child = self.parse_output_inputs(version, depth + 1)?;
                         self.expect_char(')')?;
                         dynamic_outputs.insert(output_name, child);
                         if self.peek() == Some(b',') {
@@ -422,5 +436,72 @@ mod tests {
             crate::parse_derivation_aterm(&store_dir, input.as_bytes(), "test".parse().unwrap())
                 .is_err()
         );
+    }
+
+    fn nested_dynamic_drv(depth: usize) -> String {
+        let mut s = String::from(
+            r#"DrvWithVersion("xp-dyn-drv",[],[("/nix/store/00000000000000000000000000000000-a.drv","#,
+        );
+        for _ in 0..depth {
+            s.push_str(r#"([],[("a","#);
+        }
+        s.push_str(r#"["out"]"#);
+        for _ in 0..depth {
+            s.push_str(")])");
+        }
+        s.push_str(r#")],[],"x86_64-linux","/bin/sh",[],[])"#);
+        s
+    }
+
+    #[test]
+    fn dynamic_output_depth_at_limit_roundtrips() {
+        let input = nested_dynamic_drv(MAX_DYNAMIC_OUTPUT_DEPTH);
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let store_dir = StoreDir::default();
+                let drv = crate::parse_derivation_aterm(
+                    &store_dir,
+                    input.as_bytes(),
+                    "test".parse().unwrap(),
+                )
+                .expect("nesting at MAX_DYNAMIC_OUTPUT_DEPTH should succeed");
+                let printed = crate::print_derivation_aterm(&store_dir, &drv.into_full());
+                assert_eq!(printed, input.as_bytes());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[rstest]
+    #[case::one_over_limit(MAX_DYNAMIC_OUTPUT_DEPTH + 1)]
+    #[case::deep_hostile_input(10_000)]
+    fn dynamic_output_depth_exceeding_limit_errors(#[case] depth: usize) {
+        let input = nested_dynamic_drv(depth);
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let store_dir = StoreDir::default();
+                let err = crate::parse_derivation_aterm(
+                    &store_dir,
+                    input.as_bytes(),
+                    "test".parse().unwrap(),
+                )
+                .unwrap_err();
+                assert!(
+                    matches!(
+                        err,
+                        ParseError::MaxDepthExceeded {
+                            max_depth: MAX_DYNAMIC_OUTPUT_DEPTH,
+                            ..
+                        }
+                    ),
+                    "unexpected error: {err}"
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
