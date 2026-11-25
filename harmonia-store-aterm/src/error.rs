@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+use harmonia_store_derivation::derivation::StructuredAttrsError;
 use harmonia_store_path::{ParseStorePathError, StorePathNameError};
 
 use crate::raw_output::FromRawOutputError;
@@ -28,4 +29,6 @@ pub enum ParseError {
     Output(#[from] FromRawOutputError),
     #[error("invalid UTF-8 in string at position {pos}")]
     InvalidUtf8 { pos: usize },
+    #[error("{0}")]
+    StructuredAttrs(#[from] StructuredAttrsError),
 }

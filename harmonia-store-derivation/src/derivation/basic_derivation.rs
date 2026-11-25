@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{Hash, Hasher};
 
 use memchr::memmem;
 #[cfg(test)]
@@ -11,19 +13,164 @@ use harmonia_store_path::{StorePathName, StorePathSet};
 use super::inputs::DerivationInputsRef;
 use super::{DerivationInputs, DerivationOutput, DerivationOutputs};
 
+/// Error extracting or parsing `__json` structured attributes.
+#[derive(Debug, thiserror::Error)]
+pub enum StructuredAttrsError {
+    #[error("invalid UTF-8 in `__json` structured attributes: {0}")]
+    InvalidUtf8(#[from] std::str::Utf8Error),
+    #[error("invalid `__json` structured attributes: {0}")]
+    InvalidJson(#[from] serde_json::Error),
+}
+
 /// Structured attributes for a derivation.
 ///
 /// When present, derivation attributes are passed to the builder as a JSON object
 /// via the `__json` environment variable, rather than individual environment variables.
 /// This allows passing complex data structures (arrays, nested objects, etc.) to builders.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+///
+/// When parsed from ATerm or the daemon wire format via [`Self::parse`], the
+/// original `__json` string is kept verbatim so non-canonical encodings (such as
+/// float formatting like `1e+15` vs `1000000000000000.0` or whitespace) round-trip
+/// byte-identically and produce matching derivation hashes. Mutating through
+/// [`Self::attrs_mut`] clears the verbatim copy so [`Self::unparse`] re-serializes
+/// the updated map.
+#[derive(Debug, Clone)]
 pub struct StructuredAttrs {
     /// The structured attributes as a JSON object.
     ///
     /// Note: The `env` map must not contain the key `__json` when structured attrs are used,
     /// as that key is reserved for encoding the structured attributes themselves.
-    pub attrs: serde_json::Map<String, serde_json::Value>,
+    attrs: serde_json::Map<String, serde_json::Value>,
+    /// Raw `__json` encoding preserved from parsing, if any.
+    verbatim: Option<String>,
+}
+
+impl StructuredAttrs {
+    /// Environment variable name used to carry structured attributes in ATerm
+    /// and daemon wire encodings.
+    pub const ENV_VAR: &[u8] = b"__json";
+
+    /// Create structured attributes from a parsed JSON object map.
+    pub fn new(attrs: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self {
+            attrs,
+            verbatim: None,
+        }
+    }
+
+    /// Parse structured attributes from an encoded `__json` string, retaining
+    /// the original encoding verbatim for lossless ATerm/wire round-tripping.
+    pub fn parse(encoded: impl Into<String>) -> Result<Self, serde_json::Error> {
+        let encoded = encoded.into();
+        let attrs: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&encoded)?;
+        Ok(Self {
+            attrs,
+            verbatim: Some(encoded),
+        })
+    }
+
+    /// Remove and parse `__json` from an environment map, mirroring C++ Nix's
+    /// `StructuredAttrs::tryExtract`.
+    pub fn try_extract(
+        env: &mut BTreeMap<bytes::Bytes, bytes::Bytes>,
+    ) -> Result<Option<Self>, StructuredAttrsError> {
+        let Some(json_bytes) = env.remove(Self::ENV_VAR) else {
+            return Ok(None);
+        };
+        let json_str = String::from_utf8(json_bytes.into()).map_err(|e| e.utf8_error())?;
+        Ok(Some(Self::parse(json_str)?))
+    }
+
+    /// Borrow the parsed structured attributes map.
+    pub fn attrs(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.attrs
+    }
+
+    /// Mutably borrow the structured attributes map, invalidating any preserved
+    /// verbatim `__json` encoding.
+    pub fn attrs_mut(&mut self) -> &mut serde_json::Map<String, serde_json::Value> {
+        self.verbatim = None;
+        &mut self.attrs
+    }
+
+    /// Consume `self` and return the underlying JSON object map.
+    pub fn into_attrs(self) -> serde_json::Map<String, serde_json::Value> {
+        self.attrs
+    }
+
+    /// Return the preserved verbatim `__json` encoding, if this value was parsed
+    /// and has not been mutated since.
+    pub fn verbatim(&self) -> Option<&str> {
+        self.verbatim.as_deref()
+    }
+
+    /// Encode the structured attributes as a `__json` string, borrowing the
+    /// preserved verbatim encoding when available.
+    pub fn unparse(&self) -> Cow<'_, str> {
+        match &self.verbatim {
+            Some(raw) => Cow::Borrowed(raw.as_str()),
+            None => Cow::Owned(
+                serde_json::to_string(&self.attrs)
+                    .expect("serde_json::Map serialization is infallible"),
+            ),
+        }
+    }
+
+    /// Encode the structured attributes as owned `__json` bytes.
+    pub fn unparse_bytes(&self) -> bytes::Bytes {
+        match self.unparse() {
+            Cow::Borrowed(s) => bytes::Bytes::copy_from_slice(s.as_bytes()),
+            Cow::Owned(s) => bytes::Bytes::from(s),
+        }
+    }
+}
+
+impl From<serde_json::Map<String, serde_json::Value>> for StructuredAttrs {
+    fn from(attrs: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self::new(attrs)
+    }
+}
+
+impl PartialEq for StructuredAttrs {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare encoded representations (matching C++ Nix's
+        // `StructuredAttrs::operator==`), since the exact `__json` bytes are
+        // part of a derivation's hash identity.
+        match (&self.verbatim, &other.verbatim) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) if self.attrs != other.attrs => false,
+            // Exactly one side is verbatim, so compare encodings only. Parsed
+            // maps can differ even when the encodings match, because parsing
+            // need not reproduce the exact `f64` that was serialized.
+            _ => self.unparse() == other.unparse(),
+        }
+    }
+}
+
+impl Eq for StructuredAttrs {}
+
+impl Hash for StructuredAttrs {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.unparse().hash(state);
+    }
+}
+
+impl Serialize for StructuredAttrs {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.attrs.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for StructuredAttrs {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        serde_json::Map::deserialize(deserializer).map(Self::new)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -116,7 +263,7 @@ pub mod arbitrary {
             for (k, v) in map {
                 attrs.insert(k, v);
             }
-            StructuredAttrs { attrs }
+            StructuredAttrs::new(attrs)
         })
     }
 }
@@ -512,11 +659,12 @@ impl<Inputs> DerivationT<Inputs> {
         }
 
         if let Some(ref mut sa) = self.structured_attrs {
-            let json = serde_json::to_string(&sa.attrs).unwrap();
-            if let Some(rewritten) = rewriter.rewrite(json.as_bytes())
-                && let Ok(attrs) = serde_json::from_slice(&rewritten)
+            let raw = sa.unparse();
+            if let Some(rewritten) = rewriter.rewrite(raw.as_bytes())
+                && let Ok(rewritten_str) = String::from_utf8(rewritten.into())
+                && let Ok(parsed) = StructuredAttrs::parse(rewritten_str)
             {
-                sa.attrs = attrs;
+                *sa = parsed;
             }
         }
     }
@@ -798,5 +946,122 @@ mod tests {
             drv.apply_rewrites(&rewrites);
             prop_assert_eq!(drv.env, expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod structured_attrs_tests {
+    use super::*;
+    use std::collections::hash_map::DefaultHasher;
+
+    fn hash_of(sa: &StructuredAttrs) -> u64 {
+        let mut h = DefaultHasher::new();
+        sa.hash(&mut h);
+        h.finish()
+    }
+
+    #[test]
+    fn parse_preserves_verbatim_and_mut_clears_it() {
+        for raw in [
+            r#"{"x":1e+15}"#,
+            r#"{"x":1e-05}"#,
+            r#"{ "b": 2, "a": 1 }"#,
+            r#"{"s":"\u001B"}"#,
+        ] {
+            let mut sa = StructuredAttrs::parse(raw).unwrap();
+            assert_eq!(sa.verbatim(), Some(raw));
+            assert_eq!(sa.unparse().as_ref(), raw);
+            assert!(matches!(sa.unparse(), Cow::Borrowed(_)));
+
+            sa.attrs_mut()
+                .insert("added".into(), serde_json::json!(true));
+            assert_eq!(sa.verbatim(), None);
+            assert!(sa.unparse().contains("\"added\":true"));
+        }
+    }
+
+    #[test]
+    fn parse_rejects_invalid_or_non_object_json() {
+        for bad in ["", "not-json", "[1,2]", "\"str\"", "42", "null"] {
+            assert!(
+                StructuredAttrs::parse(bad).is_err(),
+                "expected error for {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn eq_and_hash_consistent_across_verbatim_and_canonical() {
+        let canonical_parsed = StructuredAttrs::parse(r#"{"a":1}"#).unwrap();
+        let canonical_new = StructuredAttrs::new(serde_json::from_str(r#"{"a":1}"#).unwrap());
+        assert_eq!(canonical_parsed, canonical_new);
+        assert_eq!(hash_of(&canonical_parsed), hash_of(&canonical_new));
+
+        let exp_parsed = StructuredAttrs::parse(r#"{"x":1e+15}"#).unwrap();
+        let exp_new = StructuredAttrs::new(serde_json::from_str(r#"{"x":1e+15}"#).unwrap());
+        assert_ne!(exp_parsed, exp_new);
+
+        let neg_zero = StructuredAttrs::new(serde_json::from_str(r#"{"z":-0.0}"#).unwrap());
+        let pos_zero = StructuredAttrs::new(serde_json::from_str(r#"{"z":0.0}"#).unwrap());
+        let pos_zero_parsed = StructuredAttrs::parse(r#"{"z":0.0}"#).unwrap();
+        assert_eq!(pos_zero, pos_zero_parsed);
+        assert_eq!(hash_of(&pos_zero), hash_of(&pos_zero_parsed));
+        assert_ne!(neg_zero, pos_zero);
+        assert_ne!(neg_zero, pos_zero_parsed);
+    }
+
+    /// With one verbatim side, equality compares encodings only, as C++ Nix
+    /// does. `serde_json`'s default float parser does not round-trip this
+    /// value exactly, so the parsed maps differ although the encodings match.
+    #[test]
+    fn eq_compares_encodings_when_one_side_is_verbatim() {
+        let mut attrs = serde_json::Map::new();
+        let x = f64::from_bits(0x305f_050c_368d_cc74);
+        attrs.insert("x".into(), serde_json::Value::from(x));
+        let canonical = StructuredAttrs::new(attrs);
+        let parsed = StructuredAttrs::parse(canonical.unparse().into_owned()).unwrap();
+        assert_eq!(parsed, canonical);
+        assert_eq!(canonical, parsed);
+        assert_eq!(hash_of(&parsed), hash_of(&canonical));
+    }
+
+    #[test]
+    fn apply_rewrites_preserves_verbatim_formatting() {
+        let mut drv = Derivation::new(
+            "test".parse().unwrap(),
+            bytes::Bytes::from_static(b"x86_64-linux"),
+            bytes::Bytes::from_static(b"/bin/sh"),
+        );
+        drv.structured_attrs =
+            Some(StructuredAttrs::parse(r#"{"p":"/placeholder","x":1e+15}"#).unwrap());
+
+        // Non-matching rewrite leaves verbatim intact.
+        let mut no_match = BTreeMap::new();
+        no_match.insert(
+            bytes::Bytes::from_static(b"/unused"),
+            bytes::Bytes::from_static(b"/replaced"),
+        );
+        drv.apply_rewrites(&no_match);
+        assert_eq!(
+            drv.structured_attrs.as_ref().unwrap().verbatim(),
+            Some(r#"{"p":"/placeholder","x":1e+15}"#),
+        );
+
+        // Matching rewrite preserves untouched float formatting verbatim.
+        let mut matched = BTreeMap::new();
+        matched.insert(
+            bytes::Bytes::from_static(b"/placeholder"),
+            bytes::Bytes::from_static(b"/nix/store/00000000000000000000000000000000-out"),
+        );
+        drv.apply_rewrites(&matched);
+        let sa = drv.structured_attrs.as_ref().unwrap();
+        assert_eq!(
+            sa.verbatim(),
+            Some(r#"{"p":"/nix/store/00000000000000000000000000000000-out","x":1e+15}"#),
+        );
+        assert_eq!(
+            sa.attrs().get("p").and_then(|v| v.as_str()),
+            Some("/nix/store/00000000000000000000000000000000-out"),
+        );
     }
 }
