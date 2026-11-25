@@ -226,10 +226,12 @@ where
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        let rem = ready!(self.as_mut().poll_fill_buf(cx))?;
-        if !rem.is_empty() {
-            let amt = std::cmp::min(rem.len(), buf.remaining());
-            buf.put_slice(&rem[0..amt]);
+        if self.buf.is_empty() {
+            ready!(self.as_mut().poll_force_fill_buf_internal(cx))?;
+        }
+        if !self.buf.is_empty() {
+            let amt = std::cmp::min(self.buf.len(), buf.remaining());
+            buf.put_slice(&self.buf[..amt]);
             self.consume(amt);
         }
         Poll::Ready(Ok(()))

@@ -5,7 +5,6 @@ use std::{
     task::{Context, Poll, ready},
 };
 
-use bytes::Buf;
 use tokio::io::{AsyncRead, ReadBuf};
 
 #[derive(Debug, Clone)]
@@ -27,6 +26,7 @@ impl TryReadU64 {
             read: 0,
         }
     }
+
     pub async fn read<R: AsyncRead>(mut self, reader: R) -> io::Result<Option<u64>> {
         let mut reader = pin!(reader);
         poll_fn(move |cx| self.poll_reader(cx, reader.as_mut())).await
@@ -54,7 +54,6 @@ impl TryReadU64 {
             }
             self.read += buf.filled().len() as u8;
         }
-        let num = Buf::get_u64_le(&mut &self.buf[..]);
-        Poll::Ready(Ok(Some(num)))
+        Poll::Ready(Ok(Some(u64::from_le_bytes(self.buf))))
     }
 }

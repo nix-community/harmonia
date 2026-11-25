@@ -81,19 +81,18 @@ impl TryReadBytesLimited {
                         drop(buf);
                         buf = ready!(reader.as_mut().poll_force_fill_buf(cx))?;
                     }
-                    let mut contents = buf.split_to(*aligned);
                     reader.as_mut().consume(*aligned);
 
                     let padding = *aligned - *len;
                     // Ensure padding is all zeros
-                    if contents[*len..] != ZEROS[..padding] {
+                    if buf[*len..*aligned] != ZEROS[..padding] {
                         *self = Self::Done;
                         return Poll::Ready(Err(invalid_data("non-zero padding")));
                     }
 
-                    contents.truncate(*len);
+                    buf.truncate(*len);
                     *self = Self::Done;
-                    return Poll::Ready(Ok(Some(contents)));
+                    return Poll::Ready(Ok(Some(buf)));
                 }
                 Self::Done => panic!("Polling completed future"),
             }
