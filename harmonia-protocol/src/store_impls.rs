@@ -54,12 +54,11 @@ impl NixSerialize for (StorePath, BasicDerivation) {
         match &drv.structured_attrs {
             None => writer.write_value(&drv.env).await?,
             Some(sa) => {
-                use crate::ser::Error as _;
                 let mut env = drv.env.clone();
-                let json = serde_json::to_string(&sa.attrs).map_err(|e| {
-                    W::Error::custom(std::format_args!("failed to encode structured attrs: {e}"))
-                })?;
-                env.insert(Bytes::from_static(b"__json"), Bytes::from(json));
+                env.insert(
+                    Bytes::from_static(StructuredAttrs::ENV_VAR),
+                    sa.unparse_bytes(),
+                );
                 writer.write_value(&env).await?;
             }
         }
@@ -98,13 +97,9 @@ impl NixDeserialize for (StorePath, BasicDerivation) {
             let args = reader.read_value().await?;
             let mut env: BTreeMap<Bytes, Bytes> = reader.read_value().await?;
             // Mirror `StructuredAttrs::tryExtract`: pull `__json` out
-            // of env into the dedicated field so round-tripping is lossless.
-            let structured_attrs = env.remove(b"__json".as_slice()).and_then(|json_bytes| {
-                let json_str = std::str::from_utf8(&json_bytes).ok()?;
-                let attrs: serde_json::Map<String, serde_json::Value> =
-                    serde_json::from_str(json_str).ok()?;
-                Some(StructuredAttrs { attrs })
-            });
+            // of env into the dedicated field, preserving the raw encoding.
+            let structured_attrs =
+                StructuredAttrs::try_extract(&mut env).map_err(R::Error::invalid_data)?;
 
             Ok(Some((
                 drv_path,
@@ -900,5 +895,63 @@ mod tests {
         let got: (harmonia_store_path::StorePath, BasicDerivation) =
             reader.read_value().await.unwrap();
         assert_eq!(got, (path, drv));
+    }
+
+    #[tokio::test]
+    async fn basic_derivation_wire_preserves_verbatim_structured_attrs() {
+        use crate::de::NixRead;
+        use tokio::io::AsyncWriteExt as _;
+
+        let (path, mut drv) = sample_fod();
+        let raw_json = r#"{"x":1e+15}"#;
+        drv.structured_attrs = Some(super::StructuredAttrs::parse(raw_json).unwrap());
+
+        let mut buf = Vec::new();
+        let mut writer = crate::ser::NixWriter::new(&mut buf);
+        writer
+            .write_value(&(path.clone(), drv.clone()))
+            .await
+            .unwrap();
+        writer.flush().await.unwrap();
+        drop(writer);
+
+        assert!(
+            buf.windows(raw_json.len())
+                .any(|w| w == raw_json.as_bytes())
+        );
+
+        let mut reader = crate::de::NixReader::new(std::io::Cursor::new(buf));
+        let (got_path, got_drv): (harmonia_store_path::StorePath, BasicDerivation) =
+            reader.read_value().await.unwrap();
+        assert_eq!(got_path, path);
+        assert_eq!(
+            got_drv.structured_attrs.as_ref().unwrap().verbatim(),
+            Some(raw_json)
+        );
+        assert_eq!(got_drv, drv);
+    }
+
+    #[tokio::test]
+    async fn basic_derivation_wire_rejects_malformed_structured_attrs() {
+        use crate::de::NixRead;
+        use tokio::io::AsyncWriteExt as _;
+
+        let (path, mut drv) = sample_fod();
+        drv.env.insert(
+            bytes::Bytes::from_static(b"__json"),
+            bytes::Bytes::from_static(b"not-valid-json"),
+        );
+
+        let mut buf = Vec::new();
+        let mut writer = crate::ser::NixWriter::new(&mut buf);
+        writer.write_value(&(path, drv)).await.unwrap();
+        writer.flush().await.unwrap();
+        drop(writer);
+
+        let mut reader = crate::de::NixReader::new(std::io::Cursor::new(buf));
+        let res = reader
+            .read_value::<(harmonia_store_path::StorePath, BasicDerivation)>()
+            .await;
+        assert!(res.is_err());
     }
 }
