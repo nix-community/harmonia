@@ -9,10 +9,9 @@
 //! (CSR) adjacency list, so liveness computation is a BFS over integer node
 //! ids ([`StoreGraph::compute_closure`]).
 
-use std::collections::HashMap;
 use std::time::Instant;
 
-use foldhash::{HashMap as IdMap, HashMapExt};
+use foldhash::{HashMap, HashMapExt};
 
 use harmonia_store_path::StoreDir;
 use rusqlite::Connection;
@@ -303,7 +302,7 @@ fn load_graph_in_txn(
     options: &GraphOptions,
 ) -> Result<StoreGraph> {
     // ValidPaths ids are sparse: every collected path leaves a gap.
-    let mut id_to_idx: IdMap<i64, u32> = IdMap::new();
+    let mut id_to_idx: HashMap<i64, u32> = HashMap::new();
 
     let mut paths: Vec<String> = Vec::new();
     let mut ids: Vec<i64> = Vec::new();
