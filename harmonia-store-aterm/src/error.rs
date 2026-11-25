@@ -17,6 +17,8 @@ pub enum ParseError {
     UnexpectedEof { expected: &'static str, pos: usize },
     #[error("unterminated string at position {pos}")]
     UnterminatedString { pos: usize },
+    #[error("dynamic output nesting exceeds maximum depth of {max_depth} at position {pos}")]
+    MaxDepthExceeded { max_depth: usize, pos: usize },
     #[error("invalid store path at position {pos}: {source}")]
     StorePath {
         pos: usize,
