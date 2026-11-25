@@ -27,15 +27,18 @@ pub enum ContentAddressMethod {
     NixArchive,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(any(test, feature = "test"), derive(Arbitrary))]
 pub enum ContentAddressMethodAlgorithm {
-    #[display("text:sha256")]
     Text,
-    #[display("{_0}")]
     Flat(Algorithm),
-    #[display("r:{_0}")]
     NixArchive(Algorithm),
+}
+
+impl std::fmt::Display for ContentAddressMethodAlgorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Raw representation for JSON serialization/deserialization
@@ -92,9 +95,43 @@ impl ContentAddressMethodAlgorithm {
         }
     }
 
+    /// Returns the ATerm form (e.g. `"sha256"`, `"r:sha256"`, `"text:sha256"`).
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Text => "text:sha256",
+            Self::Flat(Algorithm::MD5) => "md5",
+            Self::Flat(Algorithm::SHA1) => "sha1",
+            Self::Flat(Algorithm::SHA256) => "sha256",
+            Self::Flat(Algorithm::SHA512) => "sha512",
+            Self::Flat(Algorithm::BLAKE3) => "blake3",
+            Self::NixArchive(Algorithm::MD5) => "r:md5",
+            Self::NixArchive(Algorithm::SHA1) => "r:sha1",
+            Self::NixArchive(Algorithm::SHA256) => "r:sha256",
+            Self::NixArchive(Algorithm::SHA512) => "r:sha512",
+            Self::NixArchive(Algorithm::BLAKE3) => "r:blake3",
+        }
+    }
+
+    /// Returns the worker protocol form (e.g. `"fixed:r:sha256"`, `"text:sha256"`).
+    pub const fn as_with_algo_str(&self) -> &'static str {
+        match self {
+            Self::Text => "text:sha256",
+            Self::Flat(Algorithm::MD5) => "fixed:md5",
+            Self::Flat(Algorithm::SHA1) => "fixed:sha1",
+            Self::Flat(Algorithm::SHA256) => "fixed:sha256",
+            Self::Flat(Algorithm::SHA512) => "fixed:sha512",
+            Self::Flat(Algorithm::BLAKE3) => "fixed:blake3",
+            Self::NixArchive(Algorithm::MD5) => "fixed:r:md5",
+            Self::NixArchive(Algorithm::SHA1) => "fixed:r:sha1",
+            Self::NixArchive(Algorithm::SHA256) => "fixed:r:sha256",
+            Self::NixArchive(Algorithm::SHA512) => "fixed:r:sha512",
+            Self::NixArchive(Algorithm::BLAKE3) => "fixed:r:blake3",
+        }
+    }
+
     /// Renders the worker protocol form.
     pub fn render_with_algo(&self) -> String {
-        format!("{}:{}", self.method(), self.algorithm())
+        self.as_with_algo_str().to_owned()
     }
 
     /// Parses the worker protocol form produced by [`Self::render_with_algo`].
@@ -295,15 +332,55 @@ mod unittests {
 
     #[rstest]
     #[case::text(ContentAddressMethodAlgorithm::Text, "text:sha256", "text:sha256")]
-    #[case::flat(
+    #[case::flat_md5(
+        ContentAddressMethodAlgorithm::Flat(Algorithm::MD5),
+        "fixed:md5",
+        "md5"
+    )]
+    #[case::flat_sha1(
+        ContentAddressMethodAlgorithm::Flat(Algorithm::SHA1),
+        "fixed:sha1",
+        "sha1"
+    )]
+    #[case::flat_sha256(
         ContentAddressMethodAlgorithm::Flat(Algorithm::SHA256),
         "fixed:sha256",
         "sha256"
     )]
-    #[case::recursive(
+    #[case::flat_sha512(
+        ContentAddressMethodAlgorithm::Flat(Algorithm::SHA512),
+        "fixed:sha512",
+        "sha512"
+    )]
+    #[case::flat_blake3(
+        ContentAddressMethodAlgorithm::Flat(Algorithm::BLAKE3),
+        "fixed:blake3",
+        "blake3"
+    )]
+    #[case::nar_md5(
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::MD5),
+        "fixed:r:md5",
+        "r:md5"
+    )]
+    #[case::nar_sha1(
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA1),
+        "fixed:r:sha1",
+        "r:sha1"
+    )]
+    #[case::nar_sha256(
         ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA256),
         "fixed:r:sha256",
         "r:sha256"
+    )]
+    #[case::nar_sha512(
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::SHA512),
+        "fixed:r:sha512",
+        "r:sha512"
+    )]
+    #[case::nar_blake3(
+        ContentAddressMethodAlgorithm::NixArchive(Algorithm::BLAKE3),
+        "fixed:r:blake3",
+        "r:blake3"
     )]
     fn method_algorithm_render_parse(
         #[case] cama: ContentAddressMethodAlgorithm,
