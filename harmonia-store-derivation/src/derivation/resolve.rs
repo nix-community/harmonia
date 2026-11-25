@@ -2,9 +2,25 @@ use std::collections::BTreeMap;
 
 use crate::derived_path::{OutputName, SingleDerivedPath};
 use crate::placeholder::Placeholder;
-use harmonia_store_path::{StoreDir, StorePath, StorePathSet};
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathSet};
+use harmonia_utils_base_encoding::base32;
 
 use super::{BasicDerivation, Derivation, DerivationOutput};
+
+fn store_dir_path_bytes(store_dir: &StoreDir, path: &StorePath) -> bytes::Bytes {
+    let dir = store_dir.to_str().trim_end_matches('/').as_bytes();
+    let name = path.name().as_bytes();
+    let hash_len = StorePathHash::encoded_len();
+    let mut out = Vec::with_capacity(dir.len() + 1 + hash_len + 1 + name.len());
+    out.extend_from_slice(dir);
+    out.push(b'/');
+    let hash_start = out.len();
+    out.resize(hash_start + hash_len, 0);
+    base32::encode_mut(path.hash().as_ref(), &mut out[hash_start..]);
+    out.push(b'-');
+    out.extend_from_slice(name);
+    bytes::Bytes::from(out)
+}
 
 impl Derivation {
     /// Resolve input derivation references into concrete store paths.
@@ -33,14 +49,10 @@ impl Derivation {
         store_dir: &StoreDir,
         query: &mut impl FnMut(&[(&SingleDerivedPath, &OutputName)]) -> Vec<Option<StorePath>>,
     ) -> Option<BasicDerivation> {
-        let mut resolved = self.try_resolve_force(store_dir, query)?;
+        let (mut resolved, has_built_inputs) = self.try_resolve_inner(store_dir, query)?;
 
         // InputAddressed becomes Deferred when the inputs had Built
         // entries, since the original output hashes are no longer valid.
-        let has_built_inputs = self
-            .inputs
-            .iter()
-            .any(|i| matches!(i, SingleDerivedPath::Built { .. }));
         if has_built_inputs {
             for output in resolved.outputs.values_mut() {
                 if matches!(output, DerivationOutput::InputAddressed(_)) {
@@ -66,9 +78,16 @@ impl Derivation {
         store_dir: &StoreDir,
         query: &mut impl FnMut(&[(&SingleDerivedPath, &OutputName)]) -> Vec<Option<StorePath>>,
     ) -> Option<BasicDerivation> {
-        let mut input_srcs = StorePathSet::new();
-        let mut input_rewrites = BTreeMap::<bytes::Bytes, bytes::Bytes>::new();
+        self.try_resolve_inner(store_dir, query)
+            .map(|(resolved, _)| resolved)
+    }
 
+    fn try_resolve_inner(
+        &self,
+        store_dir: &StoreDir,
+        query: &mut impl FnMut(&[(&SingleDerivedPath, &OutputName)]) -> Vec<Option<StorePath>>,
+    ) -> Option<(BasicDerivation, bool)> {
+        let mut input_srcs = StorePathSet::new();
         let mut built_inputs: Vec<(&SingleDerivedPath, &OutputName)> = Vec::new();
 
         for input in &self.inputs {
@@ -82,19 +101,20 @@ impl Derivation {
             }
         }
 
+        let has_built_inputs = !built_inputs.is_empty();
         let resolved_paths = query(&built_inputs);
         assert_eq!(resolved_paths.len(), built_inputs.len());
+        if resolved_paths.iter().any(Option::is_none) {
+            return None;
+        }
 
+        let mut input_rewrites = BTreeMap::<bytes::Bytes, bytes::Bytes>::new();
         for ((drv_path, output), actual_path) in built_inputs.into_iter().zip(resolved_paths) {
             let actual_path = actual_path?;
 
-            let placeholder = Placeholder::output(&drv_path.into(), output);
-            let ph_path = placeholder.render();
-            let actual = actual_path.to_absolute_path(store_dir);
-            input_rewrites.insert(
-                bytes::Bytes::copy_from_slice(ph_path.as_os_str().as_encoded_bytes()),
-                bytes::Bytes::copy_from_slice(actual.as_os_str().as_encoded_bytes()),
-            );
+            let placeholder = Placeholder::from_single_derived_path(drv_path, output);
+            let actual = store_dir_path_bytes(store_dir, &actual_path);
+            input_rewrites.insert(placeholder.render_bytes(), actual);
 
             input_srcs.insert(actual_path);
         }
@@ -112,7 +132,7 @@ impl Derivation {
 
         resolved.apply_rewrites(&input_rewrites);
 
-        Some(resolved)
+        Some((resolved, has_built_inputs))
     }
 }
 
