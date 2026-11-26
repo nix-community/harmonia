@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use memchr::memmem;
 #[cfg(test)]
 use proptest::prelude::{Arbitrary, BoxedStrategy};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -7,6 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::derived_path::SingleDerivedPath;
 use harmonia_store_path::{StorePathName, StorePathSet};
 
+use super::inputs::DerivationInputsRef;
 use super::{DerivationInputs, DerivationOutput, DerivationOutputs};
 
 /// Structured attributes for a derivation.
@@ -119,9 +121,72 @@ pub mod arbitrary {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+struct StrMapSlice<'a>(&'a [(&'a str, &'a str)]);
+
+impl Serialize for StrMapSlice<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().copied())
+    }
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DerivationHelperT<Inputs> {
+struct DerivationRef<'a, Inputs: Serialize> {
+    name: &'a str,
+    outputs: &'a DerivationOutputs,
+    inputs: Inputs,
+    #[serde(rename = "system")]
+    platform: &'a str,
+    builder: &'a str,
+    args: &'a [&'a str],
+    env: StrMapSlice<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    structured_attrs: Option<&'a StructuredAttrs>,
+    version: u32,
+}
+
+fn serialize_derivation<'a, Inputs, SerInputs, S>(
+    drv: &'a DerivationT<Inputs>,
+    make_inputs: impl FnOnce(&'a Inputs) -> SerInputs,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    SerInputs: Serialize,
+    S: Serializer,
+{
+    // Validate all UTF-8 upfront so streaming serializers never receive partial
+    // output if a later arg or env entry is invalid UTF-8.
+    let platform = std::str::from_utf8(&drv.platform).map_err(serde::ser::Error::custom)?;
+    let builder = std::str::from_utf8(&drv.builder).map_err(serde::ser::Error::custom)?;
+    let args: Vec<&str> = drv
+        .args
+        .iter()
+        .map(|b| std::str::from_utf8(b))
+        .collect::<Result<_, _>>()
+        .map_err(serde::ser::Error::custom)?;
+    let env: Vec<(&str, &str)> = drv
+        .env
+        .iter()
+        .map(|(k, v)| Ok((std::str::from_utf8(k)?, std::str::from_utf8(v)?)))
+        .collect::<Result<_, std::str::Utf8Error>>()
+        .map_err(serde::ser::Error::custom)?;
+    DerivationRef {
+        name: drv.name.as_ref(),
+        outputs: &drv.outputs,
+        inputs: make_inputs(&drv.inputs),
+        platform,
+        builder,
+        args: &args,
+        env: StrMapSlice(&env),
+        structured_attrs: drv.structured_attrs.as_ref(),
+        version: default_version(),
+    }
+    .serialize(serializer)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DerivationDe<Inputs> {
     name: String,
     outputs: DerivationOutputs,
     inputs: Inputs,
@@ -130,79 +195,21 @@ struct DerivationHelperT<Inputs> {
     builder: String,
     args: Vec<String>,
     env: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     structured_attrs: Option<StructuredAttrs>,
     #[serde(default = "default_version")]
     version: u32,
 }
 
-/// Trait for converting between the in-memory input representation and
-/// the JSON-serializable form.
-trait SerdeInputs: Sized {
-    type Helper: Serialize + for<'de> Deserialize<'de>;
-    fn to_helper(&self) -> Self::Helper;
-    fn from_helper(h: Self::Helper) -> Self;
-}
-
-impl SerdeInputs for StorePathSet {
-    type Helper = StorePathSet;
-    fn to_helper(&self) -> StorePathSet {
-        self.clone()
-    }
-    fn from_helper(h: StorePathSet) -> Self {
-        h
-    }
-}
-
-impl SerdeInputs for BTreeSet<SingleDerivedPath> {
-    type Helper = DerivationInputs;
-    fn to_helper(&self) -> DerivationInputs {
-        DerivationInputs::from(self)
-    }
-    fn from_helper(h: DerivationInputs) -> Self {
-        BTreeSet::from(&h)
-    }
-}
-
-fn derivation_to_helper<Inputs: SerdeInputs>(
-    drv: &DerivationT<Inputs>,
-) -> Result<DerivationHelperT<Inputs::Helper>, std::str::Utf8Error> {
-    let platform_str = std::str::from_utf8(&drv.platform)?;
-    let builder_str = std::str::from_utf8(&drv.builder)?;
-    let args_strs: Result<Vec<String>, _> = drv
-        .args
-        .iter()
-        .map(|b| std::str::from_utf8(b).map(|s| s.to_string()))
-        .collect();
-    let args_strs = args_strs?;
-    let env_map: Result<BTreeMap<String, String>, _> = drv
-        .env
-        .iter()
-        .map(|(k, v)| {
-            Ok((
-                std::str::from_utf8(k)?.to_string(),
-                std::str::from_utf8(v)?.to_string(),
-            ))
-        })
-        .collect();
-    let env_map = env_map?;
-
-    Ok(DerivationHelperT {
-        name: drv.name.to_string(),
-        version: default_version(),
-        outputs: drv.outputs.clone(),
-        inputs: drv.inputs.to_helper(),
-        platform: platform_str.to_string(),
-        builder: builder_str.to_string(),
-        args: args_strs,
-        env: env_map,
-        structured_attrs: drv.structured_attrs.clone(),
-    })
-}
-
-fn helper_to_derivation<'de, Inputs: SerdeInputs, D: Deserializer<'de>>(
-    helper: DerivationHelperT<Inputs::Helper>,
-) -> Result<DerivationT<Inputs>, D::Error> {
+fn deserialize_derivation<'de, Inputs, HelperInputs, D>(
+    deserializer: D,
+    convert_inputs: impl FnOnce(HelperInputs) -> Inputs,
+) -> Result<DerivationT<Inputs>, D::Error>
+where
+    HelperInputs: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    let helper = DerivationDe::<HelperInputs>::deserialize(deserializer)?;
     if helper.version != 4 {
         return Err(serde::de::Error::custom(format!(
             "unsupported derivation version: {}, expected 4",
@@ -215,7 +222,7 @@ fn helper_to_derivation<'de, Inputs: SerdeInputs, D: Deserializer<'de>>(
             .parse()
             .map_err(|e| serde::de::Error::custom(format!("invalid derivation name: {}", e)))?,
         outputs: helper.outputs,
-        inputs: Inputs::from_helper(helper.inputs),
+        inputs: convert_inputs(helper.inputs),
         platform: bytes::Bytes::from(helper.platform),
         builder: bytes::Bytes::from(helper.builder),
         args: helper.args.into_iter().map(bytes::Bytes::from).collect(),
@@ -233,9 +240,7 @@ impl Serialize for BasicDerivation {
     where
         S: Serializer,
     {
-        derivation_to_helper(self)
-            .map_err(serde::ser::Error::custom)?
-            .serialize(serializer)
+        serialize_derivation(self, |i| i, serializer)
     }
 }
 
@@ -244,8 +249,7 @@ impl<'de> Deserialize<'de> for BasicDerivation {
     where
         D: Deserializer<'de>,
     {
-        let helper = DerivationHelperT::<StorePathSet>::deserialize(deserializer)?;
-        helper_to_derivation::<StorePathSet, D>(helper)
+        deserialize_derivation(deserializer, std::convert::identity)
     }
 }
 
@@ -254,9 +258,7 @@ impl Serialize for Derivation {
     where
         S: Serializer,
     {
-        derivation_to_helper(self)
-            .map_err(serde::ser::Error::custom)?
-            .serialize(serializer)
+        serialize_derivation(self, DerivationInputsRef::from, serializer)
     }
 }
 
@@ -265,8 +267,7 @@ impl<'de> Deserialize<'de> for Derivation {
     where
         D: Deserializer<'de>,
     {
-        let helper = DerivationHelperT::<DerivationInputs>::deserialize(deserializer)?;
-        helper_to_derivation::<BTreeSet<SingleDerivedPath>, D>(helper)
+        deserialize_derivation(deserializer, |h: DerivationInputs| BTreeSet::from(&h))
     }
 }
 
@@ -311,6 +312,158 @@ impl<Inputs, Output> DerivationT<Inputs, Output> {
     }
 }
 
+#[inline]
+fn hash_pair(b1: u8, b2: u8) -> usize {
+    (u16::from_le_bytes([b1, b2]).wrapping_mul(0x9e37) >> 8) as usize
+}
+
+fn replace_matches<'a>(
+    haystack: &[u8],
+    from_len: usize,
+    mut next_match: impl FnMut(usize) -> Option<(usize, &'a bytes::Bytes)>,
+) -> Option<bytes::Bytes> {
+    let (first, first_to) = next_match(0)?;
+    if first == 0 && from_len == haystack.len() {
+        return Some(first_to.clone());
+    }
+    let cap = (haystack.len() - from_len).saturating_add(first_to.len());
+    let mut out = Vec::with_capacity(cap);
+    out.extend_from_slice(&haystack[..first]);
+    out.extend_from_slice(first_to);
+    let mut pos = first + from_len;
+    while let Some((idx, to)) = next_match(pos) {
+        out.extend_from_slice(&haystack[pos..idx]);
+        out.extend_from_slice(to);
+        pos = idx + from_len;
+    }
+    out.extend_from_slice(&haystack[pos..]);
+    Some(bytes::Bytes::from(out))
+}
+
+struct DelimFixedRewriter<'a> {
+    delim: u8,
+    key_len: usize,
+    pair_mask: [u64; 4],
+    /// Sorted by key (preserved from `BTreeMap` iteration order).
+    pairs: Vec<(&'a [u8], &'a bytes::Bytes)>,
+}
+
+impl<'a> DelimFixedRewriter<'a> {
+    fn find_from(&self, haystack: &[u8], start: usize) -> Option<(usize, &'a bytes::Bytes)> {
+        let end_limit = haystack.len().checked_sub(self.key_len)?;
+        let second_off = (self.key_len - 1).min(2);
+        let mut pos = start;
+        while pos <= end_limit {
+            let rel = memchr::memchr(self.delim, &haystack[pos..=end_limit])?;
+            let idx = pos + rel;
+            let h = hash_pair(haystack[idx + 1], haystack[idx + second_off]);
+            if (self.pair_mask[h >> 6] & (1u64 << (h & 63))) != 0 {
+                let candidate = &haystack[idx..idx + self.key_len];
+                if let Ok(found) = self.pairs.binary_search_by_key(&candidate, |&(k, _)| k) {
+                    return Some((idx, self.pairs[found].1));
+                }
+            }
+            pos = idx + 1;
+        }
+        None
+    }
+}
+
+enum Rewriter<'a> {
+    /// Fast single-pass SIMD `memchr` scanner when multiple keys share a fixed
+    /// length and unique leading delimiter byte (all Nix output placeholders).
+    DelimFixed(DelimFixedRewriter<'a>),
+    /// Single-key and general sequential fallback for overlapping or chained keys.
+    Sequential(Vec<(memmem::Finder<'a>, &'a bytes::Bytes)>),
+}
+
+impl<'a> Rewriter<'a> {
+    fn new(rewrites: &'a BTreeMap<bytes::Bytes, bytes::Bytes>) -> Option<Self> {
+        let mut pairs: Vec<(&'a [u8], &'a bytes::Bytes)> = Vec::with_capacity(rewrites.len());
+        for (from, to) in rewrites {
+            assert!(!from.is_empty(), "rewrite key must not be empty");
+            if from != to {
+                pairs.push((from.as_ref(), to));
+            }
+        }
+        if pairs.is_empty() {
+            return None;
+        }
+        if pairs.len() > 1 {
+            let key_len = pairs[0].0.len();
+            let delim = pairs[0].0[0];
+            let keys_disjoint = key_len >= 2
+                && pairs.iter().all(|(from, _)| {
+                    from.len() == key_len
+                        && from[0] == delim
+                        && memchr::memchr(delim, &from[1..]).is_none()
+                });
+            if keys_disjoint {
+                let second_off = (key_len - 1).min(2);
+                let mut pair_mask = [0u64; 4];
+                for &(from, _) in &pairs {
+                    let h = hash_pair(from[1], from[second_off]);
+                    pair_mask[h >> 6] |= 1u64 << (h & 63);
+                }
+                let candidate = DelimFixedRewriter {
+                    delim,
+                    key_len,
+                    pair_mask,
+                    pairs,
+                };
+                let single_pass_safe = candidate.pairs.iter().all(|&(_, to)| {
+                    let to = to.as_ref();
+                    if to.first() != Some(&delim) || candidate.find_from(to, 0).is_some() {
+                        return false;
+                    }
+                    let last_delim = memchr::memrchr(delim, to).unwrap();
+                    let tail = &to[last_delim..];
+                    if tail.len() >= key_len {
+                        return true;
+                    }
+                    // `candidate.pairs` is sorted, so any key starting with `tail`
+                    // must be the first key >= `tail`.
+                    let idx = candidate.pairs.partition_point(|&(from, _)| from < tail);
+                    candidate
+                        .pairs
+                        .get(idx)
+                        .is_none_or(|&(from, _)| !from.starts_with(tail))
+                });
+                if single_pass_safe {
+                    return Some(Self::DelimFixed(candidate));
+                }
+                pairs = candidate.pairs;
+            }
+        }
+        let finders = pairs
+            .into_iter()
+            .map(|(from, to)| (memmem::Finder::new(from), to))
+            .collect();
+        Some(Self::Sequential(finders))
+    }
+
+    fn rewrite(&self, haystack: &[u8]) -> Option<bytes::Bytes> {
+        match self {
+            Self::DelimFixed(rw) => {
+                replace_matches(haystack, rw.key_len, |pos| rw.find_from(haystack, pos))
+            }
+            Self::Sequential(finders) => {
+                let mut buf: Option<bytes::Bytes> = None;
+                for (finder, to) in finders {
+                    let cur = buf.as_deref().unwrap_or(haystack);
+                    let from_len = finder.needle().len();
+                    if let Some(next) = replace_matches(cur, from_len, |pos| {
+                        finder.find(&cur[pos..]).map(|rel| (pos + rel, *to))
+                    }) {
+                        buf = Some(next);
+                    }
+                }
+                buf
+            }
+        }
+    }
+}
+
 impl<Inputs> DerivationT<Inputs> {
     /// Replace all occurrences of each rewrite's key with its value in builder,
     /// args, env (keys and values), and structured_attrs.
@@ -318,48 +471,51 @@ impl<Inputs> DerivationT<Inputs> {
     /// This is used during derivation resolution to substitute CA output
     /// placeholders with their actual store paths.
     pub fn apply_rewrites(&mut self, rewrites: &BTreeMap<bytes::Bytes, bytes::Bytes>) {
-        if rewrites.is_empty() {
+        let Some(rewriter) = Rewriter::new(rewrites) else {
             return;
-        }
+        };
 
-        fn rewrite(
-            s: &bytes::Bytes,
-            rewrites: &BTreeMap<bytes::Bytes, bytes::Bytes>,
-        ) -> bytes::Bytes {
-            let mut buf = Vec::from(s.as_ref());
-            for (from, to) in rewrites {
-                assert!(!from.is_empty(), "rewrite key must not be empty");
-                // Repeatedly scan for the pattern and replace all occurrences.
-                // TODO: after https://github.com/tokio-rs/bytes/issues/824 is resolved, use the replace method on BytesMut.
-                let mut i = 0;
-                while i + from.len() <= buf.len() {
-                    if buf[i..i + from.len()] == **from {
-                        buf.splice(i..i + from.len(), to.iter().copied());
-                        i += to.len();
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
-            bytes::Bytes::from(buf)
+        if let Some(builder) = rewriter.rewrite(&self.builder) {
+            self.builder = builder;
         }
-
-        self.builder = rewrite(&self.builder, rewrites);
 
         for arg in &mut self.args {
-            *arg = rewrite(arg, rewrites);
+            if let Some(rewritten) = rewriter.rewrite(arg) {
+                *arg = rewritten;
+            }
         }
 
-        let old_env = std::mem::take(&mut self.env);
-        for (k, v) in old_env {
-            self.env
-                .insert(rewrite(&k, rewrites), rewrite(&v, rewrites));
+        // Rewrite values in place in a single BTreeMap traversal, deferring
+        // key re-insertion to the rare case where an env key itself matched.
+        let mut renamed_keys: Vec<(bytes::Bytes, bytes::Bytes)> = Vec::new();
+        for (k, v) in &mut self.env {
+            if let Some(rewritten) = rewriter.rewrite(v) {
+                *v = rewritten;
+            }
+            if let Some(new_k) = rewriter.rewrite(k) {
+                renamed_keys.push((k.clone(), new_k));
+            }
+        }
+        if !renamed_keys.is_empty() {
+            // Re-insert every entry in ascending original-key order so the
+            // later original key wins any collision, whether between a renamed
+            // and an unchanged key or between two renamed keys.
+            // `renamed_keys` was collected in that same order.
+            let mut renamed = renamed_keys.into_iter().peekable();
+            for (k, v) in std::mem::take(&mut self.env) {
+                let k = match renamed.next_if(|(old_k, _)| *old_k == k) {
+                    Some((_, new_k)) => new_k,
+                    None => k,
+                };
+                self.env.insert(k, v);
+            }
         }
 
         if let Some(ref mut sa) = self.structured_attrs {
-            let json_bytes = bytes::Bytes::from(serde_json::to_string(&sa.attrs).unwrap());
-            let rewritten = rewrite(&json_bytes, rewrites);
-            if let Ok(attrs) = serde_json::from_slice(&rewritten) {
+            let json = serde_json::to_string(&sa.attrs).unwrap();
+            if let Some(rewritten) = rewriter.rewrite(json.as_bytes())
+                && let Ok(attrs) = serde_json::from_slice(&rewritten)
+            {
                 sa.attrs = attrs;
             }
         }
@@ -379,6 +535,268 @@ impl Derivation {
             args: Vec::new(),
             env: Default::default(),
             structured_attrs: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::derived_path::OutputName;
+    use crate::placeholder::Placeholder;
+    use bytes::Bytes;
+    use harmonia_store_path::StorePath;
+    use proptest::prelude::*;
+
+    /// Reference sequential byte-by-byte rewriter matching the original algorithm.
+    fn reference_rewrite(s: &[u8], rewrites: &BTreeMap<Bytes, Bytes>) -> Vec<u8> {
+        let mut buf = s.to_vec();
+        for (from, to) in rewrites {
+            let mut i = 0;
+            while i + from.len() <= buf.len() {
+                if &buf[i..i + from.len()] == from.as_ref() {
+                    buf.splice(i..i + from.len(), to.iter().copied());
+                    i += to.len();
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        buf
+    }
+
+    fn sample_basic() -> BasicDerivation {
+        BasicDerivation {
+            name: "test".parse().unwrap(),
+            outputs: BTreeMap::new(),
+            inputs: StorePathSet::new(),
+            platform: Bytes::from_static(b"x86_64-linux"),
+            builder: Bytes::from_static(b"/bin/sh"),
+            args: vec![Bytes::from_static(b"-c"), Bytes::from_static(b"echo hi")],
+            env: BTreeMap::from([
+                (Bytes::from_static(b"A"), Bytes::from_static(b"val")),
+                (Bytes::from_static(b"B"), Bytes::from_static(b"other")),
+            ]),
+            structured_attrs: None,
+        }
+    }
+
+    #[test]
+    fn apply_rewrites_delim_fixed_placeholders() {
+        let sp1: StorePath = "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-a.drv".parse().unwrap();
+        let sp2: StorePath = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-b.drv".parse().unwrap();
+        let ph1 = Bytes::from(
+            Placeholder::ca_output(&sp1, &OutputName::default())
+                .render()
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let ph2 = Bytes::from(
+            Placeholder::ca_output(&sp2, &OutputName::default())
+                .render()
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let out1 = Bytes::from_static(b"/nix/store/g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-a");
+        let out2 = Bytes::from_static(b"/nix/store/7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-b");
+        let rewrites = BTreeMap::from([(ph1.clone(), out1.clone()), (ph2.clone(), out2.clone())]);
+
+        let rw = Rewriter::new(&rewrites).unwrap();
+        assert!(matches!(rw, Rewriter::DelimFixed(_)));
+
+        let mut drv = sample_basic();
+        let combined = [ph1.as_ref(), b" ", ph2.as_ref(), b":", ph1.as_ref()].concat();
+        drv.builder = ph1.clone();
+        drv.args.push(Bytes::from(combined.clone()));
+        drv.env
+            .insert(Bytes::from_static(b"deps"), Bytes::from(combined));
+        drv.apply_rewrites(&rewrites);
+
+        let expected = [out1.as_ref(), b" ", out2.as_ref(), b":", out1.as_ref()].concat();
+        assert_eq!(drv.builder, out1);
+        assert_eq!(drv.args[2].as_ref(), expected.as_slice());
+        assert_eq!(drv.env[b"deps".as_slice()].as_ref(), expected.as_slice());
+        assert_eq!(drv.env[b"A".as_slice()].as_ref(), b"val");
+    }
+
+    #[test]
+    fn apply_rewrites_chained_and_env_key_collisions() {
+        // Sequential semantics: "aa" -> "bb" then "bb" -> "cc" turns "aa" into "cc".
+        let rewrites = BTreeMap::from([
+            (Bytes::from_static(b"aa"), Bytes::from_static(b"bb")),
+            (Bytes::from_static(b"bb"), Bytes::from_static(b"cc")),
+        ]);
+        let rw = Rewriter::new(&rewrites).unwrap();
+        assert!(matches!(rw, Rewriter::Sequential(_)));
+
+        let mut drv = sample_basic();
+        drv.env.insert(
+            Bytes::from_static(b"key_aa"),
+            Bytes::from_static(b"from_aa"),
+        );
+        // Collides with later unchanged key "key_cc": later key must win.
+        drv.env.insert(
+            Bytes::from_static(b"key_cc"),
+            Bytes::from_static(b"unchanged_cc"),
+        );
+        // Earlier unchanged key "key_0" collided by renamed "key_aa" -> nope; test
+        // rename overwriting an EARLIER unchanged key too.
+        let mut drv2 = sample_basic();
+        let rewrites2 = BTreeMap::from([(Bytes::from_static(b"z"), Bytes::from_static(b"a"))]);
+        drv2.env
+            .insert(Bytes::from_static(b"a"), Bytes::from_static(b"early"));
+        drv2.env
+            .insert(Bytes::from_static(b"z"), Bytes::from_static(b"late"));
+        drv2.apply_rewrites(&rewrites2);
+        assert_eq!(drv2.env[b"a".as_slice()].as_ref(), b"late");
+        assert!(!drv2.env.contains_key(b"z".as_slice()));
+
+        // Two renamed keys sharing a destination: the later original key wins.
+        let mut drv3 = sample_basic();
+        let rewrites3 = BTreeMap::from([
+            (Bytes::from_static(b"a"), Bytes::from_static(b"z")),
+            (Bytes::from_static(b"b"), Bytes::from_static(b"z")),
+        ]);
+        drv3.env
+            .insert(Bytes::from_static(b"x_a"), Bytes::from_static(b"first"));
+        drv3.env
+            .insert(Bytes::from_static(b"x_b"), Bytes::from_static(b"second"));
+        drv3.apply_rewrites(&rewrites3);
+        assert_eq!(drv3.env[b"x_z".as_slice()].as_ref(), b"second");
+        assert!(!drv3.env.contains_key(b"x_a".as_slice()));
+        assert!(!drv3.env.contains_key(b"x_b".as_slice()));
+
+        drv.apply_rewrites(&rewrites);
+        assert!(!drv.env.contains_key(b"key_aa".as_slice()));
+        assert_eq!(drv.env[b"key_cc".as_slice()].as_ref(), b"unchanged_cc");
+    }
+
+    #[test]
+    fn apply_rewrites_noop_and_atomic_invalid_utf8_serialize() {
+        let noop = BTreeMap::from([(Bytes::from_static(b"x"), Bytes::from_static(b"x"))]);
+        assert!(Rewriter::new(&noop).is_none());
+
+        let single = BTreeMap::from([(Bytes::from_static(b"hi"), Bytes::from_static(b"bye"))]);
+        assert!(matches!(
+            Rewriter::new(&single).unwrap(),
+            Rewriter::Sequential(_)
+        ));
+        let mut drv = sample_basic();
+        drv.apply_rewrites(&single);
+        assert_eq!(drv.args[1].as_ref(), b"echo bye");
+
+        // Invalid UTF-8 in args or env must fail before writing any bytes.
+        let mut bad = sample_basic();
+        bad.args.push(Bytes::from_static(&[0xff]));
+        let mut out = Vec::new();
+        assert!(serde_json::to_writer(&mut out, &bad).is_err());
+        assert!(out.is_empty());
+
+        let mut bad_env = sample_basic();
+        bad_env
+            .env
+            .insert(Bytes::from_static(b"BAD"), Bytes::from_static(&[0xff]));
+        let mut out = Vec::new();
+        assert!(serde_json::to_writer(&mut out, &bad_env).is_err());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "rewrite key must not be empty")]
+    fn apply_rewrites_empty_key_panics() {
+        let mut drv = sample_basic();
+        let rewrites = BTreeMap::from([(Bytes::new(), Bytes::from_static(b"x"))]);
+        drv.apply_rewrites(&rewrites);
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_rewriter_matches_reference(
+            haystack in prop::collection::vec(prop::sample::select(vec![b'/', b'a', b'b', b'c', b'-']), 0..64),
+            entries in prop::collection::vec(
+                (
+                    prop::collection::vec(prop::sample::select(vec![b'/', b'a', b'b', b'c']), 1..6),
+                    prop::collection::vec(prop::sample::select(vec![b'/', b'a', b'b', b'c', b'-']), 0..8),
+                ),
+                0..5,
+            ),
+        ) {
+            let rewrites: BTreeMap<Bytes, Bytes> = entries
+                .into_iter()
+                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
+                .collect();
+            let expected = reference_rewrite(&haystack, &rewrites);
+            let actual = Rewriter::new(&rewrites)
+                .and_then(|rw| rw.rewrite(&haystack))
+                .map(|b| b.to_vec())
+                .unwrap_or_else(|| haystack.clone());
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn proptest_delim_fixed_matches_reference(
+            haystack in prop::collection::vec(prop::sample::select(vec![b'/', b'a', b'b', b'c', b'-']), 0..80),
+            key_bodies in prop::collection::btree_set(
+                prop::collection::vec(prop::sample::select(vec![b'a', b'b', b'c']), 4),
+                2..5,
+            ),
+            val_tails in prop::collection::vec(
+                prop::collection::vec(prop::sample::select(vec![b'/', b'a', b'b', b'c', b'-']), 1..10),
+                5,
+            ),
+        ) {
+            let rewrites: BTreeMap<Bytes, Bytes> = key_bodies
+                .into_iter()
+                .zip(val_tails)
+                .map(|(mut k, mut v)| {
+                    k.insert(0, b'/');
+                    v.insert(0, b'/');
+                    (Bytes::from(k), Bytes::from(v))
+                })
+                .collect();
+            let expected = reference_rewrite(&haystack, &rewrites);
+            let actual = Rewriter::new(&rewrites)
+                .and_then(|rw| rw.rewrite(&haystack))
+                .map(|b| b.to_vec())
+                .unwrap_or_else(|| haystack.clone());
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn proptest_env_rewrites_match_reference(
+            env in prop::collection::btree_map(
+                prop::collection::vec(prop::sample::select(vec![b'a', b'b', b'c']), 1..4),
+                prop::collection::vec(prop::sample::select(vec![b'a', b'b', b'c']), 0..4),
+                0..8,
+            ),
+            entries in prop::collection::vec(
+                (
+                    prop::collection::vec(prop::sample::select(vec![b'a', b'b', b'c']), 1..3),
+                    prop::collection::vec(prop::sample::select(vec![b'a', b'b', b'c']), 0..3),
+                ),
+                1..4,
+            ),
+        ) {
+            let rewrites: BTreeMap<Bytes, Bytes> = entries
+                .into_iter()
+                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
+                .collect();
+            let mut drv = sample_basic();
+            drv.env = env
+                .into_iter()
+                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
+                .collect();
+            // The original algorithm: re-insert every entry in ascending
+            // original-key order, so the later original key wins collisions.
+            let mut expected = BTreeMap::new();
+            for (k, v) in &drv.env {
+                expected.insert(
+                    Bytes::from(reference_rewrite(k, &rewrites)),
+                    Bytes::from(reference_rewrite(v, &rewrites)),
+                );
+            }
+            drv.apply_rewrites(&rewrites);
+            prop_assert_eq!(drv.env, expected);
         }
     }
 }
