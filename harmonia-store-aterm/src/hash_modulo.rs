@@ -24,6 +24,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
 use bytes::Bytes;
 
 use harmonia_store_derivation::derivation::{
@@ -36,7 +37,7 @@ use harmonia_store_path::{StoreDir, StorePath, StorePathNameError};
 use harmonia_utils_hash::Sha256;
 
 use crate::input_address::{UnfilledOutput, fill_outputs_from_hash};
-use crate::print_derivation_aterm;
+use crate::printer::{Sha256Sink, write_derivation_parts, write_sha256_hex};
 
 /// The hash of a derivation "modulo" fixed-output derivations, used as
 /// its identity when it appears as an input to other derivations.
@@ -63,14 +64,9 @@ pub enum HashModulo {
     DeferredDrv,
 }
 
-/// The inputs of the intermediate derivation used to compute the hash
-/// modulo: input derivations are identified by their hash modulo rather
-/// than by store path.
-///
-/// `Sha256`'s `Ord` compares digest bytes left-to-right, which matches
-/// base16-lexicographic order (hex encoding is monotonic per byte), so
-/// the `BTreeMap` gives the correct ATerm key ordering directly.
-type HashModuloInputs = DerivationInputs<Sha256>;
+// `Sha256`'s `Ord` compares digest bytes left-to-right, which matches
+// base16-lexicographic order (hex encoding is monotonic per byte), so
+// `BTreeMap<Sha256, OutputInputs>` gives the correct ATerm key ordering directly.
 
 /// Error from substituting input derivations with their hash moduli —
 /// the failure modes shared by every function in this module.
@@ -91,11 +87,11 @@ pub enum InputModuloError<E> {
 /// Returns `Ok(None)` if any input is deferred or dynamic (its output
 /// paths are not yet known, so no hash modulo can be computed yet).
 fn modulo_drvs<E>(
-    inputs: &DerivationInputs,
+    input_drvs: BTreeMap<StorePath, OutputInputs>,
     mut lookup: impl FnMut(&StorePath) -> Result<HashModulo, E>,
 ) -> Result<Option<BTreeMap<Sha256, OutputInputs>>, InputModuloError<E>> {
     let mut drvs: BTreeMap<Sha256, OutputInputs> = BTreeMap::new();
-    for (drv_path, oi) in &inputs.drvs {
+    for (drv_path, oi) in input_drvs {
         // Need to build and resolve dynamic derivations first.
         if !oi.dynamic_outputs.is_empty() {
             return Ok(None);
@@ -103,20 +99,18 @@ fn modulo_drvs<E>(
         // Nix merges the output names on a hash-key collision
         // (`drvInputs[drvHash].insert(...)` in derivation/masked.cc);
         // replicate that exactly since this is the preimage for output paths.
-        let mut add = |h: Sha256, outputs: BTreeSet<OutputName>| {
-            drvs.entry(h)
-                .or_insert_with(|| OutputInputs {
-                    outputs: BTreeSet::new(),
-                    dynamic_outputs: BTreeMap::new(),
-                })
-                .outputs
-                .extend(outputs);
-        };
-        match lookup(drv_path).map_err(InputModuloError::Lookup)? {
+        match lookup(&drv_path).map_err(InputModuloError::Lookup)? {
             HashModulo::DeferredDrv => return Ok(None),
             // Regular non-CA derivation: replace the derivation path
             // with its hash, keeping the requested output names.
-            HashModulo::DrvHash(h) => add(h, oi.outputs.clone()),
+            HashModulo::DrvHash(h) => match drvs.entry(h) {
+                std::collections::btree_map::Entry::Vacant(e) => {
+                    e.insert(oi);
+                }
+                std::collections::btree_map::Entry::Occupied(mut e) => {
+                    e.get_mut().outputs.extend(oi.outputs);
+                }
+            },
             // Fixed-output derivation: pretend each output hash is a
             // derivation hash producing a single "out" output.
             HashModulo::CaOutputHashes(output_hashes) => {
@@ -126,7 +120,13 @@ fn modulo_drvs<E>(
                             output: output.clone(),
                         }
                     })?;
-                    add(*h, [OutputName::default()].into());
+                    drvs.entry(*h)
+                        .or_insert_with(|| OutputInputs {
+                            outputs: BTreeSet::new(),
+                            dynamic_outputs: BTreeMap::new(),
+                        })
+                        .outputs
+                        .insert(OutputName::default());
                 }
             }
         }
@@ -134,40 +134,31 @@ fn modulo_drvs<E>(
     Ok(Some(drvs))
 }
 
-/// Replace each input derivation with its hash modulo, producing the
-/// intermediate derivation the hash is taken over. Polymorphic over the
-/// output type: `hash_input_modulo` preserves outputs, `hash_modulo`
-/// masks them first.
-///
-/// Returns `Ok(None)` if any input is deferred or dynamic.
-fn derivation_modulo<E, O>(
-    drv: DerivationT<BTreeSet<SingleDerivedPath>, O>,
-    lookup: impl FnMut(&StorePath) -> Result<HashModulo, E>,
-) -> Result<Option<DerivationT<HashModuloInputs, O>>, InputModuloError<E>> {
-    let inputs = DerivationInputs::from(&drv.inputs);
-    let Some(drvs) = modulo_drvs(&inputs, lookup)? else {
-        return Ok(None);
-    };
-    Ok(Some(drv.map_inputs(|_| HashModuloInputs {
-        srcs: inputs.srcs,
-        drvs,
-    })))
-}
-
-/// Substitute the inputs with their hash moduli and hash the printed
-/// intermediate derivation. `None` if any input is deferred or dynamic.
+/// Substitute the inputs with their hash moduli and stream the
+/// intermediate derivation ATerm directly into SHA-256 without cloning
+/// the derivation or buffering the full ATerm. `None` if any input is
+/// deferred or dynamic.
 fn hash_intermediate<E, O: crate::raw_output::AtermOutput>(
     store_dir: &StoreDir,
-    drv: DerivationT<BTreeSet<SingleDerivedPath>, O>,
+    drv: &DerivationT<BTreeSet<SingleDerivedPath>, O>,
+    mask_outputs: bool,
     lookup: impl FnMut(&StorePath) -> Result<HashModulo, E>,
 ) -> Result<Option<Sha256>, InputModuloError<E>> {
-    let Some(intermediate) = derivation_modulo(drv, lookup)? else {
+    let inputs = DerivationInputs::from(&drv.inputs);
+    let Some(drvs) = modulo_drvs(inputs.drvs, lookup)? else {
         return Ok(None);
     };
-    Ok(Some(Sha256::digest(print_derivation_aterm(
+    let mut sink = Sha256Sink::new();
+    write_derivation_parts(
         store_dir,
-        &intermediate,
-    ))))
+        drv,
+        &inputs.srcs,
+        &drvs,
+        write_sha256_hex,
+        mask_outputs,
+        &mut sink,
+    );
+    Ok(Some(sink.finish()))
 }
 
 /// Is this a fixed-output derivation (all outputs `CAFixed`)?
@@ -241,28 +232,10 @@ pub fn hash_input_modulo<E>(
         return Ok(HashModulo::DeferredDrv);
     }
 
-    Ok(match hash_intermediate(store_dir, drv.clone(), lookup)? {
+    Ok(match hash_intermediate(store_dir, drv, false, lookup)? {
         Some(h) => HashModulo::DrvHash(h),
         None => HashModulo::DeferredDrv,
     })
-}
-
-/// Replace the outputs with unfilled placeholders and blank the env
-/// vars named after them, so the hash does not depend on the
-/// derivation's own output paths.
-///
-/// Purely structural — whether masking is *meaningful* for the given
-/// output type is the caller's concern (e.g. [`hash_modulo`] first
-/// checks the derivation is input-addressed).
-pub(crate) fn mask_outputs_and_env<I, O>(drv: DerivationT<I, O>) -> DerivationT<I, UnfilledOutput> {
-    let mut masked = drv.map_outputs(|_| UnfilledOutput);
-    for output_name in masked.outputs.keys() {
-        let key = Bytes::copy_from_slice(output_name.as_ref().as_bytes());
-        if let Some(v) = masked.env.get_mut(&key) {
-            *v = Bytes::new();
-        }
-    }
-    masked
 }
 
 /// Error from [`hash_modulo`].
@@ -305,8 +278,7 @@ pub fn hash_modulo<E>(
             }
         }
     }
-    let masked = mask_outputs_and_env(drv.clone());
-    Ok(hash_intermediate(store_dir, masked, lookup)?)
+    Ok(hash_intermediate(store_dir, drv, true, lookup)?)
 }
 
 /// Error from [`fill_deferred_outputs`].
@@ -342,11 +314,10 @@ pub fn fill_deferred_outputs<E>(
     drv: DerivationT<BTreeSet<SingleDerivedPath>, UnfilledOutput>,
     lookup: impl FnMut(&StorePath) -> Result<HashModulo, E>,
 ) -> Result<Option<DerivationT<BTreeSet<SingleDerivedPath>, StorePath>>, FillOutputsError<E>> {
-    // The output type already guarantees all outputs are deferred; mask
-    // a copy for hashing (the real env keeps its values until the
+    // The output type already guarantees all outputs are deferred; stream
+    // with masked output env vars (the real env keeps its values until the
     // computed paths overwrite them in fill_outputs_from_hash).
-    let masked = mask_outputs_and_env(drv.clone());
-    let Some(drv_hash) = hash_intermediate(store_dir, masked, lookup)? else {
+    let Some(drv_hash) = hash_intermediate(store_dir, &drv, true, lookup)? else {
         return Ok(None);
     };
     Ok(Some(fill_outputs_from_hash(store_dir, drv, &drv_hash)?))
@@ -412,7 +383,7 @@ mod tests {
             "11111111111111111111111111111111-b.drv".parse().unwrap(),
             mk(&["out"]),
         );
-        let res = modulo_drvs(&inputs, |_| Ok::<_, Infallible>(HashModulo::DrvHash(h)))
+        let res = modulo_drvs(inputs.drvs, |_| Ok::<_, Infallible>(HashModulo::DrvHash(h)))
             .unwrap()
             .unwrap();
         assert_eq!(res[&h], mk(&["dev", "out"]));
