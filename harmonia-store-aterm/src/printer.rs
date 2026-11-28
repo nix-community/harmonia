@@ -203,10 +203,8 @@ fn write_env(
 ) {
     // When structured attrs are present, the ATerm format stores them as the
     // `__json` env var. Merge it into the sorted env output.
-    let json_key = Bytes::from("__json");
-    let json_value = structured_attrs
-        .as_ref()
-        .map(|sa| Bytes::from(serde_json::to_string(&sa.attrs).unwrap()));
+    let json_key = Bytes::from_static(StructuredAttrs::ENV_VAR);
+    let json_value = structured_attrs.as_ref().map(StructuredAttrs::unparse);
 
     out.push(b'[');
     let mut first = true;
@@ -222,7 +220,7 @@ fn write_env(
             out.push(b'(');
             write_escaped(out, &json_key);
             out.push(b',');
-            write_escaped(out, json_value.as_ref().unwrap());
+            write_escaped(out, json_value.as_deref().unwrap().as_bytes());
             out.push(b')');
             json_emitted = true;
         }
@@ -246,7 +244,7 @@ fn write_env(
         out.push(b'(');
         write_escaped(out, &json_key);
         out.push(b',');
-        write_escaped(out, json_value.as_ref().unwrap());
+        write_escaped(out, json_value.as_deref().unwrap().as_bytes());
         out.push(b')');
     }
 
