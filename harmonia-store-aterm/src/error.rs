@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+use harmonia_store_derivation::derivation::StructuredAttrsError;
 use harmonia_store_path::{ParseStorePathError, StorePathNameError};
 
 use crate::raw_output::FromRawOutputError;
@@ -16,6 +17,8 @@ pub enum ParseError {
     UnexpectedEof { expected: &'static str, pos: usize },
     #[error("unterminated string at position {pos}")]
     UnterminatedString { pos: usize },
+    #[error("dynamic output nesting exceeds maximum depth of {max_depth} at position {pos}")]
+    MaxDepthExceeded { max_depth: usize, pos: usize },
     #[error("invalid store path at position {pos}: {source}")]
     StorePath {
         pos: usize,
@@ -28,4 +31,8 @@ pub enum ParseError {
     Output(#[from] FromRawOutputError),
     #[error("invalid UTF-8 in string at position {pos}")]
     InvalidUtf8 { pos: usize },
+    #[error("duplicate {key} in inputDrvs at position {pos}")]
+    DuplicateInputDrv { key: String, pos: usize },
+    #[error("{0}")]
+    StructuredAttrs(#[from] StructuredAttrsError),
 }
