@@ -1,10 +1,14 @@
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
 
 use memchr::memmem;
 #[cfg(test)]
 use proptest::prelude::{Arbitrary, BoxedStrategy};
+use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::derived_path::SingleDerivedPath;
@@ -22,27 +26,191 @@ pub enum StructuredAttrsError {
     InvalidJson(#[from] serde_json::Error),
 }
 
+/// Non-materializing JSON validator matching `serde_json::Value`'s acceptance
+/// rules (float range, UTF-16 surrogates, control characters, and recursion
+/// depth) without building a DOM tree.
+///
+/// `serde::de::IgnoredAny` is deliberately not used because `serde_json`'s
+/// `deserialize_ignored_any` skips float-range and surrogate checks, which
+/// would let `parse` accept inputs that lazy `Map` materialization later
+/// rejects.
+///
+/// Object keys starting with [`SERDE_JSON_RESERVED_KEY_PREFIX`] are only
+/// flagged, not judged: their meaning depends on `serde_json` features that
+/// this crate does not control.
+#[derive(Clone, Copy)]
+struct JsonValueValidator<'a> {
+    reserved_key: &'a Cell<bool>,
+}
+
+/// Prefix of the object keys that `serde_json`'s `arbitrary_precision` and
+/// `raw_value` features reserve. With either feature on, `serde_json::Value`
+/// reads an object whose first key is such a token as a number or as raw JSON
+/// in string form. Cargo feature unification can enable these features in a
+/// downstream build.
+const SERDE_JSON_RESERVED_KEY_PREFIX: &str = "$serde_json::private::";
+
+impl<'de> DeserializeSeed<'de> for JsonValueValidator<'_> {
+    type Value = ();
+
+    #[inline]
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for JsonValueValidator<'_> {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON object")
+    }
+
+    #[inline]
+    fn visit_bool<E>(self, _: bool) -> Result<(), E> {
+        Ok(())
+    }
+
+    #[inline]
+    fn visit_i64<E>(self, _: i64) -> Result<(), E> {
+        Ok(())
+    }
+
+    #[inline]
+    fn visit_u64<E>(self, _: u64) -> Result<(), E> {
+        Ok(())
+    }
+
+    #[inline]
+    fn visit_i128<E>(self, _: i128) -> Result<(), E> {
+        Ok(())
+    }
+
+    #[inline]
+    fn visit_u128<E>(self, _: u128) -> Result<(), E> {
+        Ok(())
+    }
+
+    #[inline]
+    fn visit_f64<E>(self, _: f64) -> Result<(), E> {
+        Ok(())
+    }
+
+    #[inline]
+    fn visit_str<E>(self, _: &str) -> Result<(), E> {
+        Ok(())
+    }
+
+    #[inline]
+    fn visit_unit<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        while seq.next_element_seed(self)?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        while map
+            .next_entry_seed(JsonKeyValidator(self.reserved_key), self)?
+            .is_some()
+        {}
+        Ok(())
+    }
+}
+
+/// Flags object keys that start with [`SERDE_JSON_RESERVED_KEY_PREFIX`].
+struct JsonKeyValidator<'a>(&'a Cell<bool>);
+
+impl<'de> DeserializeSeed<'de> for JsonKeyValidator<'_> {
+    type Value = ();
+
+    #[inline]
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for JsonKeyValidator<'_> {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON object key")
+    }
+
+    #[inline]
+    fn visit_str<E>(self, key: &str) -> Result<(), E> {
+        if key.starts_with(SERDE_JSON_RESERVED_KEY_PREFIX) {
+            self.0.set(true);
+        }
+        Ok(())
+    }
+}
+
+/// Validate `raw` as a JSON object without materializing it.
+///
+/// If the input uses a reserved `serde_json` key, the real map parser decides
+/// instead, so `parse` accepts exactly what later materialization accepts
+/// whichever `serde_json` features are enabled. The map it built is returned.
+fn validate_json_object(
+    raw: &str,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, serde_json::Error> {
+    let reserved_key = Cell::new(false);
+    let mut de = serde_json::Deserializer::from_str(raw);
+    de.deserialize_map(JsonValueValidator {
+        reserved_key: &reserved_key,
+    })?;
+    de.end()?;
+    if reserved_key.get() {
+        return serde_json::from_str(raw).map(Some);
+    }
+    Ok(None)
+}
+
+fn parse_validated_map(raw: &str) -> serde_json::Map<String, serde_json::Value> {
+    serde_json::from_str(raw).expect("StructuredAttrs::parse already validated JSON object")
+}
+
 /// Structured attributes for a derivation.
 ///
 /// When present, derivation attributes are passed to the builder as a JSON object
 /// via the `__json` environment variable, rather than individual environment variables.
 /// This allows passing complex data structures (arrays, nested objects, etc.) to builders.
+/// The `env` map must not contain `__json` when structured attrs are used.
 ///
 /// When parsed from ATerm or the daemon wire format via [`Self::parse`], the
-/// original `__json` string is kept verbatim so non-canonical encodings (such as
-/// float formatting like `1e+15` vs `1000000000000000.0` or whitespace) round-trip
-/// byte-identically and produce matching derivation hashes. Mutating through
-/// [`Self::attrs_mut`] clears the verbatim copy so [`Self::unparse`] re-serializes
-/// the updated map.
-#[derive(Debug, Clone)]
+/// original `__json` string is validated eagerly and kept verbatim so non-canonical
+/// encodings (such as float formatting like `1e+15` vs `1000000000000000.0` or
+/// whitespace) round-trip byte-identically and produce matching derivation hashes.
+/// Materializing the `serde_json::Map` DOM is deferred until [`Self::attrs`],
+/// [`Self::attrs_mut`], [`Self::into_attrs`], or `Serialize` is called. Mutating
+/// through [`Self::attrs_mut`] clears the verbatim copy so [`Self::unparse`]
+/// re-serializes the updated map.
+#[derive(Debug)]
 pub struct StructuredAttrs {
-    /// The structured attributes as a JSON object.
-    ///
-    /// Note: The `env` map must not contain the key `__json` when structured attrs are used,
-    /// as that key is reserved for encoding the structured attributes themselves.
-    attrs: serde_json::Map<String, serde_json::Value>,
+    /// Lazily materialized JSON object map. Always initialized whenever `verbatim` is `None`.
+    attrs: OnceLock<serde_json::Map<String, serde_json::Value>>,
     /// Raw `__json` encoding preserved from parsing, if any.
     verbatim: Option<String>,
+}
+
+impl Clone for StructuredAttrs {
+    fn clone(&self) -> Self {
+        // Keep verbatim clones lazy so cloning a parsed derivation does not
+        // deep-copy an already materialized DOM map.
+        if let Some(raw) = &self.verbatim {
+            Self {
+                attrs: OnceLock::new(),
+                verbatim: Some(raw.clone()),
+            }
+        } else {
+            Self {
+                attrs: self.attrs.clone(),
+                verbatim: None,
+            }
+        }
+    }
 }
 
 impl StructuredAttrs {
@@ -53,16 +221,22 @@ impl StructuredAttrs {
     /// Create structured attributes from a parsed JSON object map.
     pub fn new(attrs: serde_json::Map<String, serde_json::Value>) -> Self {
         Self {
-            attrs,
+            attrs: OnceLock::from(attrs),
             verbatim: None,
         }
     }
 
     /// Parse structured attributes from an encoded `__json` string, retaining
     /// the original encoding verbatim for lossless ATerm/wire round-tripping.
+    ///
+    /// Validates the JSON object eagerly while deferring `serde_json::Map`
+    /// materialization until [`Self::attrs`] or [`Self::attrs_mut`] is called.
     pub fn parse(encoded: impl Into<String>) -> Result<Self, serde_json::Error> {
         let encoded = encoded.into();
-        let attrs: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&encoded)?;
+        let attrs = match validate_json_object(&encoded)? {
+            Some(attrs) => OnceLock::from(attrs),
+            None => OnceLock::new(),
+        };
         Ok(Self {
             attrs,
             verbatim: Some(encoded),
@@ -81,21 +255,37 @@ impl StructuredAttrs {
         Ok(Some(Self::parse(json_str)?))
     }
 
-    /// Borrow the parsed structured attributes map.
+    /// Borrow the parsed structured attributes map, materializing it on first
+    /// access if this value was constructed via [`Self::parse`].
     pub fn attrs(&self) -> &serde_json::Map<String, serde_json::Value> {
-        &self.attrs
+        self.attrs.get_or_init(|| {
+            let raw = self
+                .verbatim
+                .as_deref()
+                .expect("StructuredAttrs without verbatim always has initialized attrs");
+            parse_validated_map(raw)
+        })
     }
 
     /// Mutably borrow the structured attributes map, invalidating any preserved
     /// verbatim `__json` encoding.
     pub fn attrs_mut(&mut self) -> &mut serde_json::Map<String, serde_json::Value> {
+        let _ = self.attrs();
         self.verbatim = None;
-        &mut self.attrs
+        self.attrs
+            .get_mut()
+            .expect("attrs was just initialized above")
     }
 
     /// Consume `self` and return the underlying JSON object map.
     pub fn into_attrs(self) -> serde_json::Map<String, serde_json::Value> {
-        self.attrs
+        self.attrs.into_inner().unwrap_or_else(|| {
+            let raw = self
+                .verbatim
+                .as_deref()
+                .expect("StructuredAttrs without verbatim always has initialized attrs");
+            parse_validated_map(raw)
+        })
     }
 
     /// Return the preserved verbatim `__json` encoding, if this value was parsed
@@ -110,7 +300,7 @@ impl StructuredAttrs {
         match &self.verbatim {
             Some(raw) => Cow::Borrowed(raw.as_str()),
             None => Cow::Owned(
-                serde_json::to_string(&self.attrs)
+                serde_json::to_string(self.attrs())
                     .expect("serde_json::Map serialization is infallible"),
             ),
         }
@@ -138,10 +328,11 @@ impl PartialEq for StructuredAttrs {
         // part of a derivation's hash identity.
         match (&self.verbatim, &other.verbatim) {
             (Some(a), Some(b)) => a == b,
-            (None, None) if self.attrs != other.attrs => false,
-            // Exactly one side is verbatim, so compare encodings only. Parsed
-            // maps can differ even when the encodings match, because parsing
-            // need not reproduce the exact `f64` that was serialized.
+            // `serde_json::Value` treats `-0.0 == 0.0`, so compare encodings too,
+            // as those determine the derivation hash.
+            (None, None) => self.attrs() == other.attrs() && self.unparse() == other.unparse(),
+            // Mixed verbatim/owned: compare encoded strings directly so the
+            // verbatim side stays unmaterialized.
             _ => self.unparse() == other.unparse(),
         }
     }
@@ -160,7 +351,7 @@ impl Serialize for StructuredAttrs {
     where
         S: Serializer,
     {
-        self.attrs.serialize(serializer)
+        self.attrs().serialize(serializer)
     }
 }
 
@@ -960,6 +1151,41 @@ mod structured_attrs_tests {
         h.finish()
     }
 
+    /// Objects using a key that `serde_json` reserves for optional features
+    /// are validated by the real map parser, so `parse` accepts exactly what
+    /// materialization accepts, whichever of `arbitrary_precision` and
+    /// `raw_value` a build enables, and accepted input is materialized
+    /// eagerly. Without those features the keys are ordinary.
+    #[test]
+    fn parse_defers_reserved_serde_json_keys_to_map_parser() {
+        for raw in [
+            r#"{"x":{"$serde_json::private::Number":false}}"#,
+            r#"{"x":{"$serde_json::private::Number":"12.5"}}"#,
+            r#"{"x":[{"$serde_json::private::RawValue":1}]}"#,
+            r#"{"x":[{"$serde_json::private::RawValue":"[1]"}]}"#,
+            // The check sees decoded keys, not their spelling.
+            r#"{"x":{"\u0024serde_json::private::Number":false}}"#,
+        ] {
+            let expected = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(raw);
+            match StructuredAttrs::parse(raw) {
+                Ok(sa) => {
+                    let expected = expected.unwrap_or_else(|e| {
+                        panic!("{raw}: accepted input the map parser rejects: {e}")
+                    });
+                    assert_eq!(sa.attrs.get(), Some(&expected), "{raw}");
+                    assert_eq!(sa.verbatim(), Some(raw));
+                }
+                Err(e) => assert!(
+                    expected.is_err(),
+                    "{raw}: rejected input the map parser accepts: {e}"
+                ),
+            }
+        }
+
+        let sa = StructuredAttrs::parse(r#"{"x":{"serde_json::private::Number":1}}"#).unwrap();
+        assert!(sa.attrs.get().is_none());
+    }
+
     #[test]
     fn parse_preserves_verbatim_and_mut_clears_it() {
         for raw in [
@@ -981,13 +1207,50 @@ mod structured_attrs_tests {
     }
 
     #[test]
-    fn parse_rejects_invalid_or_non_object_json() {
-        for bad in ["", "not-json", "[1,2]", "\"str\"", "42", "null"] {
-            assert!(
-                StructuredAttrs::parse(bad).is_err(),
-                "expected error for {bad:?}"
+    fn parse_matches_serde_json_map_validation() {
+        let deep = format!(r#"{{"a":{}0{}}}"#, "[".repeat(200), "]".repeat(200));
+        let cases = [
+            "",
+            "not-json",
+            "[1,2]",
+            "\"str\"",
+            "42",
+            "null",
+            "true",
+            "{}{}",
+            r#"{"x":1e9999}"#,
+            r#"{"s":"\uD800"}"#,
+            "{\"a\":\"\n\"}",
+            deep.as_str(),
+            r#"{}"#,
+            r#"{"a":1,"b":[true,false,null,-0.0,1e+15,"hi\n\t\u001b"]}"#,
+            r#"{"dup":1,"dup":2}"#,
+        ];
+        for input in cases {
+            let expected: Result<serde_json::Map<String, serde_json::Value>, _> =
+                serde_json::from_str(input);
+            let actual = StructuredAttrs::parse(input);
+            assert_eq!(
+                actual.is_ok(),
+                expected.is_ok(),
+                "parity mismatch for {input:?}"
             );
+            if let (Ok(sa), Ok(map)) = (actual, expected) {
+                assert_eq!(sa.attrs(), &map);
+            }
         }
+    }
+
+    #[test]
+    fn lazy_parse_materializes_across_accessors_and_clone() {
+        let raw = r#"{"a":1,"nested":{"b":[true,null,"ok"]}}"#;
+        let sa = StructuredAttrs::parse(raw).unwrap();
+        let cloned = sa.clone();
+        assert_eq!(sa, cloned);
+        assert_eq!(sa.attrs().get("a"), Some(&serde_json::json!(1)));
+        assert_eq!(serde_json::to_string(&sa).unwrap(), raw);
+        let owned = cloned.into_attrs();
+        assert_eq!(owned.get("a"), Some(&serde_json::json!(1)));
     }
 
     #[test]
