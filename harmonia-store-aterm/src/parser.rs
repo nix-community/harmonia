@@ -285,17 +285,53 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_env(&mut self) -> Result<BTreeMap<Bytes, Bytes>, ParseError> {
+        // Pack small unescaped strings into a single shared backing buffer to avoid
+        // per-entry heap allocations. Values larger than `MAX_SLAB_ENTRY_LEN` and
+        // `__json` are allocated independently so `StructuredAttrs::try_extract`
+        // stays zero-copy and individual oversized values are not retained by the
+        // shared buffer.
+        const MAX_SLAB_ENTRY_LEN: usize = 4096;
+
+        enum EnvAtom<'a> {
+            Slab(&'a [u8]),
+            Standalone(Cow<'a, [u8]>),
+        }
+
+        let classify =
+            |cow: Cow<'a, [u8]>, allow_slab: bool, slab_len: &mut usize| -> EnvAtom<'a> {
+                match cow {
+                    Cow::Borrowed(s)
+                        if allow_slab && !s.is_empty() && s.len() <= MAX_SLAB_ENTRY_LEN =>
+                    {
+                        *slab_len += s.len();
+                        EnvAtom::Slab(s)
+                    }
+                    other => EnvAtom::Standalone(other),
+                }
+            };
+
         self.expect_char('[')?;
-        let mut env = BTreeMap::new();
+        if self.peek() == Some(b']') {
+            self.advance();
+            return Ok(BTreeMap::new());
+        }
+
+        // `env` is the final ATerm field, so `remaining` bounds its encoded size.
+        let remaining = self.bytes.len().saturating_sub(self.pos);
+        let mut pairs: Vec<(EnvAtom<'a>, EnvAtom<'a>)> =
+            Vec::with_capacity((remaining / 64).clamp(8, 512));
+        let mut slab_len = 0usize;
 
         while self.peek() != Some(b']') {
             self.expect_char('(')?;
-            let key = cow_to_bytes(self.parse_string()?);
+            let key_cow = self.parse_string()?;
+            let allow_val_slab = key_cow.as_ref() != StructuredAttrs::ENV_VAR;
+            let key = classify(key_cow, true, &mut slab_len);
             self.expect_char(',')?;
-            let value = cow_to_bytes(self.parse_string()?);
+            let val = classify(self.parse_string()?, allow_val_slab, &mut slab_len);
             self.expect_char(')')?;
 
-            env.insert(key, value);
+            pairs.push((key, val));
 
             if self.peek() == Some(b',') {
                 self.advance();
@@ -303,6 +339,29 @@ impl<'a> Parser<'a> {
         }
 
         self.expect_char(']')?;
+
+        let mut slab = Vec::with_capacity(slab_len);
+        for (k, v) in &pairs {
+            if let EnvAtom::Slab(s) = k {
+                slab.extend_from_slice(s);
+            }
+            if let EnvAtom::Slab(s) = v {
+                slab.extend_from_slice(s);
+            }
+        }
+        let mut backing = Bytes::from(slab);
+        let mut resolve = |atom: EnvAtom<'a>| -> Bytes {
+            match atom {
+                EnvAtom::Slab(s) => backing.split_to(s.len()),
+                EnvAtom::Standalone(cow) => cow_to_bytes(cow),
+            }
+        };
+
+        let env = pairs
+            .into_iter()
+            .map(|(k, v)| (resolve(k), resolve(v)))
+            .collect();
+        debug_assert!(backing.is_empty());
         Ok(env)
     }
 
@@ -668,5 +727,44 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn parse_env_slab_edge_cases() {
+        let store_dir = StoreDir::default();
+        let name: StorePathName = "test".parse().unwrap();
+
+        // Empty env list.
+        let empty = br#"Derive([],[],[],"x86_64-linux","/bin/sh",[],[])"#;
+        let drv = crate::parse_derivation_aterm(&store_dir, empty, name.clone()).unwrap();
+        assert!(drv.env.is_empty());
+
+        // Mix of empty, small borrowed, escaped, duplicate (last wins), >4 KiB, and __json.
+        let big = "b".repeat(5000);
+        let input = format!(
+            concat!(
+                r#"Derive([],[],[],"x86_64-linux","/bin/sh",[],"#,
+                r#"[("__json","{{\"k\":1}}"),("big","{}"),"#,
+                r#"("dup","first"),("dup","second"),"#,
+                r#"("empty",""),("esc","line1
+line2"),("small","val")])"#,
+            ),
+            big
+        );
+        let drv = crate::parse_derivation_aterm(&store_dir, input.as_bytes(), name).unwrap();
+        assert_eq!(
+            drv.structured_attrs.as_ref().unwrap().verbatim(),
+            Some(r#"{"k":1}"#)
+        );
+        assert!(!drv.env.contains_key(StructuredAttrs::ENV_VAR));
+        assert_eq!(drv.env[b"big".as_slice()].as_ref(), big.as_bytes());
+        assert_eq!(drv.env[b"dup".as_slice()].as_ref(), b"second");
+        assert_eq!(drv.env[b"empty".as_slice()].as_ref(), b"");
+        assert_eq!(
+            drv.env[b"esc".as_slice()].as_ref(),
+            b"line1
+line2"
+        );
+        assert_eq!(drv.env[b"small".as_slice()].as_ref(), b"val");
     }
 }
