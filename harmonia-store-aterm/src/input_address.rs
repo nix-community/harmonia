@@ -1,11 +1,15 @@
 //! For derivations that input-address their outputs
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
-use harmonia_store_derivation::derivation::{DerivationOutput, DerivationT, OutputPathName};
+use harmonia_store_derivation::derivation::{
+    DerivationOutput, DerivationT, OutputInputs, OutputPathName,
+};
 use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName, StorePathNameError, StorePathSet};
 
-use crate::print_derivation_aterm;
+use crate::printer::{Sha256Sink, write_derivation_parts};
 use crate::raw_output::{AtermOutput, BorrowedRawOutput, InvalidCombination, RawOutput};
 use harmonia_utils_base_encoding::Base;
 
@@ -70,14 +74,21 @@ pub fn hash_derivation(
     store_dir: &StoreDir,
     drv: &DerivationT<StorePathSet, UnfilledOutput>,
 ) -> harmonia_utils_hash::Sha256 {
-    // Blank env vars named after outputs (shared with the unresolved
-    // hash-modulo path — the two hashes must agree on masking), so the
-    // hash does not depend on the derivation's own (stale or
-    // placeholder) output paths. `UnfilledOutput` prints as all-empty
-    // output fields directly.
-    let masked = crate::hash_modulo::mask_outputs_and_env(drv.clone());
-    let aterm = print_derivation_aterm(store_dir, &masked.into_full());
-    harmonia_utils_hash::Sha256::digest(&aterm)
+    // Stream ATerm directly into SHA-256 with outputs and output-named env
+    // vars masked (matching hash_modulo), avoiding a full Derivation clone
+    // and intermediate ATerm buffer.
+    let empty_drvs: BTreeMap<StorePath, OutputInputs> = BTreeMap::new();
+    let mut sink = Sha256Sink::new();
+    write_derivation_parts(
+        store_dir,
+        drv,
+        &drv.inputs,
+        &empty_drvs,
+        |_, _| unreachable!("resolved derivation has no input derivations"),
+        true,
+        &mut sink,
+    );
+    sink.finish()
 }
 
 /// Compute the output store path for an input-addressed derivation
