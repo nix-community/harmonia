@@ -6,7 +6,7 @@ use harmonia_store_derivation::derivation::{
     DerivationInputs, DerivationT, OutputInputs, StructuredAttrs,
 };
 use harmonia_store_derivation::derived_path::OutputName;
-use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathName, StorePathSet};
+use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathName};
 use harmonia_utils_base_encoding::{Base, base32, encode_for_base};
 use harmonia_utils_hash::{Algorithm, Context, Sha256};
 use memchr::{memchr2, memchr3};
@@ -191,10 +191,10 @@ pub fn write_derivation<K: AtermInput, O: AtermOutput>(
     );
 }
 
-pub(crate) fn write_derivation_parts<S: AtermSink, I, K, O: AtermOutput>(
+pub(crate) fn write_derivation_parts<'s, S: AtermSink, I, K, O: AtermOutput>(
     store_dir: &StoreDir,
     drv: &DerivationT<I, O>,
-    srcs: &StorePathSet,
+    srcs: impl IntoIterator<Item = &'s StorePath>,
     drvs: &BTreeMap<K, OutputInputs>,
     write_key: impl Fn(&K, &mut S),
     mask_outputs: bool,
@@ -336,9 +336,13 @@ fn write_output_names<S: AtermSink>(outputs: &BTreeSet<OutputName>, out: &mut S)
     out.push(b']');
 }
 
-fn write_input_srcs<S: AtermSink>(escaped_dir: &[u8], srcs: &StorePathSet, out: &mut S) {
+fn write_input_srcs<'s, S: AtermSink>(
+    escaped_dir: &[u8],
+    srcs: impl IntoIterator<Item = &'s StorePath>,
+    out: &mut S,
+) {
     out.push(b'[');
-    for (i, path) in srcs.iter().enumerate() {
+    for (i, path) in srcs.into_iter().enumerate() {
         if i > 0 {
             out.push(b',');
         }
