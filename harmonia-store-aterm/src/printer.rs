@@ -9,7 +9,6 @@ use harmonia_store_derivation::derived_path::OutputName;
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathName, StorePathSet};
 use harmonia_utils_base_encoding::{Base, base32, encode_for_base};
 use harmonia_utils_hash::{Algorithm, Context, Sha256};
-use memchr::{memchr2, memchr3};
 
 use crate::raw_output::AtermOutput;
 
@@ -166,7 +165,21 @@ pub fn print_derivation_aterm<K: AtermInput, O: AtermOutput>(
     let DerivationInputs { srcs, drvs } = &drv.inputs;
     let args_len: usize = drv.args.iter().map(|a| a.len() + 3).sum();
     let env_len: usize = drv.env.iter().map(|(k, v)| k.len() + v.len() + 8).sum();
-    let capacity = 256 + drvs.len() * 88 + srcs.len() * 64 + args_len + env_len;
+    // Account for structured attrs (__json) plus ~25% headroom for JSON quote escaping.
+    let sa_len = drv
+        .structured_attrs
+        .as_ref()
+        .and_then(StructuredAttrs::verbatim)
+        .map_or(0, |s| s.len() + (s.len() >> 2) + 16);
+    let capacity = 256
+        + drv.outputs.len() * 80
+        + drvs.len() * 128
+        + srcs.len() * 64
+        + drv.platform.len()
+        + drv.builder.len()
+        + args_len
+        + env_len
+        + sa_len;
     let mut out = Vec::with_capacity(capacity);
     write_derivation(store_dir, drv, &mut out);
     out
@@ -328,10 +341,9 @@ fn write_output_inputs<S: AtermSink>(oi: &OutputInputs, versioned: bool, out: &m
 fn write_output_names<S: AtermSink>(outputs: &BTreeSet<OutputName>, out: &mut S) {
     out.push(b'[');
     for (j, name) in outputs.iter().enumerate() {
-        if j > 0 {
-            out.push(b',');
-        }
-        write_escaped(out, name.as_ref().as_bytes());
+        out.extend_from_slice(if j > 0 { b",\"" } else { b"\"" });
+        write_escaped_bytes(out, name.as_ref().as_bytes());
+        out.push(b'"');
     }
     out.push(b']');
 }
@@ -365,26 +377,27 @@ fn write_env<S: AtermSink, O>(
     // in lockstep so masking is O(|env| + |outputs|).
     let mut output_keys = outputs.keys().peekable();
 
+    let emit_json = |first: &mut bool, out: &mut S| {
+        out.extend_from_slice(if *first {
+            b"(\"__json\",\""
+        } else {
+            b",(\"__json\",\""
+        });
+        *first = false;
+        write_escaped_bytes(out, json_value.as_deref().unwrap().as_bytes());
+        out.extend_from_slice(b"\")");
+    };
+
     for (key, value) in env.iter() {
         // Emit __json if it sorts before the current key
         if !json_emitted && JSON_KEY < key.as_ref() {
-            if !first {
-                out.push(b',');
-            }
-            first = false;
-            out.extend_from_slice(b"(\"__json\",");
-            write_escaped(out, json_value.as_deref().unwrap().as_bytes());
-            out.push(b')');
+            emit_json(&mut first, out);
             json_emitted = true;
         }
 
-        if !first {
-            out.push(b',');
-        }
+        out.extend_from_slice(if first { b"(\"" } else { b",(\"" });
         first = false;
-        out.push(b'(');
-        write_escaped(out, key);
-        out.push(b',');
+        write_escaped_bytes(out, key);
 
         let masked = mask_outputs && {
             while let Some(o) = output_keys.peek() {
@@ -399,37 +412,79 @@ fn write_env<S: AtermSink, O>(
                 .is_some_and(|o| o.as_ref().as_bytes() == key.as_ref())
         };
         if masked {
-            out.extend_from_slice(b"\"\"");
+            out.extend_from_slice(b"\",\"\")");
         } else {
-            write_escaped(out, value);
+            out.extend_from_slice(b"\",\"");
+            write_escaped_bytes(out, value);
+            out.extend_from_slice(b"\")");
         }
-        out.push(b')');
     }
 
     // Emit __json if it comes after all env keys
     if !json_emitted {
-        if !first {
-            out.push(b',');
-        }
-        out.extend_from_slice(b"(\"__json\",");
-        write_escaped(out, json_value.as_deref().unwrap().as_bytes());
-        out.push(b')');
+        emit_json(&mut first, out);
     }
 
     out.push(b']');
 }
 
+/// Maps each byte to the character following `\` in its ATerm escape sequence
+/// (`\"`, `\\`, `\n`, `\t`, `\r`), or `0` if the byte is emitted verbatim.
+const ESCAPE_LUT: [u8; 256] = {
+    let mut table = [0u8; 256];
+    table[b'"' as usize] = b'"';
+    table[b'\\' as usize] = b'\\';
+    table[b'\n' as usize] = b'n';
+    table[b'\t' as usize] = b't';
+    table[b'\r' as usize] = b'r';
+    table
+};
+
+/// Returns a bitmask with bit 7 set in every byte lane of `word` that is
+/// `< 0x20` (covering `\t`, `\n`, `\r`), `b'"'`, or `b'\\'`.
+///
+/// False positives arise from other control bytes `< 0x20` or borrow propagation
+/// into higher lanes; callers filter every flagged lane through `ESCAPE_LUT`.
+/// False negatives are impossible for all five escaped bytes.
+#[inline(always)]
+const fn needs_escape_mask(word: u64) -> u64 {
+    const LO: u64 = 0x0101_0101_0101_0101;
+    const HI: u64 = 0x8080_8080_8080_8080;
+    let lt_space = word.wrapping_sub(LO * 0x20) & !word & HI;
+    let q = word ^ (LO * (b'"' as u64));
+    let is_quote = q.wrapping_sub(LO) & !q & HI;
+    let b = word ^ (LO * (b'\\' as u64));
+    let is_bs = b.wrapping_sub(LO) & !b & HI;
+    lt_space | is_quote | is_bs
+}
+
+#[inline(always)]
+fn load_u64(slice: &[u8]) -> u64 {
+    u64::from_le_bytes(slice.try_into().unwrap())
+}
+
 #[inline]
 fn find_escape(bytes: &[u8]) -> Option<usize> {
-    let hit_a = memchr3(b'"', b'\\', b'\n', bytes);
-    let prefix = match hit_a {
-        Some(i) => &bytes[..i],
-        None => bytes,
-    };
-    match memchr2(b'\t', b'\r', prefix) {
-        Some(j) => Some(j),
-        None => hit_a,
+    let mut i = 0;
+    while i + 8 <= bytes.len() {
+        let mut mask = needs_escape_mask(load_u64(&bytes[i..i + 8]));
+        while mask != 0 {
+            let lane = (mask.trailing_zeros() >> 3) as usize;
+            mask &= mask - 1;
+            let pos = i + lane;
+            if ESCAPE_LUT[bytes[pos] as usize] != 0 {
+                return Some(pos);
+            }
+        }
+        i += 8;
     }
+    while i < bytes.len() {
+        if ESCAPE_LUT[bytes[i] as usize] != 0 {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
 }
 
 #[inline]
@@ -440,39 +495,73 @@ fn write_escaped<S: AtermSink>(out: &mut S, bytes: &[u8]) {
 }
 
 #[inline]
+fn emit_escape<S: AtermSink>(out: &mut S, bytes: &[u8], pos: usize, esc: u8, start: &mut usize) {
+    if pos > *start {
+        out.extend_from_slice(&bytes[*start..pos]);
+    }
+    out.extend_from_slice(&[b'\\', esc]);
+    *start = pos + 1;
+}
+
+#[inline]
+fn flush_mask<S: AtermSink>(
+    out: &mut S,
+    bytes: &[u8],
+    base: usize,
+    mut mask: u64,
+    start: &mut usize,
+) {
+    while mask != 0 {
+        let lane = (mask.trailing_zeros() >> 3) as usize;
+        mask &= mask - 1;
+        let pos = base + lane;
+        let esc = ESCAPE_LUT[bytes[pos] as usize];
+        if esc != 0 {
+            emit_escape(out, bytes, pos, esc, start);
+        }
+    }
+}
+
 fn write_escaped_bytes<S: AtermSink>(out: &mut S, bytes: &[u8]) {
-    let find_a =
-        |from: usize| memchr3(b'"', b'\\', b'\n', &bytes[from..]).map_or(bytes.len(), |i| from + i);
     let mut start = 0;
-    // Next `"`, `\` or `\n` at or after `start` (or `bytes.len()`). Cached so
-    // a run of tabs or carriage returns does not rescan the same tail on
-    // every escape; each byte is searched at most once per needle set.
-    let mut next_a = find_a(0);
-    loop {
-        let pos = match memchr2(b'\t', b'\r', &bytes[start..next_a]) {
-            Some(j) => start + j,
-            None if next_a < bytes.len() => next_a,
-            None => {
-                out.extend_from_slice(&bytes[start..]);
-                return;
+    let mut i = 0;
+    while i + 32 <= bytes.len() {
+        let m0 = needs_escape_mask(load_u64(&bytes[i..i + 8]));
+        let m1 = needs_escape_mask(load_u64(&bytes[i + 8..i + 16]));
+        let m2 = needs_escape_mask(load_u64(&bytes[i + 16..i + 24]));
+        let m3 = needs_escape_mask(load_u64(&bytes[i + 24..i + 32]));
+        if (m0 | m1 | m2 | m3) != 0 {
+            if m0 != 0 {
+                flush_mask(out, bytes, i, m0, &mut start);
             }
-        };
-        if pos > start {
-            out.extend_from_slice(&bytes[start..pos]);
+            if m1 != 0 {
+                flush_mask(out, bytes, i + 8, m1, &mut start);
+            }
+            if m2 != 0 {
+                flush_mask(out, bytes, i + 16, m2, &mut start);
+            }
+            if m3 != 0 {
+                flush_mask(out, bytes, i + 24, m3, &mut start);
+            }
         }
-        let esc: &[u8] = match bytes[pos] {
-            b'"' => b"\\\"",
-            b'\\' => b"\\\\",
-            b'\n' => b"\\n",
-            b'\t' => b"\\t",
-            b'\r' => b"\\r",
-            _ => unreachable!(),
-        };
-        out.extend_from_slice(esc);
-        start = pos + 1;
-        if pos == next_a {
-            next_a = find_a(start);
+        i += 32;
+    }
+    while i + 8 <= bytes.len() {
+        let mask = needs_escape_mask(load_u64(&bytes[i..i + 8]));
+        if mask != 0 {
+            flush_mask(out, bytes, i, mask, &mut start);
         }
+        i += 8;
+    }
+    while i < bytes.len() {
+        let esc = ESCAPE_LUT[bytes[i] as usize];
+        if esc != 0 {
+            emit_escape(out, bytes, i, esc, &mut start);
+        }
+        i += 1;
+    }
+    if start < bytes.len() {
+        out.extend_from_slice(&bytes[start..]);
     }
 }
 
@@ -526,6 +615,46 @@ mod escape_tests {
             [vec![b'\t'; 1 << 19], b"\"tail\\\n".to_vec()].concat(),
         ] {
             assert_eq!(escaped(&input), reference(&input));
+        }
+    }
+
+    #[test]
+    fn swar_boundaries_all_bytes_and_false_positives() {
+        // Every single byte value, alone and across 8-/32-byte SWAR boundaries.
+        let all_bytes: Vec<u8> = (0u8..=255).collect();
+        assert_eq!(escaped(&all_bytes), reference(&all_bytes));
+
+        for b in 0u8..=255 {
+            assert_eq!(escaped(&[b]), reference(&[b]));
+            // Exercise borrow-propagation false positives (control byte followed by space/ASCII/high byte).
+            for next in [b' ', b'!', b'"', b'\\', b'\n', 0x7f, 0x80, 0xff] {
+                let mut buf = vec![b'a'; 40];
+                for pos in [0, 6, 7, 8, 15, 30, 31, 32, 38] {
+                    buf.fill(b'a');
+                    buf[pos] = b;
+                    buf[pos + 1] = next;
+                    assert_eq!(
+                        escaped(&buf),
+                        reference(&buf),
+                        "b={b:#x} next={next:#x} pos={pos}"
+                    );
+                }
+            }
+        }
+
+        // Lengths 0..=40 with escapes at each position.
+        for len in 0..=40 {
+            for &esc in b"\"\\\n\t\r\x01\x1f\x7f\x80" {
+                let mut buf = vec![b'x'; len];
+                assert_eq!(escaped(&buf), reference(&buf));
+                if len > 0 {
+                    buf[0] = esc;
+                    assert_eq!(escaped(&buf), reference(&buf));
+                    buf[0] = b'x';
+                    buf[len - 1] = esc;
+                    assert_eq!(escaped(&buf), reference(&buf));
+                }
+            }
         }
     }
 }
