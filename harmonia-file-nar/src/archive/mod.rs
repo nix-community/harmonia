@@ -13,6 +13,7 @@ pub use byte_stream::NarByteStream;
 pub use dumper::{DumpOptions, DumpedFile, NarDumper, dump};
 #[cfg(any(test, feature = "test"))]
 pub use parser::read_nar;
+pub(crate) use parser::{NarMetaEvent, walk_nar_metadata};
 pub use parser::{NarParser, ParsedFile, parse_nar, parse_nar_stream};
 pub use read_nar::{NarBytesReader, NarReader};
 pub use restorer::{NarRestorer, NarWriteError, RestoreOptions, restore};
