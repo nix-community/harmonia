@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::ffi::OsStr;
+use std::ffi::{CStr, OsStr};
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Write as _};
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,13 +18,12 @@ use rustix::fs::{
 use rustix::io::Errno;
 use rustix::path::Arg;
 use thiserror::Error;
-use tokio::io::{AsyncBufRead, AsyncReadExt as _};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt as _};
+use tokio::sync::mpsc;
 use tokio::task::{JoinError, spawn_blocking};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
 
-use super::dumper::FILE_CHUNK_SIZE;
 use super::{CASE_HACK_SUFFIX, NarEvent, is_valid_entry_name};
 
 #[derive(Display, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
@@ -75,7 +74,10 @@ impl NarWriteError {
 }
 
 pub struct NarRestorer {
-    path: PathBuf,
+    root: PathBuf,
+    /// Open subdirectory names below `root`, kept as owned copies so they do
+    /// not pin the parser's read buffer; used only to construct error paths.
+    dir_names: Vec<Box<[u8]>>,
     use_case_hack: bool,
     entries: Entries,
     dir_stack: Vec<Entries>,
@@ -99,9 +101,9 @@ impl NarRestorer {
     where
         P: Into<PathBuf>,
     {
-        let path = path.into();
         Self {
-            path,
+            root: path.into(),
+            dir_names: Vec::new(),
             use_case_hack,
             entries: Default::default(),
             dir_stack: Default::default(),
@@ -111,22 +113,29 @@ impl NarRestorer {
         }
     }
 
+    /// Construct the full path of `leaf` inside the current open directory.
+    /// Only called on the cold error path.
+    #[cold]
+    fn error_path(&self, leaf: &[u8]) -> PathBuf {
+        build_error_path(&self.root, self.dir_names.iter().map(Box::as_ref), leaf)
+    }
+
     /// Checks that `event` stays inside the destination.
     ///
     /// The events don't have to come from our parser, so the names and the
     /// nesting are checked here: the root has no name, everything below it has
     /// a single path component, and nothing follows the root or closes it twice.
     fn check_event<R>(&mut self, event: &NarEvent<R>) -> Result<(), NarWriteError> {
-        let invalid = |name: &[u8], reason| {
-            NarWriteError::invalid_entry_error(join_name(&self.path, name), reason)
-        };
         let name = match event {
             NarEvent::File { name, .. }
             | NarEvent::Symlink { name, .. }
             | NarEvent::StartDirectory { name } => name,
             NarEvent::EndDirectory => {
                 if self.depth == 0 {
-                    return Err(invalid(b"", "end of a directory that was not started"));
+                    return Err(NarWriteError::invalid_entry_error(
+                        self.error_path(b""),
+                        "end of a directory that was not started",
+                    ));
                 }
                 self.depth -= 1;
                 return Ok(());
@@ -134,14 +143,23 @@ impl NarRestorer {
         };
         if self.depth == 0 {
             if self.root_seen {
-                return Err(invalid(name, "entry after the root"));
+                return Err(NarWriteError::invalid_entry_error(
+                    self.error_path(name),
+                    "entry after the root",
+                ));
             }
             if !name.is_empty() {
-                return Err(invalid(name, "the root has a name"));
+                return Err(NarWriteError::invalid_entry_error(
+                    self.error_path(name),
+                    "the root has a name",
+                ));
             }
             self.root_seen = true;
         } else if !is_valid_entry_name(name) {
-            return Err(invalid(name, "invalid file name"));
+            return Err(NarWriteError::invalid_entry_error(
+                self.error_path(name),
+                "invalid file name",
+            ));
         }
         if matches!(event, NarEvent::StartDirectory { .. }) {
             self.depth += 1;
@@ -149,15 +167,66 @@ impl NarRestorer {
         Ok(())
     }
 
-    /// Process a single NAR event and send its filesystem work to `writer`.
+    /// Read exactly `want` bytes from `reader` into `dst` using `AsyncBufRead`
+    /// directly, avoiding `read_to_end`'s EOF-probe reallocation.
+    async fn read_exact_into<R: AsyncBufRead + Unpin>(
+        &self,
+        reader: &mut R,
+        name: &[u8],
+        dst: &mut Vec<u8>,
+        want: usize,
+    ) -> Result<(), NarWriteError> {
+        let mut copied = 0usize;
+        while copied < want {
+            let buf = reader
+                .fill_buf()
+                .await
+                .map_err(|err| NarWriteError::create_file_error(self.error_path(name), err))?;
+            if buf.is_empty() {
+                return Err(NarWriteError::invalid_entry_error(
+                    self.error_path(name),
+                    "file size doesn't match",
+                ));
+            }
+            let take = buf.len().min(want - copied);
+            dst.extend_from_slice(&buf[..take]);
+            reader.consume(take);
+            copied += take;
+        }
+        Ok(())
+    }
+
+    /// Verify that `reader` has reached EOF (draining parser padding) without
+    /// allocating.
+    async fn verify_eof<R: AsyncBufRead + Unpin>(
+        &self,
+        reader: &mut R,
+        name: &[u8],
+    ) -> Result<(), NarWriteError> {
+        let extra = reader
+            .fill_buf()
+            .await
+            .map_err(|err| NarWriteError::create_file_error(self.error_path(name), err))?;
+        if !extra.is_empty() {
+            return Err(NarWriteError::invalid_entry_error(
+                self.error_path(name),
+                "file size doesn't match",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Process a single NAR event, appending it to `batch` or flushing to `writer`.
     async fn process_event<R>(
         &mut self,
         event: NarEvent<R>,
-        writer: &Writer,
+        writer: &mut Writer,
+        batch: &mut OpBatch,
     ) -> Result<(), NarWriteError>
     where
         R: AsyncBufRead + Unpin,
     {
+        use futures_util::FutureExt as _;
         self.check_event(&event)?;
         match event {
             NarEvent::File {
@@ -172,65 +241,135 @@ impl NarRestorer {
                     name
                 };
 
-                // Drop `name` before reading so the parser can reuse the read
-                // buffer it points into.
-                let pushed = !name.is_empty();
-                if pushed {
-                    self.path.push(OsStr::from_bytes(&name));
-                }
-                drop(name);
-                let mut left = size;
-                let mut created = false;
-                loop {
-                    // The parser's reads are small, so this collects bigger
-                    // chunks for the writer. Reading to the end of the file
-                    // also drains its padding.
-                    let want = left.min(FILE_CHUNK_SIZE as u64) as usize;
-                    let mut chunk = (want == FILE_CHUNK_SIZE)
-                        .then(|| writer.spare.lock().unwrap().pop())
-                        .flatten()
-                        .unwrap_or_else(|| Vec::with_capacity(want));
-                    (&mut reader)
-                        .take(FILE_CHUNK_SIZE as u64)
-                        .read_to_end(&mut chunk)
-                        .await
-                        .map_err(|err| NarWriteError::create_file_error(self.path.clone(), err))?;
-                    let last = chunk.len() < FILE_CHUNK_SIZE;
-                    // Events don't have to come from the parser, which checks this.
-                    left = left
-                        .checked_sub(chunk.len() as u64)
-                        .filter(|&left| !last || left == 0)
-                        .ok_or_else(|| {
-                            NarWriteError::invalid_entry_error(
-                                self.path.clone(),
-                                "file size doesn't match",
+                // Small files go into the batch's payload when their name and
+                // data fit, so a payload never outgrows its reservation.
+                if (name.len() as u64 + 1).saturating_add(size) <= BATCH_PAYLOAD_LIMIT as u64 {
+                    let want = size as usize;
+                    if !batch.ops.is_empty()
+                        && (batch.ops.len() >= OPS_PER_BATCH
+                            || batch.payload.len() + name.len() + 1 + want > BATCH_PAYLOAD_LIMIT)
+                    {
+                        writer.flush(batch).await?;
+                    }
+                    // Copy `name` into the batch buffer and drop the parser's
+                    // `Bytes` before reading file data so the parser can reuse
+                    // its read buffer.
+                    let mut name_span = batch.push_c_name(&name);
+                    drop(name);
+
+                    if want > 0 && batch.payload.capacity() < BATCH_PAYLOAD_LIMIT {
+                        batch
+                            .payload
+                            .reserve_exact(BATCH_PAYLOAD_LIMIT - batch.payload.len());
+                    }
+                    let mut copied = 0usize;
+                    // Read the data, then check that the file ends there.
+                    loop {
+                        let filled = match reader.fill_buf().now_or_never() {
+                            Some(filled) => filled,
+                            None => {
+                                // Before waiting for the stream, hand the
+                                // finished entries to the writer thread, as
+                                // `restore` does between entries.
+                                if !batch.ops.is_empty() {
+                                    writer.flush_finished(batch, name_span.offset).await?;
+                                    name_span.offset = 0;
+                                }
+                                reader.fill_buf().await
+                            }
+                        };
+                        let buf = filled.map_err(|err| {
+                            NarWriteError::create_file_error(
+                                self.error_path(batch.name_bytes(name_span)),
+                                err,
                             )
                         })?;
-                    // A file that fills its last chunk ends with an empty read.
-                    if created && chunk.is_empty() {
-                        break;
+                        let done = copied == want;
+                        if buf.is_empty() != done {
+                            return Err(NarWriteError::invalid_entry_error(
+                                self.error_path(batch.name_bytes(name_span)),
+                                "file size doesn't match",
+                            ));
+                        }
+                        if done {
+                            break;
+                        }
+                        let take = buf.len().min(want - copied);
+                        batch.payload.extend_from_slice(&buf[..take]);
+                        reader.consume(take);
+                        copied += take;
                     }
-                    // A file can be bigger than the whole budget, so each
-                    // chunk takes its own permit.
-                    let permit = writer
-                        .data
-                        .clone()
-                        .acquire_many_owned(chunk.len() as u32)
-                        .await
-                        .expect("the semaphore is never closed");
-                    let op = if created {
-                        Op::Write(chunk, permit)
-                    } else {
-                        Op::CreateFile(self.path.clone(), executable, chunk, permit)
-                    };
-                    writer.send(op).await?;
-                    created = true;
-                    if last {
-                        break;
+                    batch.ops.push(Op::CreateFileInline {
+                        name: name_span,
+                        executable,
+                        data: Span {
+                            offset: name_span.offset + name_span.len + 1,
+                            len: want,
+                        },
+                    });
+                    if batch.ops.len() >= OPS_PER_BATCH
+                        || batch.payload.len() >= BATCH_PAYLOAD_LIMIT
+                    {
+                        writer.flush(batch).await?;
                     }
-                }
-                if pushed {
-                    self.path.pop();
+                } else {
+                    // Flush buffered metadata/small files before streaming a large file.
+                    writer.flush(batch).await?;
+                    // Copy the filename out of `name` and drop the parser's
+                    // `Bytes` before reading so the parser can reuse its buffer.
+                    let owned_name: Box<[u8]> = name.as_ref().into();
+                    drop(name);
+                    let mut first_name = Some(owned_name.clone());
+                    let mut left = size;
+                    let mut created = false;
+                    // Runs at least once: an empty file whose name is too
+                    // long to inline still needs its EOF check and creation.
+                    loop {
+                        let want = left.min(RESTORE_CHUNK_SIZE as u64) as usize;
+                        let mut chunk = writer.take_chunk();
+                        self.read_exact_into(&mut reader, &owned_name, &mut chunk, want)
+                            .await?;
+                        left -= want as u64;
+                        // If checking for the end after the last chunk would
+                        // wait, the chunk goes first, so the writer thread can
+                        // write it (and report errors) meanwhile, and the file
+                        // is finished once the check passes.
+                        let eof_waits = left == 0
+                            && match self.verify_eof(&mut reader, &owned_name).now_or_never() {
+                                Some(checked) => {
+                                    checked?;
+                                    false
+                                }
+                                None => true,
+                            };
+                        let finish = left == 0 && !eof_waits;
+                        let op = if created {
+                            Op::Write {
+                                data: chunk,
+                                finish,
+                            }
+                        } else {
+                            created = true;
+                            Op::CreateFileChunk {
+                                name: first_name.take().unwrap(),
+                                executable,
+                                data: chunk,
+                                finish,
+                            }
+                        };
+                        writer.send_msg(Msg::Large(op)).await?;
+                        if eof_waits {
+                            self.verify_eof(&mut reader, &owned_name).await?;
+                            let op = Op::Write {
+                                data: Vec::new(),
+                                finish: true,
+                            };
+                            writer.send_msg(Msg::Large(op)).await?;
+                        }
+                        if left == 0 {
+                            break;
+                        }
+                    }
                 }
             }
             NarEvent::Symlink { name, target } => {
@@ -239,9 +378,21 @@ impl NarRestorer {
                 } else {
                     name
                 };
-
+                if !batch.ops.is_empty()
+                    && batch.payload.len() + name.len() + 1 + target.len() > BATCH_PAYLOAD_LIMIT
+                {
+                    writer.flush(batch).await?;
+                }
+                let name_span = batch.push_c_name(&name);
+                let target_span = batch.push_raw(&target);
                 writer
-                    .send(Op::CreateSymlink(join_name(&self.path, &name), target))
+                    .push_op(
+                        batch,
+                        Op::CreateSymlink {
+                            name: name_span,
+                            target: target_span,
+                        },
+                    )
                     .await?;
             }
             NarEvent::StartDirectory { name } => {
@@ -256,21 +407,30 @@ impl NarRestorer {
                     name
                 };
 
-                // In place, so entering a directory doesn't allocate a new path.
                 if !name.is_empty() {
-                    self.path.push(OsStr::from_bytes(&name));
+                    self.dir_names.push(name.as_ref().into());
                 }
-                writer.send(Op::CreateDirectory(self.path.clone())).await?;
+                if !batch.ops.is_empty()
+                    && batch.payload.len() + name.len() + 1 > BATCH_PAYLOAD_LIMIT
+                {
+                    writer.flush(batch).await?;
+                }
+                let name_span = batch.push_c_name(&name);
+                writer
+                    .push_op(batch, Op::CreateDirectory { name: name_span })
+                    .await?;
             }
             NarEvent::EndDirectory => {
                 if self.use_case_hack {
                     self.entries = self.dir_stack.pop().unwrap_or_default();
                 }
-                // Keep the destination itself for error messages.
+                // `check_event` already decremented `depth`, so `depth > 0`
+                // means we are leaving a subdirectory below `root`.
                 if self.depth > 0 {
-                    self.path.pop();
+                    self.dir_names.pop();
                 }
-                writer.send(Op::EndDirectory).await?;
+                debug_assert_eq!(self.dir_names.len(), self.depth.saturating_sub(1));
+                writer.push_op(batch, Op::EndDirectory).await?;
             }
         }
         Ok(())
@@ -290,29 +450,59 @@ impl NarRestorer {
         U: Into<Result<NarEvent<R>, NarWriteError>>,
         R: AsyncBufRead + Send + Unpin,
     {
-        use futures_util::StreamExt as _;
         use futures_util::future::{Either, select};
+        use futures_util::{FutureExt as _, StreamExt as _};
         let spare = Spare::default();
-        let (ops, queued) = mpsc::channel(OPS_IN_FLIGHT);
+        let (ops, queued) = mpsc::channel(BATCHES_IN_FLIGHT);
         let dropped = CancellationToken::new();
         let written = spawn_blocking({
             let dropped = dropped.clone();
             let spare = spare.clone();
-            move || write(queued, &dropped, self.canonical, spare)
+            let root = self.root.clone();
+            move || write(queued, &dropped, root, self.canonical, spare)
         });
         let writer = Writer {
             ops,
-            data: Arc::new(Semaphore::new(DATA_IN_FLIGHT)),
             spare,
+            local_chunks: Vec::new(),
+            local_batches: Vec::new(),
         };
         let sent = async {
             // This future owns `writer`, so the queue closes when it finishes.
-            let writer = writer;
+            let mut writer = writer;
+            let mut batch = writer.take_batch();
             futures_util::pin_mut!(stream);
-            while let Some(item) = stream.next().await {
-                self.process_event(item.into()?, &writer).await?;
+            let res: Result<(), NarWriteError> = async {
+                loop {
+                    // Drain immediately-ready events into the current batch,
+                    // flushing before parking when the stream is pending so
+                    // disk writes overlap with slow streams and never stall
+                    // concurrent filesystem observers.
+                    let next_item = if !batch.ops.is_empty() {
+                        match stream.next().now_or_never() {
+                            Some(item) => item,
+                            None => {
+                                writer.flush(&mut batch).await?;
+                                stream.next().await
+                            }
+                        }
+                    } else {
+                        stream.next().await
+                    };
+                    let Some(item) = next_item else {
+                        break;
+                    };
+                    self.process_event(item.into()?, &mut writer, &mut batch)
+                        .await?;
+                }
+                Ok(())
             }
-            Ok(())
+            .await;
+            // Flush queued work before returning even on stream error so prior
+            // entries finish (and canonical directories are sealed). Any writer
+            // thread error is surfaced via `written` below.
+            let flush_res = writer.flush(&mut batch).await;
+            res.and(flush_res)
         };
         futures_util::pin_mut!(sent);
         // Locals drop in reverse order, so if the caller drops the future,
@@ -345,50 +535,259 @@ fn join_name(dir: &Path, name: &[u8]) -> PathBuf {
     path
 }
 
-/// How many entries the writer thread's queue holds.
-const OPS_IN_FLIGHT: usize = 64;
+#[cold]
+fn build_error_path<'a>(
+    root: &Path,
+    dirs: impl IntoIterator<Item = &'a [u8]>,
+    leaf: &[u8],
+) -> PathBuf {
+    let mut path = root.to_path_buf();
+    for d in dirs {
+        if !d.is_empty() {
+            path.push(OsStr::from_bytes(d));
+        }
+    }
+    if !leaf.is_empty() {
+        join_name(&path, leaf)
+    } else {
+        path
+    }
+}
 
-/// How many entries the writer thread takes from its queue at once. Taking
-/// them from a full queue wakes the task that fills it once per batch instead
-/// of once per entry. File data in a batch still counts towards
-/// [`DATA_IN_FLIGHT`].
-const OPS_PER_BATCH: usize = 32;
+/// Chunk size for large files in `NarRestorer`, kept at 64 KiB so chunks
+/// stay below glibc's 128 KiB `mmap` threshold, align with typical stream
+/// chunk sizes and OS pages, and stay L2-cache-hot between producer and writer.
+const RESTORE_CHUNK_SIZE: usize = 64 * 1024;
 
-/// How much file data the writer thread's queue holds, so a slow disk can't
-/// make a restore use much memory.
-const DATA_IN_FLIGHT: usize = 8 * FILE_CHUNK_SIZE;
+/// Maximum payload bytes accumulated in a single batch before flush. A batch
+/// is flushed before an entry that would take it past this, and small files
+/// are packed into the payload only if their name and data fit. Matching
+/// `RESTORE_CHUNK_SIZE` means every channel message carries at most one
+/// chunk's worth of data. Only a directory or symlink whose name or target
+/// alone is bigger exceeds it, and the writer thread frees such a payload
+/// instead of reusing it.
+const BATCH_PAYLOAD_LIMIT: usize = RESTORE_CHUNK_SIZE;
+
+/// How many entries a single batch holds before flushing to the writer thread.
+const OPS_PER_BATCH: usize = 64;
+
+/// How many messages the writer thread's channel holds, so the channel holds
+/// at most `BATCHES_IN_FLIGHT * RESTORE_CHUNK_SIZE` (512 KiB) of data. That
+/// isn't all the data in flight: the writer thread takes up to this many
+/// messages out of the channel at once, freeing their slots before it applies
+/// them, and `restore` holds the message it waits to send, plus at most one
+/// partly read small file. So up to `(2 * BATCHES_IN_FLIGHT + 2) *
+/// RESTORE_CHUNK_SIZE` (1.125 MiB) is in flight, apart from the entries that
+/// exceed [`BATCH_PAYLOAD_LIMIT`] on their own.
+const BATCHES_IN_FLIGHT: usize = 8;
+
+#[cfg(test)]
+const DATA_IN_FLIGHT: usize = BATCHES_IN_FLIGHT * RESTORE_CHUNK_SIZE;
+
+/// Byte range inside `OpBatch::payload`.
+#[derive(Clone, Copy)]
+struct Span {
+    offset: usize,
+    len: usize,
+}
 
 /// Filesystem work for the writer thread, in NAR order.
 enum Op {
-    CreateDirectory(PathBuf),
-    CreateSymlink(PathBuf, Bytes),
-    /// Carries the file's first chunk, so small files take one op.
-    CreateFile(PathBuf, bool, Vec<u8>, OwnedSemaphorePermit),
-    /// More data for the last created file. The permit is its share of
-    /// [`DATA_IN_FLIGHT`].
-    Write(Vec<u8>, OwnedSemaphorePermit),
+    /// Directory creation; `name` is a NUL-terminated span in `OpBatch::payload`.
+    CreateDirectory {
+        name: Span,
+    },
+    /// Symlink creation; `name` is NUL-terminated, `target` is raw bytes.
+    CreateSymlink {
+        name: Span,
+        target: Span,
+    },
+    /// Complete small file; `name` is NUL-terminated and `data` holds its bytes.
+    CreateFileInline {
+        name: Span,
+        executable: bool,
+        data: Span,
+    },
+    /// First chunk of a large file.
+    CreateFileChunk {
+        name: Box<[u8]>,
+        executable: bool,
+        data: Vec<u8>,
+        finish: bool,
+    },
+    /// Subsequent chunk of the last created large file. An empty one with
+    /// `finish` only finishes the file.
+    Write {
+        data: Vec<u8>,
+        finish: bool,
+    },
     EndDirectory,
 }
 
-/// The queue to the writer thread, and the budget for the file data in it.
-struct Writer {
-    ops: mpsc::Sender<Op>,
-    data: Arc<Semaphore>,
-    spare: Spare,
+struct OpBatch {
+    ops: Vec<Op>,
+    /// Contiguous storage for NUL-terminated entry names, symlink targets, and
+    /// small file payloads in this batch.
+    payload: Vec<u8>,
 }
 
-/// Full-size chunks the writer thread has written, for `restore` to fill
-/// again. A reused chunk is still in the cache when the writer copies it,
-/// and avoids a fresh allocation's page faults.
-type Spare = Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
+impl OpBatch {
+    /// Grows the payload for `len` more bytes like `Vec` does, but not past
+    /// [`BATCH_PAYLOAD_LIMIT`] while they fit in it, so the writer thread can
+    /// reuse the batch.
+    #[inline]
+    fn make_room(&mut self, len: usize) {
+        let need = self.payload.len() + len;
+        if need > self.payload.capacity() && need <= BATCH_PAYLOAD_LIMIT {
+            let grown = (2 * self.payload.capacity()).clamp(need, BATCH_PAYLOAD_LIMIT);
+            self.payload.reserve_exact(grown - self.payload.len());
+        }
+    }
+
+    /// Append `name` plus a trailing NUL terminator so `Disk` can borrow a
+    /// `&CStr` directly with zero conversion. `len` excludes the NUL byte.
+    fn push_c_name(&mut self, name: &[u8]) -> Span {
+        self.make_room(name.len() + 1);
+        let offset = self.payload.len();
+        self.payload.extend_from_slice(name);
+        self.payload.push(0);
+        Span {
+            offset,
+            len: name.len(),
+        }
+    }
+
+    fn push_raw(&mut self, bytes: &[u8]) -> Span {
+        self.make_room(bytes.len());
+        let offset = self.payload.len();
+        self.payload.extend_from_slice(bytes);
+        Span {
+            offset,
+            len: bytes.len(),
+        }
+    }
+
+    #[inline]
+    fn name_bytes(&self, span: Span) -> &[u8] {
+        &self.payload[span.offset..span.offset + span.len]
+    }
+}
+
+#[inline]
+fn span_bytes(payload: &[u8], span: Span) -> &[u8] {
+    &payload[span.offset..span.offset + span.len]
+}
+
+#[inline]
+fn span_cstr(payload: &[u8], span: Span) -> &CStr {
+    CStr::from_bytes_with_nul(&payload[span.offset..span.offset + span.len + 1])
+        .expect("validated NAR entry names contain no interior NUL")
+}
+
+enum Msg {
+    Batch(OpBatch),
+    Large(Op),
+}
+
+/// Recycled buffers returned by the writer thread so the producer avoids
+/// repeated allocations and page faults.
+#[derive(Default)]
+struct SparePool {
+    chunks: Vec<Vec<u8>>,
+    batches: Vec<(Vec<Op>, Vec<u8>)>,
+}
+
+type Spare = Arc<std::sync::Mutex<SparePool>>;
+
+fn push_capped<T>(dst: &mut Vec<T>, item: T, cap: usize) {
+    if dst.len() < cap {
+        dst.push(item);
+    }
+}
+
+fn take_pooled<T>(
+    local: &mut Vec<T>,
+    spare: &Spare,
+    select: impl FnOnce(&mut SparePool) -> &mut Vec<T>,
+) -> Option<T> {
+    if let Some(item) = local.pop() {
+        return Some(item);
+    }
+    {
+        let mut pool = spare.lock().unwrap();
+        let shared = select(&mut pool);
+        if !shared.is_empty() {
+            std::mem::swap(local, shared);
+        }
+    }
+    local.pop()
+}
+
+/// The bounded queue to the writer thread.
+struct Writer {
+    ops: mpsc::Sender<Msg>,
+    spare: Spare,
+    local_chunks: Vec<Vec<u8>>,
+    local_batches: Vec<(Vec<Op>, Vec<u8>)>,
+}
 
 impl Writer {
-    /// Queues `op` for the writer thread, waiting while the queue is full.
+    fn take_chunk(&mut self) -> Vec<u8> {
+        take_pooled(&mut self.local_chunks, &self.spare, |p| &mut p.chunks)
+            .unwrap_or_else(|| Vec::with_capacity(RESTORE_CHUNK_SIZE))
+    }
+
+    fn take_batch(&mut self) -> OpBatch {
+        if let Some((ops, payload)) =
+            take_pooled(&mut self.local_batches, &self.spare, |p| &mut p.batches)
+        {
+            return OpBatch { ops, payload };
+        }
+        OpBatch {
+            ops: Vec::with_capacity(OPS_PER_BATCH),
+            payload: Vec::new(),
+        }
+    }
+
+    async fn push_op(&mut self, batch: &mut OpBatch, op: Op) -> Result<(), NarWriteError> {
+        batch.ops.push(op);
+        if batch.ops.len() >= OPS_PER_BATCH || batch.payload.len() >= BATCH_PAYLOAD_LIMIT {
+            self.flush(batch).await?;
+        }
+        Ok(())
+    }
+
+    async fn flush(&mut self, batch: &mut OpBatch) -> Result<(), NarWriteError> {
+        if batch.ops.is_empty() {
+            return Ok(());
+        }
+        let to_send = std::mem::replace(batch, self.take_batch());
+        self.send_msg(Msg::Batch(to_send)).await
+    }
+
+    /// Like [`Writer::flush`], but the payload from `entry` on belongs to an
+    /// entry that isn't finished yet, so it moves to the start of the next batch.
+    async fn flush_finished(
+        &mut self,
+        batch: &mut OpBatch,
+        entry: usize,
+    ) -> Result<(), NarWriteError> {
+        let mut next = self.take_batch();
+        if next.payload.capacity() < BATCH_PAYLOAD_LIMIT {
+            next.payload.reserve_exact(BATCH_PAYLOAD_LIMIT);
+        }
+        next.payload.extend_from_slice(&batch.payload[entry..]);
+        batch.payload.truncate(entry);
+        let to_send = std::mem::replace(batch, next);
+        self.send_msg(Msg::Batch(to_send)).await
+    }
+
+    /// Queues `msg` for the writer thread, waiting while the queue is full.
     ///
     /// This fails only if the writer thread has stopped on an error. `restore`
     /// then returns the thread's error instead of this one.
-    async fn send(&self, op: Op) -> Result<(), NarWriteError> {
-        self.ops.send(op).await.map_err(|_| {
+    async fn send_msg(&self, msg: Msg) -> Result<(), NarWriteError> {
+        self.ops.send(msg).await.map_err(|_| {
             NarWriteError::create_file_error(PathBuf::new(), io::ErrorKind::BrokenPipe.into())
         })
     }
@@ -397,28 +796,54 @@ impl Writer {
 /// Does the filesystem work in `ops`, in order. If `dropped` is cancelled,
 /// it returns before the next entry and skips the rest.
 fn write(
-    mut ops: mpsc::Receiver<Op>,
+    mut ops: mpsc::Receiver<Msg>,
     dropped: &CancellationToken,
+    root: PathBuf,
     canonical: bool,
     spare: Spare,
 ) -> Result<(), NarWriteError> {
     let mut disk = Disk {
+        root,
         canonical,
         exact_mode: [None; 2],
         file: None,
         dirs: Vec::new(),
-        spare,
+        spare_chunks: Vec::new(),
+        spare_batches: Vec::new(),
     };
-    let mut batch = Vec::with_capacity(OPS_PER_BATCH);
-    while ops.blocking_recv_many(&mut batch, OPS_PER_BATCH) > 0 {
-        for op in batch.drain(..) {
-            // The caller dropped `restore`, so nobody waits for this work, and
-            // the caller may already be removing the destination.
-            if dropped.is_cancelled() {
-                return Ok(());
+    let mut msgs = Vec::with_capacity(BATCHES_IN_FLIGHT);
+    while ops.blocking_recv_many(&mut msgs, BATCHES_IN_FLIGHT) > 0 {
+        let mut res = Ok(());
+        for msg in msgs.drain(..) {
+            match msg {
+                Msg::Batch(mut batch) => {
+                    for op in batch.ops.drain(..) {
+                        if dropped.is_cancelled() {
+                            return Ok(());
+                        }
+                        if let Err(e) = disk.apply(op, &batch.payload) {
+                            res = Err(e);
+                            break;
+                        }
+                    }
+                    disk.stash_batch(batch.ops, batch.payload);
+                    if res.is_err() {
+                        break;
+                    }
+                }
+                Msg::Large(op) => {
+                    if dropped.is_cancelled() {
+                        return Ok(());
+                    }
+                    if let Err(e) = disk.apply(op, &[]) {
+                        res = Err(e);
+                        break;
+                    }
+                }
             }
-            disk.apply(op)?;
         }
+        disk.return_spares(&spare);
+        res?;
     }
     disk.close_file()
 }
@@ -455,129 +880,220 @@ fn set_canonical_mtime(dir: impl AsFd, name: impl Arg) -> Result<(), Errno> {
     utimensat(dir, name, &CANONICAL_TIMESTAMPS, AtFlags::SYMLINK_NOFOLLOW)
 }
 
-fn append((path, file): &mut (PathBuf, File), data: &[u8]) -> Result<(), NarWriteError> {
-    file.write_all(data)
-        .map_err(|err| NarWriteError::create_file_error(path.clone(), err))
-}
-
 struct Disk {
+    root: PathBuf,
     canonical: bool,
     /// Whether `openat` yields the canonical mode, indexed by `executable`.
     exact_mode: [Option<bool>; 2],
-    /// The last created file, which [`Op::Write`] appends to.
-    file: Option<(PathBuf, File)>,
+    /// Open multi-chunk file, which [`Op::Write`] appends to.
+    file: Option<(Box<[u8]>, File)>,
     /// Open directories, innermost last. Entries are created relative to
     /// the innermost one, so swapping a directory for a symlink can't
     /// redirect them.
-    dirs: Vec<(PathBuf, OwnedFd)>,
-    spare: Spare,
+    dirs: Vec<(Box<[u8]>, OwnedFd)>,
+    spare_chunks: Vec<Vec<u8>>,
+    spare_batches: Vec<(Vec<Op>, Vec<u8>)>,
 }
 
 impl Disk {
-    /// The directory to create `path` in, and its name there.
-    fn locate<'a>(&'a self, path: &'a Path) -> (BorrowedFd<'a>, &'a OsStr) {
-        match (self.dirs.last(), path.file_name()) {
-            (Some((_, dir)), Some(name)) => (dir.as_fd(), name),
-            // The root.
-            _ => (CWD, path.as_os_str()),
-        }
+    #[cold]
+    fn error_path(&self, leaf: &[u8]) -> PathBuf {
+        build_error_path(&self.root, self.dirs.iter().map(|(d, _)| d.as_ref()), leaf)
     }
 
-    fn apply(&mut self, op: Op) -> Result<(), NarWriteError> {
+    fn create_file_at(
+        &mut self,
+        entry_name: impl Arg,
+        err_leaf: &[u8],
+        executable: bool,
+    ) -> Result<File, NarWriteError> {
+        trace!("Writing to file {:?}", OsStr::from_bytes(err_leaf));
+        let mut mode = if executable { 0o777 } else { 0o666 };
+        if self.canonical {
+            // The mode only applies to later opens.
+            mode &= !0o222;
+        }
+        let mode = Mode::from_raw_mode(mode);
+        // `O_EXCL` also refuses to follow a symlink.
+        let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC;
+        let opened = match self.dirs.last() {
+            Some((_, dir)) => openat(dir, entry_name, flags, mode),
+            None => openat(CWD, self.root.as_os_str(), flags, mode),
+        };
+        let created = opened.map_err(|err| {
+            NarWriteError::create_file_error(self.error_path(err_leaf), err.into())
+        })?;
+        if self.canonical {
+            // The umask or a default ACL can take bits off `mode`.
+            // We create every directory, so all share one default
+            // ACL and the first file of each kind decides.
+            let exact = self.exact_mode[usize::from(executable)].get_or_insert_with(|| {
+                SKIP_EXACT_FCHMOD
+                    && fstat(&created).is_ok_and(|st| Mode::from_raw_mode(st.st_mode) == mode)
+            });
+            if !*exact {
+                fchmod(&created, mode).map_err(|err| {
+                    NarWriteError::create_file_error(self.error_path(err_leaf), err.into())
+                })?;
+            }
+        }
+        Ok(File::from(created))
+    }
+
+    fn finish_file(&self, file: &File, err_leaf: &[u8]) -> Result<(), NarWriteError> {
+        if self.canonical {
+            futimens(file, &CANONICAL_TIMESTAMPS).map_err(|err| {
+                NarWriteError::create_file_error(self.error_path(err_leaf), err.into())
+            })?;
+        }
+        Ok(())
+    }
+
+    fn apply(&mut self, op: Op, payload: &[u8]) -> Result<(), NarWriteError> {
         match op {
-            Op::Write(data, _permit) => {
-                append(
-                    self.file.as_mut().expect("file data follows its file"),
-                    &data,
-                )?;
-                self.recycle(data);
-            }
-            Op::CreateFile(path, executable, data, _permit) => {
+            Op::CreateFileInline {
+                name,
+                executable,
+                data,
+            } => {
                 self.close_file()?;
-                trace!("Writing to file {:?}", path);
-                let mut mode = if executable { 0o777 } else { 0o666 };
-                if self.canonical {
-                    // The mode only applies to later opens.
-                    mode &= !0o222;
+                let leaf = span_bytes(payload, name);
+                let c_name = span_cstr(payload, name);
+                let mut file = self.create_file_at(c_name, leaf, executable)?;
+                if data.len > 0 {
+                    file.write_all(span_bytes(payload, data)).map_err(|err| {
+                        NarWriteError::create_file_error(self.error_path(leaf), err)
+                    })?;
                 }
-                let mode = Mode::from_raw_mode(mode);
-                // `O_EXCL` also refuses to follow a symlink.
-                let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC;
-                let err = |err: Errno| NarWriteError::create_file_error(path.clone(), err.into());
-                let (dir, name) = self.locate(&path);
-                let created = openat(dir, name, flags, mode).map_err(err)?;
-                if self.canonical {
-                    // The umask or a default ACL can take bits off `mode`.
-                    // We create every directory, so all share one default
-                    // ACL and the first file of each kind decides.
-                    let exact = self.exact_mode[usize::from(executable)].get_or_insert_with(|| {
-                        SKIP_EXACT_FCHMOD
-                            && fstat(&created)
-                                .is_ok_and(|st| Mode::from_raw_mode(st.st_mode) == mode)
-                    });
-                    if !*exact {
-                        fchmod(&created, mode).map_err(err)?;
-                    }
+                self.finish_file(&file, leaf)?;
+            }
+            Op::CreateFileChunk {
+                name,
+                executable,
+                data,
+                finish,
+            } => {
+                self.close_file()?;
+                let mut file = self.create_file_at(OsStr::from_bytes(&name), &name, executable)?;
+                let write_res = file.write_all(&data);
+                self.stash_chunk(data);
+                write_res
+                    .map_err(|err| NarWriteError::create_file_error(self.error_path(&name), err))?;
+                if finish {
+                    self.finish_file(&file, &name)?;
+                } else {
+                    self.file = Some((name, file));
                 }
-                append(self.file.insert((path, created.into())), &data)?;
-                self.recycle(data);
             }
-            Op::CreateDirectory(path) => {
-                self.close_file()?;
-                let err = |err: Errno| NarWriteError::create_dir_error(path.clone(), err.into());
-                let (dir, name) = self.locate(&path);
-                let opened = name
-                    .into_with_c_str(|name| {
-                        mkdirat(dir, name, Mode::from_raw_mode(0o777))?;
-                        openat(dir, name, DIR_FLAGS, Mode::empty())
-                    })
-                    .map_err(err)?;
-                self.dirs.push((path, opened));
+            Op::Write { data, finish } => {
+                let write_res = {
+                    let (_, file) = self.file.as_mut().expect("file data follows its file");
+                    file.write_all(&data)
+                };
+                self.stash_chunk(data);
+                if let Err(err) = write_res {
+                    let (name, _) = self.file.take().unwrap();
+                    return Err(NarWriteError::create_file_error(
+                        self.error_path(&name),
+                        err,
+                    ));
+                }
+                if finish {
+                    self.close_file()?;
+                }
             }
-            Op::CreateSymlink(path, target) => {
+            Op::CreateDirectory { name } => {
                 self.close_file()?;
-                let err =
-                    |err: Errno| NarWriteError::create_symlink_error(path.clone(), err.into());
-                let (dir, name) = self.locate(&path);
-                name.into_with_c_str(|name| {
-                    symlinkat(target.as_ref(), dir, name)?;
-                    if self.canonical {
-                        set_canonical_mtime(dir, name)?;
+                let leaf = span_bytes(payload, name);
+                let opened = match self.dirs.last() {
+                    Some((_, dir)) => {
+                        let c_name = span_cstr(payload, name);
+                        mkdirat(dir, c_name, Mode::from_raw_mode(0o777))
+                            .and_then(|()| openat(dir, c_name, DIR_FLAGS, Mode::empty()))
                     }
-                    Ok(())
-                })
-                .map_err(err)?;
+                    None => self.root.as_os_str().into_with_c_str(|c_name| {
+                        mkdirat(CWD, c_name, Mode::from_raw_mode(0o777))?;
+                        openat(CWD, c_name, DIR_FLAGS, Mode::empty())
+                    }),
+                }
+                .map_err(|err| {
+                    NarWriteError::create_dir_error(self.error_path(leaf), err.into())
+                })?;
+                self.dirs.push((leaf.into(), opened));
+            }
+            Op::CreateSymlink { name, target } => {
+                self.close_file()?;
+                let leaf = span_bytes(payload, name);
+                let target_bytes = span_bytes(payload, target);
+                match self.dirs.last() {
+                    Some((_, dir)) => {
+                        let c_name = span_cstr(payload, name);
+                        symlinkat(target_bytes, dir, c_name).and_then(|()| {
+                            if self.canonical {
+                                set_canonical_mtime(dir, c_name)?;
+                            }
+                            Ok(())
+                        })
+                    }
+                    None => self.root.as_os_str().into_with_c_str(|c_name| {
+                        symlinkat(target_bytes, CWD, c_name)?;
+                        if self.canonical {
+                            set_canonical_mtime(CWD, c_name)?;
+                        }
+                        Ok(())
+                    }),
+                }
+                .map_err(|err| {
+                    NarWriteError::create_symlink_error(self.error_path(leaf), err.into())
+                })?;
             }
             Op::EndDirectory => {
                 self.close_file()?;
-                let (path, dir) = self.dirs.pop().expect("a directory ends after it starts");
+                let (name, dir) = self.dirs.pop().expect("a directory ends after it starts");
                 if self.canonical {
                     // `fchmod` fails on an `O_PATH` descriptor, but "." works.
                     chmodat(&dir, c".", Mode::from_raw_mode(0o555), AtFlags::empty())
                         .and_then(|()| set_canonical_mtime(&dir, c"."))
-                        .map_err(|err| NarWriteError::create_dir_error(path, err.into()))?;
+                        .map_err(|err| {
+                            NarWriteError::create_dir_error(self.error_path(&name), err.into())
+                        })?;
                 }
             }
         }
         Ok(())
     }
 
-    fn recycle(&self, mut data: Vec<u8>) {
-        if data.capacity() == FILE_CHUNK_SIZE {
+    fn stash_chunk(&mut self, mut data: Vec<u8>) {
+        if data.capacity() == RESTORE_CHUNK_SIZE {
             data.clear();
-            let mut spare = self.spare.lock().unwrap();
-            if spare.len() < DATA_IN_FLIGHT / FILE_CHUNK_SIZE {
-                spare.push(data);
-            }
+            push_capped(&mut self.spare_chunks, data, BATCHES_IN_FLIGHT);
+        }
+    }
+
+    fn stash_batch(&mut self, mut ops: Vec<Op>, mut payload: Vec<u8>) {
+        if ops.capacity() >= OPS_PER_BATCH && payload.capacity() <= BATCH_PAYLOAD_LIMIT {
+            ops.clear();
+            payload.clear();
+            push_capped(&mut self.spare_batches, (ops, payload), BATCHES_IN_FLIGHT);
+        }
+    }
+
+    fn return_spares(&mut self, spare: &Spare) {
+        if self.spare_chunks.is_empty() && self.spare_batches.is_empty() {
+            return;
+        }
+        let mut pool = spare.lock().unwrap();
+        for buf in self.spare_chunks.drain(..) {
+            push_capped(&mut pool.chunks, buf, BATCHES_IN_FLIGHT);
+        }
+        for batch in self.spare_batches.drain(..) {
+            push_capped(&mut pool.batches, batch, BATCHES_IN_FLIGHT);
         }
     }
 
     fn close_file(&mut self) -> Result<(), NarWriteError> {
-        if let Some((path, file)) = self.file.take()
-            && self.canonical
-        {
-            futimens(&file, &CANONICAL_TIMESTAMPS)
-                .map_err(|err| NarWriteError::create_file_error(path, err.into()))?;
+        if let Some((name, file)) = self.file.take() {
+            self.finish_file(&file, &name)?;
         }
         Ok(())
     }
@@ -791,7 +1307,7 @@ mod unittests {
     /// hold. Each file contains its own name, so data written to the wrong
     /// file fails the test.
     fn many_files() -> test_data::TestNarEvents {
-        let files = (0..2 * (OPS_IN_FLIGHT + OPS_PER_BATCH)).map(|i| {
+        let files = (0..2 * BATCHES_IN_FLIGHT * OPS_PER_BATCH).map(|i| {
             let name = Bytes::from(format!("{i:04}"));
             NarEvent::File {
                 name: name.clone(),
@@ -952,8 +1468,11 @@ mod unittests {
     #[case::longer(1, 2)]
     #[case::shorter(2, 1)]
     #[case::not_empty(0, 1)]
-    #[case::longer_than_chunk(FILE_CHUNK_SIZE, FILE_CHUNK_SIZE + 1)]
-    #[case::shorter_by_chunk(FILE_CHUNK_SIZE + 1, FILE_CHUNK_SIZE)]
+    // The biggest file named `f` that goes into a batch's payload.
+    #[case::longer_inline(BATCH_PAYLOAD_LIMIT - 2, BATCH_PAYLOAD_LIMIT - 1)]
+    #[case::longer_than_chunk(RESTORE_CHUNK_SIZE, RESTORE_CHUNK_SIZE + 1)]
+    #[case::longer_by_chunk(RESTORE_CHUNK_SIZE + 1, RESTORE_CHUNK_SIZE + 2)]
+    #[case::shorter_by_chunk(RESTORE_CHUNK_SIZE + 1, RESTORE_CHUNK_SIZE)]
     async fn test_restore_checks_file_size(#[case] size: usize, #[case] len: usize) {
         let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
         let path = dir.path().join("output");
@@ -1002,6 +1521,283 @@ mod unittests {
         let err = restore(events, &path).await.unwrap_err();
         assert_eq!(err.path, PathBuf::from("stream"));
         assert!(path.is_dir());
+    }
+
+    /// A file's reader that has `first`, waits once, and then has `rest`.
+    fn waiting_reader(
+        first: impl Into<Bytes>,
+        rest: impl Into<Bytes>,
+    ) -> impl AsyncBufRead + Send + Unpin {
+        let rest = rest.into();
+        let rest = futures_util::stream::once(Box::pin(async move {
+            tokio::task::yield_now().await;
+            Ok::<_, io::Error>(rest)
+        }));
+        tokio_util::io::StreamReader::new(iter([Ok(first.into())]).chain(rest))
+    }
+
+    /// The entries before a small file reach the writer thread before
+    /// `restore` waits for the file's data, so its errors don't wait for a
+    /// stalled stream either.
+    #[tokio::test]
+    async fn test_restore_errors_while_file_waits() {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("exists");
+        std::fs::create_dir(&path).unwrap();
+        let stalled = tokio_util::io::StreamReader::new(
+            iter([Ok(Bytes::from_static(b"x"))])
+                .chain(futures_util::stream::pending::<io::Result<Bytes>>()),
+        );
+        let events = [
+            NarEvent::StartDirectory { name: Bytes::new() },
+            NarEvent::File {
+                name: Bytes::from_static(b"f"),
+                executable: false,
+                size: 2,
+                reader: stalled,
+            },
+        ];
+        let restored = restore(iter(events).map(Ok::<_, NarWriteError>), &path);
+        let err = tokio::time::timeout(std::time::Duration::from_secs(10), restored)
+            .await
+            .expect("`restore` waited on the file")
+            .unwrap_err();
+        assert_eq!(err.operation, NarWriteOperation::CreateDirectory);
+        assert_eq!(err.path, path);
+    }
+
+    /// A streamed file's last chunk reaches the writer thread before `restore`
+    /// waits for the file's end, so its errors don't wait for a stalled
+    /// stream either.
+    #[tokio::test]
+    async fn test_restore_errors_while_file_end_waits() {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("exists");
+        std::fs::write(&path, b"").unwrap();
+        let stalled = tokio_util::io::StreamReader::new(
+            iter([Ok(Bytes::from(vec![0; RESTORE_CHUNK_SIZE]))])
+                .chain(futures_util::stream::pending::<io::Result<Bytes>>()),
+        );
+        let events = [NarEvent::File {
+            name: Bytes::new(),
+            executable: false,
+            size: RESTORE_CHUNK_SIZE as u64,
+            reader: stalled,
+        }];
+        let restored = restore(iter(events).map(Ok::<_, NarWriteError>), &path);
+        let err = tokio::time::timeout(std::time::Duration::from_secs(10), restored)
+            .await
+            .expect("`restore` waited on the file's end")
+            .unwrap_err();
+        assert_eq!(err.operation, NarWriteOperation::CreateFile);
+        assert_eq!(err.path, path);
+    }
+
+    /// While `restore` waits for a streamed file's end, the writer thread
+    /// already has all of its data, like the merge base had for files of
+    /// whole chunks.
+    #[tokio::test]
+    async fn test_restore_writes_file_before_end_waits() {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let size = 4 * RESTORE_CHUNK_SIZE;
+        let stalled = tokio_util::io::StreamReader::new(
+            iter([Ok(Bytes::from(vec![1; size]))])
+                .chain(futures_util::stream::pending::<io::Result<Bytes>>()),
+        );
+        let events = [NarEvent::File {
+            name: Bytes::new(),
+            executable: false,
+            size: size as u64,
+            reader: stalled,
+        }];
+        let restored = tokio::spawn(restore(
+            iter(events).map(Ok::<_, NarWriteError>),
+            path.clone(),
+        ));
+        let written = async {
+            while std::fs::metadata(&path).map_or(0, |m| m.len()) < size as u64 {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), written)
+            .await
+            .expect("the last chunk waited for the file's end");
+        restored.abort();
+    }
+
+    /// A streamed file whose end comes after a wait is finished like any other.
+    #[tokio::test]
+    #[rstest]
+    #[case::one_chunk(RESTORE_CHUNK_SIZE)]
+    #[case::partial_last_chunk(2 * RESTORE_CHUNK_SIZE + 5)]
+    async fn test_restore_streamed_file_end_waits(
+        #[case] size: usize,
+        #[values(false, true)] canonical: bool,
+    ) {
+        let _umask = UMASK.lock().await;
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let data: Bytes = (0..size).map(|i| i as u8).collect();
+        let events = [NarEvent::File {
+            name: Bytes::new(),
+            executable: true,
+            size: size as u64,
+            reader: waiting_reader(data.clone(), Bytes::new()),
+        }];
+        RestoreOptions::new()
+            .canonical(canonical)
+            .restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), data);
+        if canonical {
+            check_canonical(&path);
+        }
+    }
+
+    /// Small files whose data arrives in parts restore like any other, also
+    /// when the entries before them are sent ahead while they wait.
+    #[tokio::test]
+    async fn test_restore_files_that_wait() {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let file =
+            |name: &'static [u8], first: &'static [u8], rest: &'static [u8]| NarEvent::File {
+                name: Bytes::from_static(name),
+                executable: false,
+                size: (first.len() + rest.len()) as u64,
+                reader: waiting_reader(first, rest),
+            };
+        let events = [
+            NarEvent::StartDirectory { name: Bytes::new() },
+            file(b"a", b"ab", b"cd"),
+            file(b"b", b"", b"efgh"),
+            file(b"c", b"ijkl", b""),
+            NarEvent::EndDirectory,
+        ];
+        restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+            .await
+            .unwrap();
+        for (name, data) in [("a", "abcd"), ("b", "efgh"), ("c", "ijkl")] {
+            assert_eq!(std::fs::read_to_string(path.join(name)).unwrap(), data);
+        }
+    }
+
+    /// A batch's payload stays within [`BATCH_PAYLOAD_LIMIT`] unless it holds
+    /// a single entry bigger than that, and only payloads within the limit are
+    /// reused.
+    #[tokio::test]
+    async fn test_restore_payload_limit() {
+        let (ops, mut queued) = mpsc::channel(64);
+        let mut writer = Writer {
+            ops,
+            spare: Spare::default(),
+            local_chunks: Vec::new(),
+            local_batches: Vec::new(),
+        };
+        let mut batch = writer.take_batch();
+        let mut restorer = NarRestorer::new("output");
+        let file = |name: Bytes, size: usize| NarEvent::File {
+            name,
+            executable: false,
+            size: size as u64,
+            reader: std::io::Cursor::new(Bytes::from(vec![0; size])),
+        };
+        let long = |c: u8, len: usize| Bytes::from(vec![c; len]);
+        let mut events = vec![
+            NarEvent::StartDirectory { name: Bytes::new() },
+            // Leaves too little room for the next directory's name.
+            file(long(b'a', 1), BATCH_PAYLOAD_LIMIT - 100),
+            NarEvent::StartDirectory {
+                name: long(b'b', 255),
+            },
+            // Fits a payload exactly.
+            file(long(b'c', 200), BATCH_PAYLOAD_LIMIT - 201),
+            // Fits with a shorter name only.
+            file(long(b'd', 200), BATCH_PAYLOAD_LIMIT - 200),
+            file(long(b'e', 1), BATCH_PAYLOAD_LIMIT),
+            NarEvent::EndDirectory,
+            NarEvent::Symlink {
+                name: long(b'f', 1),
+                target: long(b'/', 2 * BATCH_PAYLOAD_LIMIT),
+            },
+        ];
+        // A fresh batch that comes close to the limit, which doubling its
+        // capacity alone would take past it.
+        events.extend((0..17).map(|i| NarEvent::Symlink {
+            name: Bytes::from(format!("s{i:02}")),
+            target: long(b'/', 3000),
+        }));
+        events.push(NarEvent::EndDirectory);
+        for event in events {
+            restorer
+                .process_event(event, &mut writer, &mut batch)
+                .await
+                .unwrap();
+        }
+        writer.flush(&mut batch).await.unwrap();
+        drop(writer);
+
+        let mut disk = Disk {
+            root: PathBuf::new(),
+            canonical: false,
+            exact_mode: [None; 2],
+            file: None,
+            dirs: Vec::new(),
+            spare_chunks: Vec::new(),
+            spare_batches: Vec::new(),
+        };
+        let (mut batches, mut oversized, mut symlinks) = (0, 0, 0);
+        while let Some(msg) = queued.recv().await {
+            let Msg::Batch(batch) = msg else { continue };
+            batches += 1;
+            if batch.payload.capacity() > BATCH_PAYLOAD_LIMIT {
+                assert!(matches!(batch.ops[..], [Op::CreateSymlink { .. }]));
+                oversized += 1;
+            } else if batch.ops.len() > 1 && matches!(batch.ops[0], Op::CreateSymlink { .. }) {
+                assert!(batch.payload.len() > BATCH_PAYLOAD_LIMIT * 3 / 4);
+                symlinks += 1;
+            }
+            disk.stash_batch(batch.ops, batch.payload);
+        }
+        assert_eq!((oversized, symlinks), (1, 1));
+        assert_eq!(disk.spare_batches.len(), batches - oversized);
+        for (_, payload) in &disk.spare_batches {
+            assert!(payload.capacity() <= BATCH_PAYLOAD_LIMIT);
+        }
+    }
+
+    /// An empty file whose name is too long to inline is still checked and
+    /// created, which fails for a name that long.
+    #[tokio::test]
+    #[rstest]
+    #[case::longer(b"x", NarWriteOperation::InvalidEntry)]
+    #[case::empty(b"", NarWriteOperation::CreateFile)]
+    async fn test_restore_empty_file_with_long_name(
+        #[case] data: &'static [u8],
+        #[case] operation: NarWriteOperation,
+    ) {
+        let dir = Builder::new().prefix("test_restore").tempdir().unwrap();
+        let path = dir.path().join("output");
+        let name = Bytes::from(vec![b'n'; BATCH_PAYLOAD_LIMIT]);
+        let events = [
+            start_dir(b""),
+            NarEvent::File {
+                name: name.clone(),
+                executable: false,
+                size: 0,
+                reader: std::io::Cursor::new(Bytes::from_static(data)),
+            },
+            NarEvent::EndDirectory,
+        ];
+        let err = RestoreOptions::new()
+            .use_case_hack(false)
+            .restore(iter(events).map(Ok::<_, NarWriteError>), &path)
+            .await
+            .unwrap_err();
+        assert_eq!(err.operation, operation);
+        assert_eq!(err.path, join_name(&path, &name));
     }
 
     /// Each case's name says which files the umask takes bits off.
