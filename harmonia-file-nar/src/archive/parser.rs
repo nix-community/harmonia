@@ -1,3 +1,4 @@
+use std::future::poll_fn;
 use std::io::{self, Cursor};
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
@@ -48,14 +49,63 @@ pin_project! {
     }
 }
 
-fn validate_entry_name(name: &[u8]) -> io::Result<()> {
+/// Validate an entry name and verify it is strictly greater than the
+/// preceding sibling in the innermost open directory.
+fn validate_and_track_name(
+    name: &[u8],
+    prev_names: &mut Vec<u8>,
+    prev_starts: &[usize],
+) -> io::Result<()> {
     if !is_valid_entry_name(name) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "NAR contains invalid file name",
         ));
     }
+    if let Some(&start) = prev_starts.last() {
+        if name <= &prev_names[start..] {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "NAR directory entries are not sorted or contain duplicates",
+            ));
+        }
+        prev_names.truncate(start);
+        prev_names.extend_from_slice(name);
+    }
     Ok(())
+}
+
+/// Drop the caller's `Bytes` handle before refilling so `BytesReader` sees a
+/// unique reference and can reclaim/grow its buffer in place.
+#[inline]
+fn poll_refill_buf<R: AsyncBytesRead + Unpin>(
+    reader: Pin<&mut R>,
+    buf: &mut Bytes,
+    cx: &mut Context<'_>,
+) -> Poll<io::Result<()>> {
+    *buf = Bytes::new();
+    let next = ready!(reader.poll_fill_buf(cx))?;
+    *buf = next;
+    Poll::Ready(Ok(()))
+}
+
+#[inline]
+fn poll_force_fill_step<R: AsyncBytesRead + Unpin>(
+    reader: Pin<&mut R>,
+    buf: &mut Bytes,
+    cx: &mut Context<'_>,
+) -> Poll<io::Result<()>> {
+    let prev_len = buf.len();
+    *buf = Bytes::new();
+    let next = ready!(reader.poll_force_fill_buf(cx))?;
+    if next.len() <= prev_len {
+        return Poll::Ready(Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "EOF while force reading",
+        )));
+    }
+    *buf = next;
+    Poll::Ready(Ok(()))
 }
 
 impl<R> NarParser<R>
@@ -140,13 +190,16 @@ where
             InnerState::Eof => return Poll::Ready(None),
             _ => {}
         }
+        let mut buf = Bytes::new();
         loop {
-            let mut buf = ready!(reader.as_mut().poll_fill_buf(cx))?;
             if buf.is_empty() {
-                return Poll::Ready(Some(Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "EOF while reading NAR",
-                ))));
+                ready!(poll_refill_buf(reader.as_mut(), &mut buf, cx))?;
+                if buf.is_empty() {
+                    return Poll::Ready(Some(Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "EOF while reading NAR",
+                    ))));
+                }
             }
             let cnt = this.state.drive(&buf)?;
             buf.advance(cnt);
@@ -189,7 +242,7 @@ where
                     }
                     let (len, aligned) = (len as usize, aligned as usize);
                     while buf.len() < aligned {
-                        buf = ready!(reader.as_mut().poll_force_fill_buf(cx))?;
+                        ready!(poll_force_fill_step(reader.as_mut(), &mut buf, cx))?;
                     }
 
                     check_padding(&buf[len..aligned])?;
@@ -210,23 +263,13 @@ where
                     }
                     let (len, aligned) = (len as usize, aligned as usize);
                     while buf.len() < aligned {
-                        buf = ready!(reader.as_mut().poll_force_fill_buf(cx))?;
+                        ready!(poll_force_fill_step(reader.as_mut(), &mut buf, cx))?;
                         trace!(len = buf.len(), "Reading name");
                     }
                     check_padding(&buf[len..aligned])?;
                     let name_buf = buf.split_to(len);
                     trace!(len = buf.len(), ?name_buf, "Read name");
-                    validate_entry_name(&name_buf)?;
-                    if let Some(&start) = this.prev_starts.last() {
-                        if name_buf[..] <= this.prev_names[start..] {
-                            return Poll::Ready(Some(Err(io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                "NAR directory entries are not sorted or contain duplicates",
-                            ))));
-                        }
-                        this.prev_names.truncate(start);
-                        this.prev_names.extend_from_slice(&name_buf);
-                    }
+                    validate_and_track_name(&name_buf, this.prev_names, this.prev_starts)?;
                     *this.name = Some(name_buf);
                     buf.advance(aligned - len);
                     reader.as_mut().consume(aligned);
@@ -249,6 +292,215 @@ where
             }
         }
     }
+}
+
+/// Borrowed metadata event yielded by [`walk_nar_metadata`] without
+/// constructing per-entry `Bytes` slices or `ParsedFile` readers.
+pub(crate) enum NarMetaEvent<'a> {
+    File {
+        name: &'a [u8],
+        executable: bool,
+        size: u64,
+        nar_offset: u64,
+    },
+    Symlink {
+        name: &'a [u8],
+        target: &'a [u8],
+    },
+    StartDirectory {
+        name: &'a [u8],
+    },
+    EndDirectory,
+}
+
+async fn skip_exact<R: AsyncBytesRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Bytes,
+    mut rem: u64,
+    validate_zero: bool,
+    eof_msg: &'static str,
+) -> io::Result<()> {
+    while rem > 0 {
+        if buf.is_empty() {
+            poll_fn(|cx| poll_refill_buf(Pin::new(&mut *reader), buf, cx)).await?;
+            if buf.is_empty() {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, eof_msg));
+            }
+        }
+        let take = (buf.len() as u64).min(rem) as usize;
+        if validate_zero {
+            check_padding(&buf[..take])?;
+        }
+        buf.advance(take);
+        Pin::new(&mut *reader).consume(take);
+        rem -= take as u64;
+    }
+    Ok(())
+}
+
+async fn skip_file_contents<R: AsyncBytesRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Bytes,
+    size: u64,
+    aligned: u64,
+) -> io::Result<()> {
+    if aligned < size {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "file size overflows 8-byte alignment",
+        ));
+    }
+    let buffered = buf.len() as u64;
+    if aligned <= buffered {
+        let (len, aligned_usize) = (size as usize, aligned as usize);
+        check_padding(&buf[len..aligned_usize])?;
+        buf.advance(aligned_usize);
+        Pin::new(&mut *reader).consume(aligned_usize);
+        return Ok(());
+    }
+    skip_exact(reader, buf, size, false, "EOF before end of content").await?;
+    skip_exact(
+        reader,
+        buf,
+        aligned - size,
+        true,
+        "EOF before end of padding",
+    )
+    .await
+}
+
+/// Walk a NAR archive's metadata directly over `reader`, skipping file contents
+/// (while still validating padding, name validity, and strict directory sorting)
+/// and delivering borrowed byte slices to `visit`.
+pub(crate) async fn walk_nar_metadata<R, F>(mut reader: R, mut visit: F) -> io::Result<()>
+where
+    R: AsyncBytesRead + Unpin,
+    F: FnMut(NarMetaEvent<'_>) -> io::Result<()>,
+{
+    // `Inner<false>` pauses at entry names, directory boundaries, and contents
+    // instead of skipping them silently, matching `NarParser`.
+    let mut state: Inner<false> = Inner {
+        level: 0,
+        state: InnerState::Root(0),
+    };
+    let mut position: u64 = 0;
+    let mut buf = Bytes::new();
+    let mut pending_name: Vec<u8> = Vec::new();
+    let mut prev_names: Vec<u8> = Vec::new();
+    let mut prev_starts: Vec<usize> = Vec::new();
+
+    loop {
+        if buf.is_empty() {
+            poll_fn(|cx| poll_refill_buf(Pin::new(&mut reader), &mut buf, cx)).await?;
+            if buf.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "EOF while reading NAR",
+                ));
+            }
+        }
+        let cnt = state.drive(&buf)?;
+        buf.advance(cnt);
+        Pin::new(&mut reader).consume(cnt);
+        position += cnt as u64;
+
+        match state.state {
+            InnerState::ReadContents(
+                node_type @ (NodeType::ExecutableFile | NodeType::File),
+                size,
+                aligned,
+            ) => {
+                // Visit before skipping the contents, so an entry the visitor
+                // rejects fails without waiting for them, as with `NarParser`.
+                visit(NarMetaEvent::File {
+                    name: &pending_name,
+                    executable: node_type == NodeType::ExecutableFile,
+                    size,
+                    nar_offset: position,
+                })?;
+                pending_name.clear();
+                skip_file_contents(&mut reader, &mut buf, size, aligned).await?;
+                position += aligned;
+                state.bump_next();
+            }
+            InnerState::ReadContents(NodeType::Symlink, len, aligned) => {
+                if len > MAX_SYMLINK_TARGET_LEN {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "symlink target too long",
+                    ));
+                }
+                // `len <= MAX_SYMLINK_TARGET_LEN`, so `aligned` fits in `usize`.
+                let (len, aligned) = (len as usize, aligned as usize);
+                while buf.len() < aligned {
+                    poll_fn(|cx| poll_force_fill_step(Pin::new(&mut reader), &mut buf, cx)).await?;
+                }
+                check_padding(&buf[len..aligned])?;
+                visit(NarMetaEvent::Symlink {
+                    name: &pending_name,
+                    target: &buf[..len],
+                })?;
+                pending_name.clear();
+                buf.advance(aligned);
+                Pin::new(&mut reader).consume(aligned);
+                position += aligned as u64;
+                state.bump_next();
+            }
+            InnerState::ReadEntryName(len, aligned) => {
+                if len > MAX_ENTRY_NAME_LEN {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "directory entry name too long",
+                    ));
+                }
+                // `len <= MAX_ENTRY_NAME_LEN`, so `aligned` fits in `usize`.
+                let (len, aligned) = (len as usize, aligned as usize);
+                while buf.len() < aligned {
+                    poll_fn(|cx| poll_force_fill_step(Pin::new(&mut reader), &mut buf, cx)).await?;
+                }
+                check_padding(&buf[len..aligned])?;
+                let name = &buf[..len];
+                validate_and_track_name(name, &mut prev_names, &prev_starts)?;
+                pending_name.clear();
+                pending_name.extend_from_slice(name);
+                buf.advance(aligned);
+                Pin::new(&mut reader).consume(aligned);
+                position += aligned as u64;
+                state.bump_next();
+            }
+            InnerState::ReadDir => {
+                prev_starts.push(prev_names.len());
+                visit(NarMetaEvent::StartDirectory {
+                    name: &pending_name,
+                })?;
+                pending_name.clear();
+                state.bump_next();
+            }
+            InnerState::FinishReadEntry => {
+                if let Some(start) = prev_starts.pop() {
+                    prev_names.truncate(start);
+                }
+                visit(NarMetaEvent::EndDirectory)?;
+                state.bump_next();
+                if state.is_eof() {
+                    break;
+                }
+            }
+            InnerState::Eof => break,
+            InnerState::Root(_)
+            | InnerState::SelectNode(_)
+            | InnerState::ReadContentsLen(_, _, _)
+            | InnerState::FinishNode(_)
+            | InnerState::FinishEntry(_)
+            | InnerState::ReadEntries(_)
+            | InnerState::ReadEntryNameLen(_, _)
+            | InnerState::ReadNode(_) => {
+                debug_assert!(buf.is_empty(), "drive stopped without consuming buffer");
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub fn parse_nar<R>(
