@@ -1,24 +1,22 @@
-use std::cmp::Ordering;
-use std::ffi::OsStr;
-use std::fs::read_link;
+use std::ffi::CStr;
 use std::future::Future as _;
-use std::os::unix::ffi::OsStrExt;
-#[cfg(unix)]
-use std::os::unix::ffi::OsStringExt;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt as _;
+use std::mem::MaybeUninit;
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 use std::{collections::VecDeque, io};
 
 use bstr::ByteSlice as _;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures_core::Stream;
+use rustix::fs::{
+    AtFlags, CWD, FileType, Mode, OFlags, fstat, openat, readlinkat, readlinkat_raw, statat,
+};
+use rustix::io::Errno;
 use tokio::io::AsyncRead;
 use tokio::task::{JoinHandle, spawn_blocking};
 use tracing::debug;
-use walkdir::{DirEntry, IntoIter};
 
 use super::{CASE_HACK_SUFFIX, NarEvent};
 
@@ -41,22 +39,11 @@ impl DumpOptions {
     }
 
     pub fn dump<P: Into<PathBuf>>(self, path: P) -> NarDumper {
-        let root = path.into();
-        let mut walker = walkdir::WalkDir::new(&root)
-            .follow_links(false)
-            .follow_root_links(false);
-        walker = if self.use_case_hack {
-            walker.sort_by(sort_case_hack)
-        } else {
-            walker.sort_by(|a, b| fast_file_name(a.path()).cmp(fast_file_name(b.path())))
-        };
-        let walker = walker.into_iter();
         NarDumper {
             state: State::Idle(Some(Box::new(BatchState {
                 buf: VecDeque::with_capacity(CHUNK_SIZE),
-                walker,
+                walker: DirWalker::new(path.into(), self.use_case_hack),
                 remain: true,
-                use_case_hack: self.use_case_hack,
             }))),
             next: None,
             level: 0,
@@ -74,122 +61,439 @@ pub fn dump<P: Into<PathBuf>>(path: P) -> NarDumper {
     DumpOptions::new().dump(path)
 }
 
-/// Return the final path segment as raw bytes.
-///
-/// Uses a byte-level search instead of `Path::file_name`, which performs a
-/// full `Components` parse on every call. This is safe because walkdir builds
-/// entry paths as `parent.join(file_name)`, so on Unix the segment after the
-/// last `/` is exactly the file name with no `.`/`..` to normalise.
-#[cfg(unix)]
-fn fast_file_name(p: &Path) -> &[u8] {
-    let b = p.as_os_str().as_bytes();
-    match b.rfind_byte(b'/') {
-        Some(i) => &b[i + 1..],
-        None => b,
-    }
-}
-
-fn sort_case_hack(left: &DirEntry, right: &DirEntry) -> Ordering {
-    let left_file_name = left.file_name();
-    let right_file_name = right.file_name();
-    remove_case_hack_osstr(left_file_name)
-        .unwrap_or(left_file_name)
-        .cmp(remove_case_hack_osstr(right_file_name).unwrap_or(right_file_name))
-}
-
-fn remove_case_hack_osstr(name: &OsStr) -> Option<&OsStr> {
-    if let Some(n) = <[u8]>::from_os_str(name)
-        && let Some(pos) = n.rfind(CASE_HACK_SUFFIX)
-    {
-        return Some(OsStr::from_bytes(&n[..pos]));
-    }
-    None
-}
-
-fn remove_case_hack(name: &mut Bytes) {
-    if let Some(pos) = name.rfind(CASE_HACK_SUFFIX) {
-        debug!("removing case hack suffix from '{:?}'", name);
-        name.truncate(pos);
-    }
-}
-
-/// Turn a walkdir entry into the NAR entry name.
-///
-/// The root node carries no name in the NAR format. For deeper entries the
-/// final path segment is copied into a fresh small `Bytes`; the entry's
-/// `PathBuf` is then dropped here on the blocking thread.
-fn entry_name(entry: DirEntry, use_case_hack: bool) -> Bytes {
-    if entry.depth() == 0 {
-        return Bytes::new();
-    }
-    let mut name = Bytes::copy_from_slice(fast_file_name(entry.path()));
-    if use_case_hack {
-        remove_case_hack(&mut name);
-    }
-    name
-}
-
-/// Convert an `OsString` (symlink target) into `Bytes` by moving its buffer.
-#[cfg(unix)]
-fn os_string_into_bytes(s: std::ffi::OsString) -> Bytes {
-    Bytes::from(s.into_vec())
-}
-
 /// Files up to this size are read eagerly; larger files are streamed in
-/// [`FILE_CHUNK_SIZE`] pieces so memory stays bounded.
+/// bounded chunks so memory stays bounded.
 ///
 /// Deliberately `read()`-based, not mmap: the kernel patches uprobe
 /// breakpoint bytes into every mapping of a probed inode (even `PROT_READ`),
 /// so an mmap-based dumper serves NARs that do not match the signed
 /// `NarHash` (issue #1140). Chunked reads also benchmark at least as fast
 /// as mmap for this one-pass workload.
-const SMALL_FILE_THRESHOLD: u64 = 256 * 1024; // 256 KiB
-
+/// Chunk / eager-read threshold (256 KiB); also imported by the restorer.
 pub(crate) const FILE_CHUNK_SIZE: usize = 256 * 1024;
+pub(crate) const SMALL_FILE_THRESHOLD: u64 = FILE_CHUNK_SIZE as u64;
+
+/// Streaming chunk size kept below 128 KiB so repeated single-chunk
+/// allocations stay in the heap cache instead of triggering per-chunk
+/// `mmap`/`munmap` page faults.
+pub(crate) const STREAM_FILE_CHUNK_SIZE: usize = 64 * 1024;
+
+/// Small eager files up to this size are packed into a bounded batch slab in
+/// `NarDumper` rather than allocating a standalone buffer per file.
+const SLAB_INLINE_LIMIT: usize = 16 * 1024;
+
+/// Maximum size of a single shared batch slab in `NarDumper`, bounding memory
+/// retention if a consumer holds onto one entry's `Bytes`.
+const MAX_SLAB_BYTES: usize = 64 * 1024;
+
+const DIR_OPEN_FLAGS: OFlags = OFlags::RDONLY
+    .union(OFlags::DIRECTORY)
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::CLOEXEC);
+
+/// `O_NONBLOCK` prevents blocking a worker thread if an entry is swapped for a
+/// FIFO between `readdir` and `openat`; on POSIX it has no effect on regular
+/// files once `fstat` verifies `FileType::RegularFile`.
+const FILE_OPEN_FLAGS: OFlags = OFlags::RDONLY
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::NONBLOCK)
+    .union(OFlags::CLOEXEC);
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const RAW_DIR_BUF_LEN: usize = 32 * 1024;
+
+/// Read from `fd` into `buf`'s uninitialized spare capacity until
+/// `buf.len() >= target`, returning an error on unexpected EOF.
+fn read_uninit_until(fd: BorrowedFd<'_>, buf: &mut Vec<u8>, target: usize) -> io::Result<()> {
+    while buf.len() < target {
+        match rustix::io::read(fd, rustix::buffer::spare_capacity(buf)) {
+            Ok(0) => {
+                return Err(io::Error::other(format!(
+                    "file truncated during dump: {} bytes missing",
+                    target - buf.len()
+                )));
+            }
+            Ok(_) => {}
+            Err(Errno::INTR) => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
+/// Read an entire file of `size` bytes into `buf`'s uninitialized spare
+/// capacity without zero-initializing first.
+///
+/// The caller must close `fd` after this call: if the file grew concurrently
+/// past `size`, `spare_capacity` may read past `size` before truncating `buf`
+/// back to `start + size`.
+pub(crate) fn read_whole_file_uninit(
+    fd: BorrowedFd<'_>,
+    buf: &mut Vec<u8>,
+    size: usize,
+) -> io::Result<()> {
+    if size == 0 {
+        return Ok(());
+    }
+    let target = buf.len() + size;
+    buf.reserve(size);
+    read_uninit_until(fd, buf, target)?;
+    buf.truncate(target);
+    Ok(())
+}
+
+/// Read exactly `want` bytes from `fd` into a fresh `Vec<u8>` without
+/// zero-initializing it first. Safe to call repeatedly on the same `fd` because
+/// `Vec::with_capacity(want)` exposes at most `want` bytes of spare capacity.
+pub(crate) fn read_chunk_uninit(fd: BorrowedFd<'_>, want: usize) -> io::Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(want);
+    if buf.capacity() == want {
+        read_uninit_until(fd, &mut buf, want)?;
+    } else {
+        buf.resize(want, 0);
+        let mut off = 0;
+        while off < want {
+            match rustix::io::read(fd, &mut buf[off..want]) {
+                Ok(0) => {
+                    return Err(io::Error::other(format!(
+                        "file truncated during dump: {} bytes missing",
+                        want - off
+                    )));
+                }
+                Ok(n) => off += n,
+                Err(Errno::INTR) => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+    Ok(buf)
+}
+
+#[derive(Clone, Copy)]
+struct DirItem {
+    name_start: u32,
+    disk_len: u32,
+    nar_len: u32,
+    file_type: FileType,
+}
+
+#[inline]
+fn nar_slice(names: &[u8], item: DirItem) -> &[u8] {
+    let start = item.name_start as usize;
+    &names[start..start + item.nar_len as usize]
+}
+
+#[inline]
+fn disk_slice(names: &[u8], item: DirItem) -> &[u8] {
+    let start = item.name_start as usize;
+    &names[start..start + item.disk_len as usize]
+}
+
+struct DirFrame {
+    dir_fd: OwnedFd,
+    /// NUL-terminated on-disk entry names packed back-to-back so each item's
+    /// slice can be passed directly to `openat`/`readlinkat`/`statat` as a
+    /// `&CStr` with zero allocations.
+    names: Vec<u8>,
+    items: Vec<DirItem>,
+    next_idx: usize,
+}
+
+impl DirFrame {
+    #[inline]
+    fn nar_name(&self, item: DirItem) -> &[u8] {
+        nar_slice(&self.names, item)
+    }
+
+    #[inline]
+    fn disk_cstr(&self, item: DirItem) -> &CStr {
+        let start = item.name_start as usize;
+        CStr::from_bytes_with_nul(&self.names[start..start + item.disk_len as usize + 1])
+            .expect("DirFrame packs NUL-terminated names")
+    }
+}
+
+pub(crate) enum WalkEvent<'a> {
+    Directory {
+        depth: usize,
+        name: &'a [u8],
+    },
+    File {
+        depth: usize,
+        name: &'a [u8],
+        fd: OwnedFd,
+        size: u64,
+        executable: bool,
+    },
+    Symlink {
+        depth: usize,
+        name: &'a [u8],
+        target: &'a [u8],
+    },
+}
+
+/// Read a symlink target into `out` without allocating on the common path
+/// (targets shorter than 4 KiB).
+fn read_symlink_into(
+    dir_fd: BorrowedFd<'_>,
+    name: impl rustix::path::Arg + Copy,
+    out: &mut Vec<u8>,
+) -> io::Result<()> {
+    const STACK_LEN: usize = 4096;
+    let mut stack = [MaybeUninit::<u8>::uninit(); STACK_LEN];
+    let (init, _) = readlinkat_raw(dir_fd, name, &mut stack)?;
+    if init.len() < STACK_LEN {
+        out.clear();
+        out.extend_from_slice(init);
+        return Ok(());
+    }
+    // Target filled the stack buffer; retry with growing heap buffer.
+    let cstr = readlinkat(dir_fd, name, Vec::new())?;
+    *out = cstr.into_bytes();
+    Ok(())
+}
+
+/// Dirfd-relative depth-first filesystem walker in NAR canonical order.
+///
+/// Opens each directory once and uses `openat`/`readlinkat`/`statat` relative
+/// to the parent directory descriptor, avoiding per-entry `PathBuf`/`CString`
+/// allocations and repeated kernel path walks.
+pub(crate) struct DirWalker {
+    root: Option<PathBuf>,
+    use_case_hack: bool,
+    frames: Vec<DirFrame>,
+    pending_dir: Option<OwnedFd>,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    raw_dir_buf: Option<Box<[MaybeUninit<u8>; RAW_DIR_BUF_LEN]>>,
+    symlink_buf: Vec<u8>,
+}
+
+impl DirWalker {
+    pub(crate) fn new(root: PathBuf, use_case_hack: bool) -> Self {
+        Self {
+            root: Some(root),
+            use_case_hack,
+            frames: Vec::new(),
+            pending_dir: None,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            raw_dir_buf: None,
+            symlink_buf: Vec::new(),
+        }
+    }
+
+    /// Drop all open directory descriptors; later calls to
+    /// [`Self::next_event`] return `Ok(None)`. Callers use this once they
+    /// treat the walk as terminal so descriptors are not held until drop.
+    pub(crate) fn close(&mut self) {
+        self.root = None;
+        self.pending_dir = None;
+        self.frames.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_dir_count(&self) -> usize {
+        self.frames.len() + usize::from(self.pending_dir.is_some())
+    }
+
+    fn push_dir(&mut self, dir_fd: OwnedFd) -> io::Result<()> {
+        let mut names = Vec::new();
+        let mut items = Vec::new();
+        let use_case_hack = self.use_case_hack;
+
+        let mut push_entry = |name_bytes: &[u8], file_type: FileType| -> io::Result<()> {
+            if name_bytes == b"." || name_bytes == b".." {
+                return Ok(());
+            }
+            let nar_len = if use_case_hack {
+                if let Some(pos) = name_bytes.rfind(CASE_HACK_SUFFIX) {
+                    debug!(
+                        "removing case hack suffix from '{:?}'",
+                        name_bytes.as_bstr()
+                    );
+                    pos
+                } else {
+                    name_bytes.len()
+                }
+            } else {
+                name_bytes.len()
+            };
+            let name_start = u32::try_from(names.len())
+                .map_err(|_| io::Error::other("directory entry names exceed 4 GiB"))?;
+            let disk_len = u32::try_from(name_bytes.len())
+                .map_err(|_| io::Error::other("directory entry name too long"))?;
+            let nar_len = u32::try_from(nar_len)
+                .map_err(|_| io::Error::other("directory entry name too long"))?;
+            names.extend_from_slice(name_bytes);
+            names.push(0);
+            items.push(DirItem {
+                name_start,
+                disk_len,
+                nar_len,
+                file_type,
+            });
+            Ok(())
+        };
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let raw_buf = self
+                .raw_dir_buf
+                .get_or_insert_with(|| Box::new([MaybeUninit::uninit(); RAW_DIR_BUF_LEN]));
+            let mut raw = rustix::fs::RawDir::new(&dir_fd, &mut **raw_buf);
+            while let Some(entry) = raw.next() {
+                let entry = entry?;
+                push_entry(entry.file_name().to_bytes(), entry.file_type())?;
+            }
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            for entry in rustix::fs::Dir::read_from(&dir_fd)? {
+                let entry = entry?;
+                push_entry(entry.file_name().to_bytes(), entry.file_type())?;
+            }
+        }
+
+        items.sort_unstable_by(|&a, &b| {
+            nar_slice(&names, a)
+                .cmp(nar_slice(&names, b))
+                .then_with(|| disk_slice(&names, a).cmp(disk_slice(&names, b)))
+        });
+
+        self.frames.push(DirFrame {
+            dir_fd,
+            names,
+            items,
+            next_idx: 0,
+        });
+        Ok(())
+    }
+
+    fn open_regular_and_stat(
+        dir_fd: BorrowedFd<'_>,
+        name: impl rustix::path::Arg,
+    ) -> io::Result<(OwnedFd, u64, bool)> {
+        let fd = openat(dir_fd, name, FILE_OPEN_FLAGS, Mode::empty())?;
+        let st = fstat(&fd)?;
+        let ft = FileType::from_raw_mode(st.st_mode);
+        if ft != FileType::RegularFile {
+            return Err(io::Error::other(format!(
+                "file type changed during dump: {ft:?}"
+            )));
+        }
+        let executable = Mode::from_raw_mode(st.st_mode).contains(Mode::XUSR);
+        let size = u64::try_from(st.st_size)
+            .map_err(|_| io::Error::other("negative file size reported by fstat"))?;
+        Ok((fd, size, executable))
+    }
+
+    fn next_root(&mut self, root: &Path) -> io::Result<WalkEvent<'_>> {
+        let st = statat(CWD, root, AtFlags::SYMLINK_NOFOLLOW)?;
+        match FileType::from_raw_mode(st.st_mode) {
+            FileType::Directory => {
+                let fd = openat(CWD, root, DIR_OPEN_FLAGS, Mode::empty())?;
+                self.pending_dir = Some(fd);
+                Ok(WalkEvent::Directory {
+                    depth: 0,
+                    name: b"",
+                })
+            }
+            FileType::RegularFile => {
+                let (fd, size, executable) = Self::open_regular_and_stat(CWD, root)?;
+                Ok(WalkEvent::File {
+                    depth: 0,
+                    name: b"",
+                    fd,
+                    size,
+                    executable,
+                })
+            }
+            FileType::Symlink => {
+                read_symlink_into(CWD, root, &mut self.symlink_buf)?;
+                Ok(WalkEvent::Symlink {
+                    depth: 0,
+                    name: b"",
+                    target: &self.symlink_buf,
+                })
+            }
+            other => Err(io::Error::other(format!("unsupported file type {other:?}"))),
+        }
+    }
+
+    pub(crate) fn next_event(&mut self) -> io::Result<Option<WalkEvent<'_>>> {
+        if let Some(root) = self.root.take() {
+            return self.next_root(&root).map(Some);
+        }
+
+        if let Some(dir_fd) = self.pending_dir.take() {
+            self.push_dir(dir_fd)?;
+        }
+
+        while let Some(top) = self.frames.last() {
+            if top.next_idx < top.items.len() {
+                break;
+            }
+            self.frames.pop();
+        }
+
+        let depth = self.frames.len();
+        let Some(frame) = self.frames.last_mut() else {
+            return Ok(None);
+        };
+        let item = frame.items[frame.next_idx];
+        frame.next_idx += 1;
+
+        let c_name = frame.disk_cstr(item);
+        let file_type = match item.file_type {
+            FileType::Unknown => {
+                let st = statat(&frame.dir_fd, c_name, AtFlags::SYMLINK_NOFOLLOW)?;
+                FileType::from_raw_mode(st.st_mode)
+            }
+            ft => ft,
+        };
+
+        match file_type {
+            FileType::Directory => {
+                let child_fd = openat(&frame.dir_fd, c_name, DIR_OPEN_FLAGS, Mode::empty())?;
+                let name = frame.nar_name(item);
+                // Defer reading the child directory until the next call so
+                // `self.frames` is not mutated while `name` borrows from it.
+                self.pending_dir = Some(child_fd);
+                Ok(Some(WalkEvent::Directory { depth, name }))
+            }
+            FileType::RegularFile => {
+                let (fd, size, executable) =
+                    Self::open_regular_and_stat(frame.dir_fd.as_fd(), c_name)?;
+                let name = frame.nar_name(item);
+                Ok(Some(WalkEvent::File {
+                    depth,
+                    name,
+                    fd,
+                    size,
+                    executable,
+                }))
+            }
+            FileType::Symlink => {
+                read_symlink_into(frame.dir_fd.as_fd(), c_name, &mut self.symlink_buf)?;
+                let name = frame.nar_name(item);
+                Ok(Some(WalkEvent::Symlink {
+                    depth,
+                    name,
+                    target: &self.symlink_buf,
+                }))
+            }
+            other => Err(io::Error::other(format!("unsupported file type {other:?}"))),
+        }
+    }
+}
 
 enum FileData {
     Eager(Bytes),
     /// Opened by the blocking walker task, read chunk-by-chunk during emission.
     Lazy {
-        file: std::fs::File,
+        fd: OwnedFd,
         remaining: u64,
     },
-}
-
-fn open_regular_file(path: &Path) -> io::Result<std::fs::File> {
-    let mut opts = std::fs::OpenOptions::new();
-    opts.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        opts.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
-    }
-    opts.open(path)
-}
-
-fn load_file_data(mut f: std::fs::File, path: &Path, size: u64) -> io::Result<FileData> {
-    if size <= SMALL_FILE_THRESHOLD {
-        use std::io::Read as _;
-        let mut buf = vec![0u8; size as usize];
-        // Read the exact `size` bytes advertised in the NAR header in a single
-        // syscall (matching the Lazy path) instead of calling `read_to_end`,
-        // which issues a second EOF read and grows the buffer.
-        if let Err(e) = f.read_exact(&mut buf) {
-            return Err(if e.kind() == io::ErrorKind::UnexpectedEof {
-                io::Error::other(format!(
-                    "file {path:?} truncated during dump: expected {size} bytes"
-                ))
-            } else {
-                e
-            });
-        }
-        Ok(FileData::Eager(Bytes::from(buf)))
-    } else {
-        Ok(FileData::Lazy {
-            file: f,
-            remaining: size,
-        })
-    }
 }
 
 /// File contents for a [`NarEvent::File`]: small files are already in memory,
@@ -202,49 +506,26 @@ pub struct DumpedFile {
 }
 
 impl DumpedFile {
-    /// If the entire file is already in memory and at most `max_len` bytes,
-    /// return its bytes so the caller can coalesce it into a framing buffer.
-    pub(crate) fn into_small_eager(self, max_len: usize) -> Result<Bytes, Self> {
-        match self.data {
-            FileData::Eager(bytes) if bytes.len() <= max_len => Ok(bytes),
-            data => Err(Self {
-                data,
-                pending: self.pending,
-            }),
-        }
-    }
     /// Produce the next content chunk, or `None` when the file is fully
-    /// emitted. The bounded synchronous `read()` for lazy data is comparable
-    /// to the page-fault stalls the previous mmap implementation incurred.
+    /// emitted.
     pub(crate) fn next_chunk(&mut self) -> Option<io::Result<Bytes>> {
         match &mut self.data {
             FileData::Eager(bytes) => {
                 if bytes.is_empty() {
                     return None;
                 }
-                let n = bytes.len().min(FILE_CHUNK_SIZE);
+                let n = bytes.len().min(STREAM_FILE_CHUNK_SIZE);
                 Some(Ok(bytes.split_to(n)))
             }
-            FileData::Lazy { file, remaining } => {
-                use std::io::Read as _;
+            FileData::Lazy { fd, remaining } => {
                 if *remaining == 0 {
                     return None;
                 }
-                let want = (*remaining).min(FILE_CHUNK_SIZE as u64) as usize;
-                let mut buf = vec![0u8; want];
-                // Truncated after lstat; the NAR length prefix is already
-                // written, so fail instead of desyncing.
-                if let Err(e) = file.read_exact(&mut buf) {
-                    return Some(Err(if e.kind() == io::ErrorKind::UnexpectedEof {
-                        io::Error::other(format!(
-                            "file truncated during dump: {remaining} bytes missing"
-                        ))
-                    } else {
-                        e
-                    }));
-                }
-                *remaining -= want as u64;
-                Some(Ok(Bytes::from(buf)))
+                let want = (*remaining).min(STREAM_FILE_CHUNK_SIZE as u64) as usize;
+                Some(read_chunk_uninit(fd.as_fd(), want).map(|buf| {
+                    *remaining -= want as u64;
+                    Bytes::from(buf)
+                }))
             }
         }
     }
@@ -301,11 +582,35 @@ impl Entry {
     }
 }
 
+/// Bounded `BytesMut` slab for packing small entry names, symlink targets, and
+/// small file bodies without per-entry heap allocations or unbounded retention.
+struct BatchSlab {
+    buf: BytesMut,
+}
+
+impl BatchSlab {
+    fn new() -> Self {
+        Self {
+            buf: BytesMut::with_capacity(MAX_SLAB_BYTES),
+        }
+    }
+
+    fn copy(&mut self, src: &[u8]) -> Bytes {
+        if src.is_empty() {
+            return Bytes::new();
+        }
+        if self.buf.capacity() < src.len() {
+            self.buf = BytesMut::with_capacity(MAX_SLAB_BYTES.max(src.len()));
+        }
+        self.buf.extend_from_slice(src);
+        self.buf.split().freeze()
+    }
+}
+
 struct BatchState {
     buf: VecDeque<io::Result<Entry>>,
-    walker: IntoIter,
+    walker: DirWalker,
     remain: bool,
-    use_case_hack: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -314,10 +619,10 @@ enum State {
     Pending(JoinHandle<Box<BatchState>>),
 }
 
-const CHUNK_SIZE: usize = 256;
+const CHUNK_SIZE: usize = 512;
 const MAX_BATCH_EAGER_BYTES: usize = 4 * 1024 * 1024;
 /// Each lazy entry keeps its file descriptor open until it is emitted, so cap
-/// them per batch (at the previous `CHUNK_SIZE`) to bound descriptors per dump.
+/// them per batch to bound descriptors per dump.
 const MAX_BATCH_LAZY_FILES: usize = 25;
 
 impl State {
@@ -333,8 +638,7 @@ impl State {
                     }
                     let mut st = data.take().unwrap();
                     *self = State::Pending(spawn_blocking(move || {
-                        st.remain =
-                            State::next_chunk(&mut st.buf, &mut st.walker, st.use_case_hack);
+                        st.remain = State::next_chunk(&mut st.buf, &mut st.walker);
                         st
                     }));
                 }
@@ -344,78 +648,80 @@ impl State {
             }
         }
     }
-    fn next_chunk(
-        buf: &mut VecDeque<io::Result<Entry>>,
-        iter: &mut IntoIter,
-        use_case_hack: bool,
-    ) -> bool {
+
+    fn next_chunk(buf: &mut VecDeque<io::Result<Entry>>, walker: &mut DirWalker) -> bool {
         let mut eager_bytes = 0usize;
         let mut lazy_files = 0usize;
+        let mut slab = BatchSlab::new();
+        let mut scratch = Vec::new();
+
         for _ in 0..CHUNK_SIZE {
-            match iter.next() {
-                Some(res) => {
-                    let res = res.map_err(io::Error::from).and_then(|entry| {
-                        let depth = entry.depth();
-                        // `file_type()` is cached from `readdir`'s `d_type`
-                        // and needs no syscall.
-                        let ft = entry.file_type();
-                        let entry = if ft.is_dir() {
-                            Entry::Directory {
+            match walker.next_event() {
+                Ok(Some(ev)) => {
+                    let res = match ev {
+                        WalkEvent::Directory { depth, name } => Ok(Entry::Directory {
+                            depth,
+                            name: slab.copy(name),
+                        }),
+                        WalkEvent::Symlink {
+                            depth,
+                            name,
+                            target,
+                        } => Ok(Entry::Symlink {
+                            depth,
+                            name: slab.copy(name),
+                            target: slab.copy(target),
+                        }),
+                        WalkEvent::File {
+                            depth,
+                            name,
+                            fd,
+                            size,
+                            executable,
+                        } => {
+                            let name = slab.copy(name);
+                            let data_res = if size == 0 {
+                                Ok(FileData::Eager(Bytes::new()))
+                            } else if size <= SLAB_INLINE_LIMIT as u64 {
+                                let n = size as usize;
+                                scratch.clear();
+                                read_whole_file_uninit(fd.as_fd(), &mut scratch, n).map(|()| {
+                                    eager_bytes = eager_bytes.saturating_add(n);
+                                    FileData::Eager(slab.copy(&scratch))
+                                })
+                            } else if size <= SMALL_FILE_THRESHOLD {
+                                let n = size as usize;
+                                read_chunk_uninit(fd.as_fd(), n).map(|data| {
+                                    eager_bytes = eager_bytes.saturating_add(n);
+                                    FileData::Eager(Bytes::from(data))
+                                })
+                            } else {
+                                lazy_files += 1;
+                                Ok(FileData::Lazy {
+                                    fd,
+                                    remaining: size,
+                                })
+                            };
+                            data_res.map(|data| Entry::File {
                                 depth,
-                                name: entry_name(entry, use_case_hack),
-                            }
-                        } else if ft.is_file() {
-                            // Open once and `fstat` the descriptor instead of
-                            // doing a separate path-walking `lstat` before `open`.
-                            let file = open_regular_file(entry.path())?;
-                            let m = file.metadata()?;
-                            let executable;
-                            #[cfg(unix)]
-                            {
-                                executable = m.permissions().mode() & 0o100 == 0o100;
-                            }
-                            #[cfg(not(unix))]
-                            {
-                                executable = false;
-                            }
-                            let size = m.len();
-                            // Load the content here, in the same blocking
-                            // task that is already iterating the directory,
-                            // so the async side receives ready-to-stream
-                            // bytes without a second pool round-trip.
-                            let data = load_file_data(file, entry.path(), size)?;
-                            match data {
-                                FileData::Eager(ref b) => {
-                                    eager_bytes = eager_bytes.saturating_add(b.len());
-                                }
-                                FileData::Lazy { .. } => lazy_files += 1,
-                            }
-                            Entry::File {
-                                depth,
-                                name: entry_name(entry, use_case_hack),
+                                name,
                                 size,
                                 executable,
                                 data,
-                            }
-                        } else if ft.is_symlink() {
-                            let target =
-                                os_string_into_bytes(read_link(entry.path())?.into_os_string());
-                            Entry::Symlink {
-                                depth,
-                                name: entry_name(entry, use_case_hack),
-                                target,
-                            }
-                        } else {
-                            return Err(io::Error::other(format!("unsupported file type {ft:?}")));
-                        };
-                        Ok(entry)
-                    });
+                            })
+                        }
+                    };
                     buf.push_back(res);
                     if eager_bytes >= MAX_BATCH_EAGER_BYTES || lazy_files >= MAX_BATCH_LAZY_FILES {
-                        break;
+                        return true;
                     }
                 }
-                None => return false,
+                Ok(None) => return false,
+                Err(e) => {
+                    walker.close();
+                    buf.push_back(Err(e));
+                    return false;
+                }
             }
         }
         true
@@ -445,9 +751,6 @@ impl Stream for NarDumper {
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         loop {
-            // Close directories until the pending entry is at the current
-            // nesting level. walkdir's `depth()` gives this directly, so no
-            // path comparison is needed.
             if let Some(entry) = self.next.as_ref()
                 && entry.depth() < self.level as usize
             {
@@ -497,7 +800,7 @@ impl Stream for NarDumper {
 }
 
 #[cfg(test)]
-mod unittests {
+pub(crate) mod unittests {
     use std::fs::create_dir_all;
 
     use futures_util::TryStreamExt as _;
@@ -592,6 +895,59 @@ mod unittests {
         assert_eq!(s, test_data::symlink());
     }
 
+    pub(crate) fn mkfifo(path: &Path) {
+        // rustix has no mknodat on Apple targets, so use mkfifo(1) there.
+        #[cfg(not(target_vendor = "apple"))]
+        rustix::fs::mknodat(CWD, path, FileType::Fifo, Mode::RUSR | Mode::WUSR, 0).unwrap();
+        #[cfg(target_vendor = "apple")]
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(path)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dump_rejects_fifo() {
+        let dir = Builder::new().prefix("test_dump_fifo").tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        mkfifo(&fifo);
+
+        let err = dump(&fifo)
+            .try_collect::<Vec<_>>()
+            .await
+            .err()
+            .expect("FIFO root must fail");
+        assert!(err.to_string().contains("unsupported file type"), "{err}");
+
+        let err = dump(dir.path())
+            .try_collect::<Vec<_>>()
+            .await
+            .err()
+            .expect("FIFO child must fail");
+        assert!(err.to_string().contains("unsupported file type"), "{err}");
+    }
+
+    /// A terminal walker error must release every open directory descriptor
+    /// instead of holding them until the exhausted dumper is dropped.
+    #[test]
+    fn walker_error_releases_dir_fds() {
+        let dir = Builder::new().prefix("test_walk_err").tempdir().unwrap();
+        let nested = dir.path().join("a/b/c");
+        create_dir_all(&nested).unwrap();
+        mkfifo(&nested.join("pipe"));
+
+        let mut walker = DirWalker::new(dir.path().to_path_buf(), false);
+        let mut buf = VecDeque::new();
+        while State::next_chunk(&mut buf, &mut walker) {}
+        let err = buf.pop_back().unwrap().err().expect("FIFO must fail");
+        assert!(err.to_string().contains("unsupported file type"), "{err}");
+        assert_eq!(walker.open_dir_count(), 0);
+        assert!(walker.next_event().unwrap().is_none());
+    }
+
     #[test]
     fn batch_caps_open_lazy_files() {
         const FILES: usize = 2 * MAX_BATCH_LAZY_FILES + 3;
@@ -601,11 +957,11 @@ mod unittests {
             let f = std::fs::File::create(dir.path().join(format!("f{i:03}"))).unwrap();
             f.set_len(SMALL_FILE_THRESHOLD + 1).unwrap();
         }
-        let mut walker = walkdir::WalkDir::new(dir.path()).into_iter();
+        let mut walker = DirWalker::new(dir.path().to_path_buf(), false);
         let mut total = 0;
         loop {
             let mut buf = VecDeque::new();
-            let remain = State::next_chunk(&mut buf, &mut walker, false);
+            let remain = State::next_chunk(&mut buf, &mut walker);
             let lazy = buf
                 .iter()
                 .filter(|e| {

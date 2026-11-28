@@ -29,7 +29,6 @@ thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "fs", "io-util" ] }
 tokio-util         = { workspace = true, features = [ "io", "io-util" ] }
 tracing            = { workspace = true }
-walkdir            = "2.5"
 
 [dev-dependencies]
 harmonia-file-nar   = { path = ".", features = [ "test" ] }
@@ -39,6 +38,7 @@ rstest              = { workspace = true }
 rustix              = { workspace = true, features = [ "process" ] }
 tempfile            = { workspace = true }
 tokio-test          = { workspace = true }
+walkdir             = "2.5"
 
 [features]
 test = [  ]
