@@ -106,43 +106,90 @@ impl From<&StorePathSet> for DerivationInputs {
     }
 }
 
+/// Borrowed counterpart of [`OutputInputs`] for zero-clone serialization.
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct OutputInputsRef<'a> {
+    outputs: BTreeSet<&'a OutputName>,
+    dynamic_outputs: BTreeMap<&'a OutputName, OutputInputsRef<'a>>,
+}
+
+/// Borrowed counterpart of [`DerivationInputs`] for zero-clone serialization.
+#[derive(Default, Serialize)]
+pub(super) struct DerivationInputsRef<'a> {
+    srcs: BTreeSet<&'a StorePath>,
+    drvs: BTreeMap<&'a StorePath, OutputInputsRef<'a>>,
+}
+
+trait OutputNode<'a>: Default {
+    fn insert_output(&mut self, output: &'a OutputName);
+    fn dynamic_slot(&mut self, output: &'a OutputName) -> &mut Self;
+}
+
+impl<'a> OutputNode<'a> for OutputInputs {
+    fn insert_output(&mut self, output: &'a OutputName) {
+        self.outputs.insert(output.clone());
+    }
+    fn dynamic_slot(&mut self, output: &'a OutputName) -> &mut Self {
+        self.dynamic_outputs.entry(output.clone()).or_default()
+    }
+}
+
+impl<'a> OutputNode<'a> for OutputInputsRef<'a> {
+    fn insert_output(&mut self, output: &'a OutputName) {
+        self.outputs.insert(output);
+    }
+    fn dynamic_slot(&mut self, output: &'a OutputName) -> &mut Self {
+        self.dynamic_outputs.entry(output).or_default()
+    }
+}
+
+fn populate_inputs<'a, K, N>(
+    paths: &'a BTreeSet<SingleDerivedPath>,
+    srcs: &mut BTreeSet<K>,
+    drvs: &mut BTreeMap<K, N>,
+    mut to_key: impl FnMut(&'a StorePath) -> K,
+) where
+    K: Ord,
+    N: OutputNode<'a>,
+{
+    fn ensure_slot<'a, 'b, K: Ord, N: OutputNode<'a>>(
+        drvs: &'b mut BTreeMap<K, N>,
+        k: &'a SingleDerivedPath,
+        to_key: &mut impl FnMut(&'a StorePath) -> K,
+    ) -> &'b mut N {
+        match k {
+            SingleDerivedPath::Opaque(store_path) => drvs.entry(to_key(store_path)).or_default(),
+            SingleDerivedPath::Built { drv_path, output } => {
+                ensure_slot(drvs, drv_path.as_ref(), to_key).dynamic_slot(output)
+            }
+        }
+    }
+
+    for path in paths {
+        match path {
+            SingleDerivedPath::Opaque(store_path) => {
+                srcs.insert(to_key(store_path));
+            }
+            SingleDerivedPath::Built { drv_path, output } => {
+                ensure_slot(drvs, drv_path.as_ref(), &mut to_key).insert_output(output);
+            }
+        }
+    }
+}
+
 impl From<&BTreeSet<SingleDerivedPath>> for DerivationInputs {
     fn from(paths: &BTreeSet<SingleDerivedPath>) -> Self {
         let mut result = Self::default();
+        populate_inputs(paths, &mut result.srcs, &mut result.drvs, Clone::clone);
+        result
+    }
+}
 
-        // Use a recursive closure to navigate the trie, similar to Nix's DerivedPathMap::ensureSlot
-        fn ensure_slot<'a>(
-            drvs: &'a mut BTreeMap<StorePath, OutputInputs>,
-            k: &SingleDerivedPath,
-        ) -> &'a mut OutputInputs {
-            match k {
-                SingleDerivedPath::Opaque(store_path) => {
-                    // Base case: will not overwrite if already there
-                    drvs.entry(store_path.clone()).or_default()
-                }
-                SingleDerivedPath::Built { drv_path, output } => {
-                    // Recursive case: navigate to the parent node first
-                    let node = ensure_slot(drvs, drv_path.as_ref());
-                    // Then navigate into its childMap (dynamic_outputs)
-                    node.dynamic_outputs.entry(output.clone()).or_default()
-                }
-            }
-        }
-
-        for path in paths {
-            match path {
-                SingleDerivedPath::Opaque(store_path) => {
-                    result.srcs.insert(store_path.clone());
-                }
-                SingleDerivedPath::Built { drv_path, output } => {
-                    // Get the slot for this path and add the output
-                    ensure_slot(&mut result.drvs, drv_path.as_ref())
-                        .outputs
-                        .insert(output.clone());
-                }
-            }
-        }
-
+impl<'a> From<&'a BTreeSet<SingleDerivedPath>> for DerivationInputsRef<'a> {
+    fn from(paths: &'a BTreeSet<SingleDerivedPath>) -> Self {
+        let mut result = Self::default();
+        populate_inputs(paths, &mut result.srcs, &mut result.drvs, |p| p);
         result
     }
 }

@@ -22,6 +22,7 @@ harmonia-utils-base-encoding   = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
 harmonia-utils-test            = { workspace = true, optional = true }
+memchr                         = { workspace = true }
 proptest                       = { workspace = true, optional = true }
 proptest-derive                = { workspace = true, optional = true }
 serde                          = { workspace = true }
