@@ -13,12 +13,8 @@ fuzz_target!(|data: &[u8]| {
     };
     // Round-trip: print the parsed derivation and re-parse. The result must
     // be identical, otherwise the printer or parser is lossy/buggy.
-    let printed = print_derivation_aterm(&store_dir, &drv);
-    let mut reparsed =
+    let printed = print_derivation_aterm(&store_dir, &drv.clone().into_full());
+    let reparsed =
         parse_derivation_aterm(&store_dir, &printed, name).expect("reparse printed derivation");
-    // Known limitation: structured_attrs are stored as serde_json::Value, and
-    // serializing then re-parsing JSON does not preserve exact float
-    // representations. C++ Nix stores the raw __json string and avoids this.
-    reparsed.structured_attrs = drv.structured_attrs.clone();
     assert_eq!(drv, reparsed, "round-trip mismatch");
 });
